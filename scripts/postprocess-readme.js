@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const readmePath = path.resolve(__dirname, '..', 'README.md');
-const banner = '![Math Workspace: mathematical writing, dependencies, symbols, and formal verification](media/readme/banner.png)';
+const banner = '![Math Workspace: mathematical writing, dependencies, symbols, and Lean alignment](media/readme/banner.png)';
 const bannerPattern = /^!\[[^\]]*\]\(media\/readme\/banner\.png\)\s*$/gm;
 
 const original = fs.readFileSync(readmePath, 'utf8');

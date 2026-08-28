@@ -1,15 +1,13 @@
 import * as crypto from 'node:crypto';
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { buildRuntimeDefinitions, formatDisplayNumber, type LabelData, type PageData } from '@math-workspace/core';
+import { findMathWorkspaceRoot } from '../project-root';
 import { readLeanBuild } from '../lean/lean-state';
 import { readLeanDependencyArtifact } from '../lean/lean-dependencies';
 import { ReaderDiscussionMarkStore } from '../reader/discussion-marks';
 import { loadWorkspaceSnapshot, type WorkspaceSnapshot } from '../reader/workspace';
 import { readSymbolAuditStatus } from '../reader/symbol-audit-service';
 import { SymbolAuditStore, type SymbolAuditBinding } from '../reader/symbol-audit';
-
-const nodeFs = require('node:fs');
 
 const VERIFY_BLOCKING_WARNING_CODES = new Set([
     'non-hash-id',
@@ -384,12 +382,8 @@ export class WorkspaceQueries {
     }
 
     private async resolveRoot(projectRoot?: string): Promise<string> {
-        const rootPath = path.resolve(projectRoot || this.options.rootPath || process.cwd());
-        try {
-            if ((await fs.stat(path.join(rootPath, '.math-workspace', 'config.json'))).isFile()) return await nodeFs.promises.realpath(rootPath);
-        } catch (_error) {
-            // The common error below is clearer than a platform-specific stat error.
-        }
-        throw new Error('The Math Workspace project needs .math-workspace/config.json. Run `math-workspace prepare` first.');
+        const rootPath = await findMathWorkspaceRoot(path.resolve(projectRoot || this.options.rootPath || process.cwd()));
+        if (rootPath) return rootPath;
+        throw new Error('No Math Workspace project was found at or above that path. Run `math-workspace init` first.');
     }
 }

@@ -12,10 +12,8 @@
     "math-workspace": "out/cli/math-workspace.js"
   },
   "files": [
-    ".agents/plugins/",
     "out/",
     "docs/",
-    "plugins/",
     "skills/",
     "vasm-catalog/",
     "README.md",
@@ -29,7 +27,7 @@
     "postcss": "8.5.18"
   },
   "scripts": {
-    "build": "node scripts/clean-build-output.js && npm run build:core && npm run build:cli && npm run build:reader",
+    "build": "node scripts/clean-build-output.js && npm run build:core && npm run build:cli && npm run build:reader && npm run build:plugin",
     "build:core": "npm run typecheck:cli && vite build --config vite.core.config.ts",
     "typecheck:cli": "tsc -p tsconfig.cli.json",
     "build:cli": "npm run typecheck:cli && vite build --config vite.cli.config.ts",
@@ -37,6 +35,7 @@
     "typecheck:reader": "tsc -p tsconfig.reader.json",
     "build:reader": "npm run typecheck:reader && vite build --config vite.reader.config.ts",
     "build:reader:quiet": "vite build --config vite.reader.config.ts --logLevel warn",
+    "build:plugin": "node out/cli/release.js --stage-plugin-runtime",
     "workspace": "npm run --silent build:cli:quiet && npm run --silent build:reader:quiet && node out/cli/math-workspace.js",
     "check": "npm run build && npm run workspace -- verify",
     "test:migrations": "node tests/math-workspace.test.mjs",
@@ -45,6 +44,7 @@
     "docs:build": "npm run content:build",
     "prepack": "npm run content:build && npm run build",
     "release:local": "npm run content:build && npm run build && node out/cli/math-workspace.js verify && npm run test:migrations && node out/cli/release.js",
+    "release:marketplace:local": "npm run content:build && npm run build && node out/cli/math-workspace.js verify && npm run test:migrations && node out/cli/release.js --marketplace-root ../marketplace",
     "release:check": "node --check scripts/publish-release.js && npm run release:local && npm_config_cache=/private/tmp/math-workspace-npm-cache npm pack --dry-run --ignore-scripts && git diff --check",
     "release": "node scripts/publish-release.js",
     "release:github": "node scripts/publish-release.js --only github",

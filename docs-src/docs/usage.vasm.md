@@ -154,11 +154,14 @@ Definition (Bounded operator): A linear map \(T:X\to Y\) is bounded if ...
 
 ## 常规流程
 
-生成上下文：
+首次接入项目并生成上下文：
 
 ```bash
-npm run workspace -- prepare
+npm run workspace -- init
+npm run workspace -- open
 ```
+
+`open` 会从当前目录向上查找 `.math-workspace/config.json`。需要单独刷新索引时仍可运行 `prepare`；检查安装、项目发现和可选工具链时运行 `doctor`。
 
 编辑文件或目录后，固化临时 ID 并刷新报告：
 
@@ -174,13 +177,13 @@ npm run workspace -- verify
 
 ## Math Workspace
 
-Math Workspace 是 `math-workspace` 引擎之上的本地工作区界面。它在内存中扫描已经存在 formal 配置的项目，不写入源码或 `.math-workspace/` 产物：
+Math Workspace 是 `math-workspace` 引擎之上的本地工作区界面。日常入口是：
 
 ```bash
-npm run workspace -- serve /path/to/project
+npm run workspace -- open /path/to/project
 ```
 
-也可以不传项目路径，打开本机项目启动台：
+也可以在项目内的任意子目录运行 `open`。不传项目路径且当前目录不在已初始化项目中时，会打开本机项目启动台。底层 `serve` 命令保留给需要明确控制启动行为的脚本：
 
 ```bash
 npm run workspace -- serve
@@ -251,7 +254,14 @@ math-workspace mcp
 math-workspace mcp --root /path/to/project
 ```
 
-仓库包含一个可安装的 Codex plugin。开发时先确保 `math-workspace` 在 `PATH` 中（例如 `npm link`），然后将仓库根目录注册为 marketplace：
+公开 plugin 从 marketplace 安装：
+
+```bash
+codex plugin marketplace add glenzli/marketplace --ref main
+codex plugin add math-workspace@glenzli-marketplace
+```
+
+plugin 自带 CLI 和 Reader 运行时。开发仓库时先运行 `npm run build`，再将仓库根目录注册为本地 marketplace：
 
 ```bash
 codex plugin marketplace add /path/to/math-workspace

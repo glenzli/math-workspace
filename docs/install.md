@@ -36,12 +36,11 @@ npm install -D math-workspace
 Then run:
 
 ```bash
-npm run workspace -- prepare
-npm run workspace -- verify
-npm run workspace -- serve .
+npm run workspace -- init
+npm run workspace -- open
 ```
 
-`prepare` creates or completes `.math-workspace/config.json` and generates inspectable indexes. `verify` checks structure, references, and migration residue. `serve` starts the local Reader on `127.0.0.1` only. Project source remains the source of truth.
+`init` creates or completes `.math-workspace/config.json` and generates inspectable indexes. `open` finds the project root from the current directory and starts the local Reader on `127.0.0.1` only. `verify` remains the project-wide gate for structure, references, and migration residue. Project source remains the source of truth.
 
 ### 3. Define the scan boundary
 
@@ -114,21 +113,26 @@ Adapt Math Workspace to the current mathematical repository. Read and obey the e
 
 ### 5. Install the Codex plugin
 
-The plugin's MCP commands require `math-workspace` to be visible on the Codex process `PATH`. From a development checkout, run:
+Install the public plugin from the marketplace:
 
 ```bash
-npm install
-npm link
+codex plugin marketplace add glenzli/marketplace --ref main
+codex plugin add math-workspace@glenzli-marketplace
 ```
 
-Then add the Math Workspace root containing `.agents/plugins/marketplace.json` and install the plugin:
+The plugin carries the built CLI and Reader, so it does not depend on a global `math-workspace` command. Start a new Codex task after installation or update.
+
+For development from the current checkout, build first and then install the repository as a local marketplace:
 
 ```bash
+cd /absolute/path/to/math-workspace
+npm install
+npm run build
 codex plugin marketplace add /absolute/path/to/math-workspace
 codex plugin add math-workspace@personal
 ```
 
-Start a new Codex task to load the plugin, skills, and MCP server. Its interfaces are read-only:
+Its interfaces are read-only:
 
 - `open`, `read_marks`
 - `lookup_formal_object`, `lookup_knowledge`
@@ -160,7 +164,7 @@ npm run workspace -- finish path/to/chapter.md
 npm run workspace -- verify
 
 # Start the local Reader
-npm run workspace -- serve .
+npm run workspace -- open
 ```
 
 A useful adaptation should satisfy at least these conditions:
@@ -177,7 +181,7 @@ Update the project dependency normally, then rebuild indexes and run read-only v
 
 ```bash
 npm update math-workspace
-npm run workspace -- prepare
+npm run workspace -- init
 npm run workspace -- verify
 ```
 
@@ -185,8 +189,8 @@ For a plugin used from source, pull the new version, build it, update the cacheb
 
 ### 9. Troubleshooting
 
-- Reader enhancements are missing: confirm that `.math-workspace/config.json` exists at the project root, then run `prepare` again.
-- Codex cannot find the MCP server: make sure `math-workspace` is on the `PATH` visible to Codex, then start a new task after installing or updating the plugin.
+- Reader enhancements are missing: confirm that `.math-workspace/config.json` exists at the project root, run `init` again, or use `doctor` to inspect project discovery.
+- Codex cannot find the MCP server: confirm that the installed plugin contains `out/cli` and `out/reader`, then start a new task after installing or updating it.
 - The plugin icon, skills, or tools did not refresh: update the plugin cachebuster and run `codex plugin add math-workspace@personal` again.
 - Indexes disagree with source: run `prepare` or `verify`; never edit generated `workspace-index.json` manually.
 - Symbol audit has no result: it never runs in the background; explicitly choose a scope, model, and effort in the Reader and start it.
@@ -228,12 +232,11 @@ npm install -D math-workspace
 然后执行：
 
 ```bash
-npm run workspace -- prepare
-npm run workspace -- verify
-npm run workspace -- serve .
+npm run workspace -- init
+npm run workspace -- open
 ```
 
-`prepare` 创建或补全 `.math-workspace/config.json` 并生成可审阅索引；`verify` 检查结构、引用和迁移遗留；`serve` 只在 `127.0.0.1` 启动本地 Reader。项目源码仍是事实来源。
+`init` 创建或补全 `.math-workspace/config.json` 并生成可审阅索引；`open` 从当前目录向上查找项目根，再只在 `127.0.0.1` 启动本地 Reader。`verify` 保留为结构、引用和迁移遗留的整项目门禁。项目源码仍是事实来源。
 
 ## 3. 明确扫描边界
 
@@ -306,21 +309,26 @@ release 和 npm 包中包含四份可审阅 artifact：
 
 ## 5. 安装 Codex plugin
 
-插件的 MCP 命令需要 `math-workspace` 在 Codex 进程的 `PATH` 中。开发仓库可以先执行：
+公开版本从 marketplace 安装：
 
 ```bash
-npm install
-npm link
+codex plugin marketplace add glenzli/marketplace --ref main
+codex plugin add math-workspace@glenzli-marketplace
 ```
 
-然后把包含 `.agents/plugins/marketplace.json` 的 Math Workspace 根目录加入 Codex，并安装插件：
+plugin 自带构建后的 CLI 与 Reader，不依赖全局 `math-workspace` 命令。安装或更新后新建 Codex 任务以加载 plugin、skills 和 MCP。
+
+开发当前仓库时，先构建，再把仓库根目录作为本地 marketplace 安装：
 
 ```bash
+cd /absolute/path/to/math-workspace
+npm install
+npm run build
 codex plugin marketplace add /absolute/path/to/math-workspace
 codex plugin add math-workspace@personal
 ```
 
-新建一个 Codex 任务以加载 plugin、skills 和 MCP。插件提供的接口保持只读：
+插件提供的接口保持只读：
 
 - `open`、`read_marks`
 - `lookup_formal_object`、`lookup_knowledge`
@@ -352,7 +360,7 @@ npm run workspace -- finish path/to/chapter.md
 npm run workspace -- verify
 
 # 启动本地 Reader
-npm run workspace -- serve .
+npm run workspace -- open
 ```
 
 一次有效接入至少满足：
@@ -369,7 +377,7 @@ npm run workspace -- serve .
 
 ```bash
 npm update math-workspace
-npm run workspace -- prepare
+npm run workspace -- init
 npm run workspace -- verify
 ```
 
@@ -377,8 +385,8 @@ npm run workspace -- verify
 
 ## 9. 故障排查
 
-- Reader 没有增强功能：确认项目根存在 `.math-workspace/config.json`，重新运行 `prepare`。
-- Codex 找不到 MCP：确认 `math-workspace` 在 Codex 可见的 `PATH` 中，并在安装或更新 plugin 后新建任务。
+- Reader 没有增强功能：确认项目根存在 `.math-workspace/config.json`，重新运行 `init`，或运行 `doctor` 查看项目发现结果。
+- Codex 找不到 MCP：确认安装的是包含 `out/cli` 与 `out/reader` 的发布 plugin，并在安装或更新后新建任务。
 - plugin 图标、skill 或工具没有刷新：更新 plugin cachebuster 后重新执行 `codex plugin add math-workspace@personal`。
 - 索引与源码不一致：运行 `prepare` 或 `verify`；不要手工编辑生成的 `workspace-index.json`。
 - 符号审计没有结果：它不会后台运行，需在 Reader 中显式选择范围、模型和强度后启动。

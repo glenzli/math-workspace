@@ -8,10 +8,9 @@
 
 ## 🌍 English
 
-`math-workspace` releases include five primary surfaces:
+`math-workspace` releases include four primary surfaces:
 
-- a vendorable CLI and local Math Workspace runtime;
-- a Codex MCP plugin that opens the local Math Workspace and provides focused formal context queries;
+- a vendorable CLI, local Math Workspace runtime, and self-contained Codex plugin;
 - human-facing public documentation;
 - reviewed AI workflow artifacts that should be merged into target projects;
 - VASMC catalog exports for lockable reuse.
@@ -64,7 +63,7 @@ dist/
 Artifact roles:
 
 - `cli/`: dependency-free CLI runtime and bundled Math Workspace assets for target projects.
-- `.agents/plugins/` and `plugins/`: Codex marketplace and the `math-workspace` MCP plugin.
+- `.agents/plugins/` and `plugins/`: Codex marketplace and the `math-workspace` MCP plugin, including its relative launcher, CLI, and Reader runtime.
 - `skills/`: AI rule and composition guidance artifacts: `skills/editor.md`, `skills/math-writing.md`, `skills/integrator.md`, and `skills/lean-formalization.md`.
 - `vasm-catalog/`: catalog for VASMC consumers, including the `editor`, `math-writing`, `integrator`, and `lean-formalization` exports.
 - `docs/`: human-facing documentation.
@@ -76,7 +75,7 @@ repository-internal content sources or build state files are not release artifac
 
 ### npm Package
 
-The npm package installs the CLI, local Math Workspace, AI artifacts, and VASMC catalog:
+The npm package installs the CLI, local Math Workspace, AI artifacts, and VASMC catalog. The Codex plugin is distributed separately through the marketplace:
 
 ```bash
 npm install -D math-workspace
@@ -96,7 +95,6 @@ npm package entries:
 
 - `bin.math-workspace`: points to `out/cli/math-workspace.js`.
 - `out/reader/`: local Math Workspace assets served by the CLI `serve` command.
-- `.agents/plugins/` and `plugins/`: the Codex marketplace and `math-workspace` MCP plugin.
 - `skills/`: `editor.md`, `math-writing.md`, `integrator.md`, and `lean-formalization.md` for plain AI review and integration.
 - `vasm-catalog/`: catalog exports for VASMC consumers.
 - `docs/`: human-facing usage and release documentation.
@@ -114,37 +112,37 @@ vasmc add --catalog node_modules/math-workspace/vasm-catalog/vasmc-catalog.yaml 
 
 ### Run the Local Math Workspace
 
-From any writing-project root that contains `.math-workspace/config.json`:
+For a first project setup:
 
 ```bash
-math-workspace serve .
+math-workspace init
+math-workspace open
 ```
 
 Or use the vendored release CLI:
 
 ```bash
-node tools/math-workspace/out/cli/math-workspace.js serve .
+node tools/math-workspace/out/cli/math-workspace.js open
 ```
 
 Omit the project directory to open the local launcher and choose a target from the native folder chooser or recent projects:
 
 ```bash
-math-workspace serve
+math-workspace open
 ```
 
 The command listens only on `127.0.0.1`, scans the project read-only, and refreshes after source changes. Recent-project records stay in local user state rather than the project.
 
 ### Use the Codex MCP Plugin
 
-The release bundle includes a marketplace and `math-workspace` plugin. Install the bundled CLI so `math-workspace` is on `PATH`, then add the release bundle as a marketplace:
+The release bundle includes a marketplace and self-contained `math-workspace` plugin. Add the release bundle as a marketplace and install the plugin:
 
 ```bash
-npm install -g ./cli
 codex plugin marketplace add /path/to/math-workspace-release
 codex plugin add math-workspace@personal
 ```
 
-The plugin calls `math-workspace mcp`, which can start or reuse the local Math Workspace for Codex's built-in browser and resolve active discussion-mark source locators alongside focused formal, dependency, Lean, and read-only validation context. It does not embed or replace the Math Workspace UI or duplicate a Codex conversation surface.
+The plugin's relative launcher runs its bundled `math-workspace mcp`; no global command is required. It can start or reuse the local Math Workspace for Codex's built-in browser and resolve active discussion-mark source locators alongside focused formal, dependency, Lean, and read-only validation context.
 
 ### Vendor CLI
 
@@ -168,7 +166,7 @@ Add the script in the target project:
 Initialize:
 
 ```bash
-npm run workspace -- prepare
+npm run workspace -- init
 ```
 
 Verify:
@@ -237,6 +235,14 @@ Build the release:
 npm run release:local
 ```
 
+To copy the same validated plugin snapshot into the sibling local marketplace repository:
+
+```bash
+npm run release:marketplace:local
+```
+
+The target catalog must already contain a local `./plugins/math-workspace` entry. The source plugin, `dist` snapshot, and marketplace copy are validated separately; the marketplace stores a copied versioned snapshot, not a symlink.
+
 Review:
 
 - `dist/manifest.json`
@@ -270,7 +276,7 @@ npm run release:check
 
 Default release targets:
 
-- `npm`: publish the `math-workspace` npm package with CLI, Math Workspace, Codex MCP plugin, public docs, `skills/`, and `vasm-catalog/`.
+- `npm`: publish the `math-workspace` npm package with CLI, Math Workspace, public docs, `skills/`, and `vasm-catalog/`. The Codex plugin comes from the marketplace surface.
 - `github`: push the current branch and release tag to the `github` remote, then create a GitHub release with `gh`.
 - `gitlab`: push the current branch and release tag to the `gitlab` remote, then create a GitLab release with `glab`.
 
@@ -294,7 +300,7 @@ Real publishing requires a clean Git worktree. `--dry-run` can preview commands 
 
 ### Dependency Policy
 
-The built Math Workspace and CLI should remain runtime dependency-free.
+The built Math Workspace, CLI, and self-contained Codex plugin should remain runtime dependency-free.
 
 Development dependencies are allowed for:
 
@@ -318,7 +324,7 @@ Rules:
 
 `math-workspace` 的 release 包含四类主产物：
 
-- 可 vendoring 的 CLI 与本地 Math Workspace 运行时；
+- 可 vendoring 的 CLI、本地 Math Workspace 运行时与自包含 Codex plugin；
 - 面向人的公开文档；
 - 需要融合到目标项目的 AI 工作流 artifact；
 - 可由 VASMC 锁定消费的 catalog exports。
@@ -371,7 +377,7 @@ dist/
 各产物职责：
 
 - `cli/`：目标项目使用的无运行时依赖 CLI 与内置 Math Workspace 静态资源。
-- `.agents/plugins/` 与 `plugins/`：Codex marketplace 与 `math-workspace` MCP plugin。
+- `.agents/plugins/` 与 `plugins/`：Codex marketplace 与 `math-workspace` MCP plugin；plugin 内含相对路径启动器、CLI 和 Reader 运行时。
 - `skills/`：AI 规则与组合指导 artifact，包含 `skills/editor.md`、`skills/math-writing.md`、`skills/integrator.md` 和 `skills/lean-formalization.md`。
 - `vasm-catalog/`：面向 VASMC consumer 的 catalog，包含 `vasmc-catalog.yaml`、`editor`、`math-writing`、`integrator` 和 `lean-formalization` exports。
 - `docs/`：面向人的文档。
@@ -383,7 +389,7 @@ dist/
 
 ## npm 包
 
-npm 包用于安装 CLI、本地 Math Workspace、AI artifacts 和 VASMC catalog：
+npm 包用于安装 CLI、本地 Math Workspace、AI artifacts 和 VASMC catalog。Codex plugin 由 marketplace 单独分发：
 
 ```bash
 npm install -D math-workspace
@@ -403,7 +409,6 @@ npm 包入口：
 
 - `bin.math-workspace`：指向 `out/cli/math-workspace.js`。
 - `out/reader/`：由 CLI 的 `serve` 命令提供的本地 Math Workspace 静态资源。
-- `.agents/plugins/` 与 `plugins/`：Codex marketplace 和 `math-workspace` MCP plugin。
 - `skills/`：裸 AI 审阅和融合用的 `editor.md` / `math-writing.md` / `integrator.md` / `lean-formalization.md`。
 - `vasm-catalog/`：VASMC consumer 使用的 catalog exports。
 - `docs/`：面向人的 usage 和 release 文档。
@@ -420,37 +425,37 @@ vasmc add --catalog node_modules/math-workspace/vasm-catalog/vasmc-catalog.yaml 
 
 ## 使用 Math Workspace
 
-在任何包含 `.math-workspace/config.json` 的写作项目根目录运行：
+首次接入项目时运行：
 
 ```bash
-math-workspace serve .
+math-workspace init
+math-workspace open
 ```
 
 或使用 release vendored CLI：
 
 ```bash
-node tools/math-workspace/out/cli/math-workspace.js serve .
+node tools/math-workspace/out/cli/math-workspace.js open
 ```
 
 省略项目目录可打开本机启动台，并从系统目录选择器或最近项目中选择目标：
 
 ```bash
-math-workspace serve
+math-workspace open
 ```
 
 命令只监听 `127.0.0.1`，只读扫描项目，并在源文件变化后刷新页面。最近项目记录保存在用户本机状态目录，不写入项目。
 
 ## 使用 Codex MCP plugin
 
-release bundle 也包含 Codex marketplace 和 plugin。先安装 bundle 内的 CLI，使 `math-workspace` 位于 `PATH`，再将 release 根目录注册为 marketplace：
+release bundle 也包含 Codex marketplace 和自包含 plugin。将 release 根目录注册为 marketplace 后即可安装：
 
 ```bash
-npm install -g ./cli
 codex plugin marketplace add /path/to/math-workspace-release
 codex plugin add math-workspace@personal
 ```
 
-plugin 调用 `math-workspace mcp`，可返回在 Codex 内置浏览器直接访问的 localhost URL，也可查询当前讨论标记的源码定位、命题、严格依赖、Lean 对齐与只读校验；它不嵌入或替代 Math Workspace UI，更不维护第二套 Codex 对话。
+plugin 通过自身的相对路径启动器运行 bundle 内的 `math-workspace mcp`，不依赖全局命令。它可返回在 Codex 内置浏览器直接访问的 localhost URL，也可查询当前讨论标记的源码定位、命题、严格依赖、Lean 对齐与只读校验。
 
 ## Vendoring CLI
 
@@ -474,7 +479,7 @@ cp -R dist/cli/* path/to/project/tools/math-workspace/
 初始化：
 
 ```bash
-npm run workspace -- prepare
+npm run workspace -- init
 ```
 
 校验：
@@ -544,6 +549,14 @@ npm test
 npm run release:local
 ```
 
+把相同的已校验 plugin 快照同步到同级的本地 `marketplace` 仓库：
+
+```bash
+npm run release:marketplace:local
+```
+
+该命令要求目标 marketplace 已有指向 `./plugins/math-workspace` 的 catalog 条目。源码 plugin、`dist/plugins/math-workspace` 和 marketplace 快照分别校验；marketplace 中保存复制出的版本快照，不使用符号链接。
+
 检查：
 
 - `dist/manifest.json`
@@ -577,7 +590,7 @@ npm run release:check
 
 默认发布目标是：
 
-- `npm`：发布 `math-workspace` npm 包，包内包含 CLI、Math Workspace、Codex MCP plugin、public docs、`skills/` 与 `vasm-catalog/`。
+- `npm`：发布 `math-workspace` npm 包，包内包含 CLI、Math Workspace、public docs、`skills/` 与 `vasm-catalog/`。Codex plugin 由 marketplace 发布面提供。
 - `github`：推送当前 branch 和 release tag 到 `github` remote，并用 `gh` 创建 GitHub release。
 - `gitlab`：推送当前 branch 和 release tag 到 `gitlab` remote，并用 `glab` 创建 GitLab release。
 
@@ -601,7 +614,7 @@ npm run release -- --gitlab-repo glenzli/math-workspace
 
 ## 依赖策略
 
-构建后的 Math Workspace、CLI 和 legacy 扩展应保持无 npm 运行时依赖。
+构建后的 Math Workspace、CLI、自包含 Codex plugin 和 legacy 扩展应保持无 npm 运行时依赖。
 
 开发依赖只用于：
 

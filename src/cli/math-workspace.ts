@@ -39,14 +39,21 @@ import {
 } from '@math-workspace/core';
 import { startReaderServer } from '../reader/server';
 import { runReaderMcpServer } from '../mcp/reader-mcp-server';
+import { findMathWorkspaceRoot } from '../project-root';
 import { renderLeanReport, scanLeanWorkspace } from '../lean/lean-index';
 import { buildLeanWorkspace, captureLeanContracts, writeLeanContracts } from '../lean/lean-state';
 import { collectLeanDependencies } from '../lean/lean-dependencies';
 
-const ROOT = process.cwd();
-const CACHE_DIR = path.join(ROOT, '.math-workspace');
+let ROOT = process.cwd();
+let CACHE_DIR = path.join(ROOT, '.math-workspace');
 const PACKAGE_ROOT = path.resolve(__dirname, '..', '..');
 const { spawnSync } = require('node:child_process');
+const nodeFs = require('node:fs');
+
+function setWorkspaceRoot(rootPath: string): void {
+    ROOT = path.resolve(rootPath);
+    CACHE_DIR = path.join(ROOT, '.math-workspace');
+}
 
 async function pathExists(filePath: string): Promise<boolean> {
     try {
@@ -220,6 +227,78 @@ async function prepare({ exitOnError = true } = {}) {
     printSummary('prepare', state);
     if (exitOnError && state.issues.some(issue => issue.severity === 'error')) process.exitCode = 1;
     return state;
+}
+
+function parseProjectDirectoryArg(args: string[], commandName: string): { inputPath?: string; help?: boolean } {
+    let inputPath: string | undefined;
+    for (const arg of args) {
+        if (arg === '--help' || arg === 'help') {
+            console.log(`Usage: math-workspace ${commandName} [project-dir]`);
+            return { help: true };
+        }
+        if (arg.startsWith('-') || inputPath) throw new Error(`Unknown ${commandName} option: ${arg}`);
+        inputPath = arg;
+    }
+    return { inputPath };
+}
+
+async function requireDirectory(inputPath: string): Promise<string> {
+    const rootPath = path.resolve(ROOT, inputPath);
+    let stat;
+    try {
+        stat = await fs.stat(rootPath);
+    } catch (_error) {
+        throw new Error(`Project directory does not exist: ${rootPath}`);
+    }
+    if (!stat.isDirectory()) throw new Error(`Project path is not a directory: ${rootPath}`);
+    return nodeFs.promises.realpath(rootPath);
+}
+
+async function initWorkspace(args: string[]): Promise<void> {
+    const options = parseProjectDirectoryArg(args, 'init');
+    if (options.help) return;
+    if (options.inputPath) setWorkspaceRoot(await requireDirectory(options.inputPath));
+    await prepare({ exitOnError: false });
+    console.log(`Initialized Math Workspace: ${ROOT}`);
+    console.log('Next: math-workspace open');
+}
+
+function commandAvailable(command: string): boolean {
+    const result = spawnSync(command, ['--version'], { cwd: ROOT, encoding: 'utf8' });
+    return !result.error && result.status === 0;
+}
+
+async function doctor(args: string[]): Promise<void> {
+    const options = parseProjectDirectoryArg(args, 'doctor');
+    if (options.help) return;
+    const startPath = options.inputPath ? await requireDirectory(options.inputPath) : ROOT;
+    const projectRoot = await findMathWorkspaceRoot(startPath);
+    const packagePath = path.join(PACKAGE_ROOT, 'package.json');
+    const manifestPath = path.join(PACKAGE_ROOT, '.codex-plugin', 'plugin.json');
+    const isPluginPackage = await pathExists(manifestPath);
+    const metadataPath = await pathExists(packagePath) ? packagePath : manifestPath;
+    const packageJson = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+    const readerReady = await pathExists(path.join(PACKAGE_ROOT, 'out', 'reader', 'index.html'));
+    const sourcePluginRoot = path.join(PACKAGE_ROOT, 'plugins', 'math-workspace');
+    const hasSourcePlugin = await pathExists(path.join(sourcePluginRoot, '.codex-plugin', 'plugin.json'));
+    const pluginRuntimeReady = isPluginPackage
+        ? await pathExists(path.join(PACKAGE_ROOT, 'out', 'cli', 'math-workspace.js'))
+        : hasSourcePlugin && await pathExists(path.join(sourcePluginRoot, 'out', 'cli', 'math-workspace.js'));
+    const pluginRuntimeStatus = isPluginPackage
+        ? (pluginRuntimeReady ? 'bundled' : 'missing from plugin package')
+        : hasSourcePlugin
+            ? (pluginRuntimeReady ? 'staged' : 'not staged; run the project build')
+            : 'distributed separately through the Codex marketplace';
+
+    console.log(`Math Workspace doctor ${packageJson.version}`);
+    console.log(`CLI: ${path.join(__dirname, 'math-workspace.js')}`);
+    console.log(`Node: ${process.version}`);
+    console.log(`Project root: ${projectRoot || 'not found'}`);
+    console.log(`Configuration: ${projectRoot ? 'found' : 'run `math-workspace init`'}`);
+    console.log(`Reader bundle: ${readerReady ? 'ready' : 'missing; run the project build'}`);
+    console.log(`Plugin runtime: ${pluginRuntimeStatus}`);
+    console.log(`Pandoc: ${commandAvailable('pandoc') ? 'available' : 'not found (optional)'}`);
+    console.log(`Lean: ${commandAvailable('lake') ? 'available' : 'not found (optional)'}`);
 }
 
 async function lint() {
@@ -2727,8 +2806,14 @@ function parsePerfArgs(args) {
 function printHelp({ all = false } = {}) {
     if (!all) {
         console.log(`Usage:
+  math-workspace init [project-dir]
+  math-workspace open [project-dir] [--port 0]
+  math-workspace finish <file-or-dir> [...] [--all]
+  math-workspace verify [--strict-chapters]
+  math-workspace doctor [project-dir]
+
+Advanced commands:
   npm run workspace -- prepare
-  npm run workspace -- finish <file-or-dir> [...] [--all]
   npm run workspace -- migrate-text-refs <file-or-dir> [...] [--apply] [--target-only] [--all]
   npm run workspace -- migrate-ids <file-or-dir> [...] [--apply] [--target-only] [--all]
   npm run workspace -- audit [file-or-dir] [...]
@@ -2745,7 +2830,6 @@ function printHelp({ all = false } = {}) {
   npm run workspace -- export-pdf <file-or-dir> [...] --out <book.pdf> [--no-toc] [--toc-depth N] [--margin 2.5cm]
   npm run workspace -- render-pdf <compiled.md> --out <book.pdf> [--title "Title"] [--toc-title 目录]
   npm run workspace -- paths
-  npm run workspace -- verify [--strict-chapters]
 
 Migrations are dry-run by default. Pass --apply to edit files.
 
@@ -2762,6 +2846,9 @@ Advanced commands:
     }
 
     console.log(`Usage:
+  math-workspace init [project-dir]
+  math-workspace open [project-dir] [--port 0]
+  math-workspace doctor [project-dir]
   npm run workspace -- prepare
   npm run workspace -- finish <file-or-dir> [...] [--all]
   npm run workspace -- migrate-text-refs <file-or-dir> [...] [--apply] [--target-only] [--all]
@@ -2826,7 +2913,7 @@ async function printArtifactPaths() {
     console.log('VASMC: vasmc add --catalog <VASMC catalog> --export editor|math-writing|integrator|lean-formalization');
 }
 
-function parseReaderArgs(args: string[]): { rootPath?: string; port: number; help?: boolean } {
+function parseReaderArgs(args: string[], commandName = 'serve'): { rootPath?: string; port: number; help?: boolean } {
     let inputPath: string | undefined;
     let port = 0;
     let hasPath = false;
@@ -2842,7 +2929,9 @@ function parseReaderArgs(args: string[]): { rootPath?: string; port: number; hel
             continue;
         }
         if (arg === '--help' || arg === 'help') {
-            console.log('Usage: npm run workspace -- serve [project-dir] [--port 0]\nOmit project-dir to choose a local project in Math Workspace.');
+            console.log(`Usage: math-workspace ${commandName} [project-dir] [--port 0]`);
+            if (commandName === 'serve') console.log('Omit project-dir to choose a local project in Math Workspace.');
+            if (commandName === 'open') console.log('Omit project-dir to use the nearest prepared project, or open the local launcher.');
             process.exitCode = 0;
             return { port: 0, help: true };
         }
@@ -2859,9 +2948,7 @@ function parseReaderArgs(args: string[]): { rootPath?: string; port: number; hel
     return { rootPath: inputPath ? path.resolve(ROOT, inputPath) : undefined, port };
 }
 
-async function serveReader(args: string[]): Promise<void> {
-    const options = parseReaderArgs(args);
-    if (options.help) return;
+async function runReader(options: { rootPath?: string; port: number }): Promise<void> {
     const reader = await startReaderServer(options);
     console.log(`Math Workspace: ${reader.url}`);
     if (reader.rootPath) {
@@ -2880,6 +2967,23 @@ async function serveReader(args: string[]): Promise<void> {
     };
     process.once('SIGINT', close);
     process.once('SIGTERM', close);
+}
+
+async function serveReader(args: string[]): Promise<void> {
+    const options = parseReaderArgs(args, 'serve');
+    if (options.help) return;
+    await runReader(options);
+}
+
+async function openReader(args: string[]): Promise<void> {
+    const options = parseReaderArgs(args, 'open');
+    if (options.help) return;
+    const startPath = options.rootPath || ROOT;
+    const rootPath = await findMathWorkspaceRoot(startPath);
+    if (options.rootPath && !rootPath) {
+        throw new Error('No Math Workspace project was found at or above that path. Run `math-workspace init` first.');
+    }
+    await runReader({ rootPath, port: options.port });
 }
 
 function parseReaderMcpArgs(args: string[]): { rootPath?: string; port: number; help?: boolean } {
@@ -2926,7 +3030,13 @@ async function main() {
 
     if (!command || command === 'help' || command === '--help') {
         printHelp({ all: args.includes('--all') });
-    } else if (command === 'prepare' || command === 'doctor') {
+    } else if (command === 'init') {
+        await initWorkspace(args);
+    } else if (command === 'open') {
+        await openReader(args);
+    } else if (command === 'doctor') {
+        await doctor(args);
+    } else if (command === 'prepare') {
         await prepare({ exitOnError: true });
     } else if (command === 'lint') {
         await lint();

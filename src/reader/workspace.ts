@@ -32,7 +32,7 @@ function pathExists(filePath: string): Promise<boolean> {
 async function readConfig(rootPath: string): Promise<any> {
     const configPath = path.join(rootPath, '.math-workspace', 'config.json');
     if (!(await pathExists(configPath))) {
-        throw new Error('Math Workspace requires .math-workspace/config.json in the project root. Run `math-workspace prepare` first.');
+        throw new Error('Math Workspace requires .math-workspace/config.json in the project root. Run `math-workspace init` first.');
     }
     return mergeConfig(JSON.parse(await fs.readFile(configPath, 'utf8')));
 }

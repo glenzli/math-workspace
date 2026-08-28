@@ -93,7 +93,7 @@ export class ReaderProjectRegistry {
     async remember(rootPath: string): Promise<ReaderProjectRecord> {
         const resolvedPath = path.resolve(rootPath);
         if (!(await this.isFormalProject(resolvedPath))) {
-            throw new Error('Selected directory needs .math-workspace/config.json. Run `math-workspace prepare` in the project first.');
+            throw new Error('Selected directory needs .math-workspace/config.json. Run `math-workspace init` in the project first.');
         }
         const canonicalPath = await nodeFs.promises.realpath(resolvedPath);
         const record: ReaderProjectRecord = {

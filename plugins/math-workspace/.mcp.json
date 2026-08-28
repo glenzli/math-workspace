@@ -1,8 +1,17 @@
 {
   "mcpServers": {
     "math-workspace": {
-      "command": "math-workspace",
-      "args": ["mcp"]
+      "command": "./scripts/launch_math_workspace_mcp",
+      "args": ["mcp"],
+      "cwd": ".",
+      "env_vars": [
+        "CODEX_HOME",
+        "CODEX_MCP_NODE_PATH",
+        "CODEX_BROWSER_USE_NODE_PATH",
+        "CODEX_ELECTRON_RESOURCES_PATH",
+        "CODEX_CLI_PATH",
+        "XDG_CACHE_HOME"
+      ]
     }
   }
 }

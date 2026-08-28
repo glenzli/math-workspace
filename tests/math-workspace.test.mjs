@@ -1702,11 +1702,44 @@ async function testReaderPluginMcpConfig() {
     assert.deepEqual(mcpConfig, {
         mcpServers: {
             'math-workspace': {
-                command: 'math-workspace',
-                args: ['mcp']
+                command: './scripts/launch_math_workspace_mcp',
+                args: ['mcp'],
+                cwd: '.',
+                env_vars: [
+                    'CODEX_HOME',
+                    'CODEX_MCP_NODE_PATH',
+                    'CODEX_BROWSER_USE_NODE_PATH',
+                    'CODEX_ELECTRON_RESOURCES_PATH',
+                    'CODEX_CLI_PATH',
+                    'XDG_CACHE_HOME'
+                ]
             }
         }
     });
+    const launcherPath = path.join(pluginRoot, 'scripts', 'launch_math_workspace_mcp');
+    const launcher = await fs.stat(launcherPath);
+    assert.ok((launcher.mode & 0o111) !== 0);
+    await fs.access(path.join(pluginRoot, 'out', 'cli', 'math-workspace.js'));
+    await fs.access(path.join(pluginRoot, 'out', 'reader', 'index.html'));
+}
+
+async function testSimplifiedCliFlow() {
+    const root = await makeWorkspace('simple-cli');
+    await fs.writeFile(path.join(root, 'book1', '01-start.md'), '# Start\n');
+
+    const init = runCli(root, ['init']);
+    assert.equal(init.status, 0, combinedOutput(init));
+    assert.match(init.stdout, /Initialized Math Workspace:/);
+    await fs.access(path.join(root, '.math-workspace', 'config.json'));
+
+    const nested = path.join(root, 'book1', 'notes');
+    await fs.mkdir(nested, { recursive: true });
+    const doctor = runCli(nested, ['doctor']);
+    assert.equal(doctor.status, 0, combinedOutput(doctor));
+    const canonicalRoot = await fs.realpath(root);
+    assert.match(doctor.stdout, new RegExp(`Project root: ${canonicalRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.match(doctor.stdout, /Configuration: found/);
+    assert.match(doctor.stdout, /Reader bundle: ready/);
 }
 
 async function testReaderDiscussionMarks() {
@@ -2538,6 +2571,7 @@ const tests = [
     ['local Reader server', testReaderServer],
     ['local Reader MCP server', testReaderMcpServer],
     ['Reader plugin MCP configuration', testReaderPluginMcpConfig],
+    ['simplified CLI flow', testSimplifiedCliFlow],
     ['local Reader discussion marks', testReaderDiscussionMarks],
     ['local Reader launcher', testReaderLauncher],
     ['page heading formatting', testPageHeadingFormatting],

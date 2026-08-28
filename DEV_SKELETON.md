@@ -37,7 +37,7 @@
 - Definitions and symbols are lookup aids, not theorem-numbering objects.
 - Project knowledge analysis may derive context from deliberately named concept/glossary, notation, and summary pages, but must not infer terms or symbol meanings from ordinary prose or rewrite source content.
 - The local Reader is opt-in for workspaces with `.math-workspace/config.json`, binds only to loopback, and is source read-only; it may write explicit document lifecycle metadata only after a deliberate local user action. Ordinary Markdown preview should stay ordinary elsewhere.
-- Release bundles and npm packages ship runtime artifacts, public docs, generated AI artifacts under `skills/`, and VASMC catalog exports for lockable reuse.
+- Release bundles ship runtime artifacts, a self-contained Codex plugin, public docs, generated AI artifacts under `skills/`, and VASMC catalog exports for lockable reuse. npm packages ship the CLI/Reader runtime, public docs, generated AI artifacts, and catalog exports; the public plugin is distributed as a copied marketplace snapshot.
 - Built Reader and CLI runtimes should remain dependency-free after bundling.
 - Dependency changes require caution and explicit verification because supply-chain risk matters for editor tooling.
 - Entry hints should stay at file or artifact-category level, not function level.

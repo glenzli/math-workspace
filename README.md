@@ -1,6 +1,6 @@
 # math-workspace
 
-![Math Workspace: mathematical writing, dependencies, symbols, and formal verification](media/readme/banner.png)
+![Math Workspace: mathematical writing, dependencies, symbols, and Lean alignment](media/readme/banner.png)
 
 [🌍 English](#en) | [🇨🇳 中文](#zh-cn)
 
@@ -10,154 +10,66 @@
 
 ## 🌍 English
 
-Math Workspace is a local environment for long-form mathematical writing and formalization work. It keeps the manuscript in Markdown that remains readable to humans and AI, while organizing stable numbering, references, proposition dependencies, notation, Lean anchors, review, and publication into one inspectable workflow.
+Math Workspace is a set of local tools for long-form mathematical writing. Manuscripts stay in Markdown; the CLI and Reader handle stable identifiers, references, proposition dependencies, symbol checks, Lean alignment records, and publication exports.
 
-The current release uses Markdown as its manuscript source layer and `math-workspace` as both the package and CLI name, but the product scope is broader than Markdown. The Reader, Lean toolchain, and Codex MCP all serve the mathematical project itself: how the manuscript evolves, how propositions support one another, whether notation has drifted, and whether formal implementations remain aligned with the source.
+> **Development preview.** Commands, configuration, and generated-data formats are still changing. Use Math Workspace in version-controlled projects and keep backups of important manuscripts.
 
-Math Workspace does not prove mathematical claims for you or silently rewrite a manuscript in the background. Deterministic scans and validation own what can be checked mechanically. Model-assisted features must be started explicitly, and their output is review advice rather than a source of truth.
+The project source is authoritative. Generated indexes and reports can be inspected, removed, and rebuilt. Structural scans find reference, identifier, and dependency problems. Authors, reviewers, and the formal tools they use remain responsible for mathematical claims.
 
-To add Math Workspace to an existing mathematical repository—or to let Codex or another AI inherit its project rules—start with the [Installation and Project Adaptation Guide](docs/install.md). It separates the CLI, Reader, Codex plugin, skill composition, and optional Lean setup, so they do not have to be adopted all at once.
+![Proposition dependency review (demo content redacted)](media/readme/dependency-review.png)
 
-### Quick Start
+### Available now
 
-Install it in a mathematical writing project:
+- **Stable identifiers and references**: chapters, sections, theorem-like objects, equations, figures, and tables can use stable `h-*` identifiers; reader-facing numbers follow the current structure. `finish` replaces `tmp-*` identifiers, while `verify` checks broken references, remaining temporary identifiers, and migration issues.
+- **Local Reader**: provides multi-volume navigation, contents, definition lookup, current-page symbols, reference recall, source refresh, and proposition relationships. The Reader binds only to `127.0.0.1` and enables the workspace interface only for projects containing `.math-workspace/config.json`.
+- **Dependency review**: reads explicitly declared strict dependencies from propositions and produces upstream/downstream relationships, chapter graphs, and endpoint reports. Ordinary explanatory prose does not create dependency edges.
+- **Symbol audit**: users can explicitly ask Codex to check same-shape symbols, their scopes, and meanings. Results are cached by content and shown as a review report. They do not rewrite the manuscript or enter the `verify` gate.
+- **Lean alignment**: after a Lean project is configured, Math Workspace can scan manuscript anchors in declaration docstrings, record Lake build results, and compare direct Lean dependencies with strict manuscript dependencies.
+- **Codex context**: Reader marks store file locations, available anchors, and source hashes. Read-only MCP tools can query marks, propositions, bounded dependency slices, Lean status, project terminology, existing symbol audits, and validation results.
+- **Publication exports**: generates combined or split Markdown and can call local Pandoc and LaTeX tools to produce PDF.
+
+![Symbol audit report (demo content redacted)](media/readme/symbol-audit-report.png)
+
+### Current boundaries
+
+- Configuration, Reader interactions, and generated-data formats may change. The current version is intended for use in writing projects that can be rolled back.
+- `verify` checks mechanically decidable structural consistency. Mathematical correctness, proof completeness, and exposition still require separate review.
+- Symbol audit and assisted review depend on a user-started Codex run and remain advisory.
+- Lean status records anchor, build, and dependency evidence. Semantic correspondence and formalization coverage require human review.
+- The Reader does not edit Markdown manuscript content. After an explicit user action, it can write workspace state such as document stages, checkpoints, and local marks.
+- PDF export requires Pandoc and a LaTeX engine installed on the local machine.
+- The early VS Code extension is frozen under `legacy/vscode-extension/` and is excluded from current builds, releases, and support.
+
+### Add it to a project
+
+Install Math Workspace in a mathematical writing project:
 
 ```bash
 npm install -D math-workspace
-npx math-workspace prepare
-npx math-workspace serve .
+npx math-workspace init
+npx math-workspace open
 ```
 
-`prepare` creates or completes `.math-workspace/config.json` and generates inspectable project indexes. `serve` starts a local Reader bound only to `127.0.0.1`. After editing a chapter, use `finish` to finalize temporary anchors and run validation:
+`init` creates or completes `.math-workspace/config.json` and generates the first project index. `open` finds the project root from the current directory and starts the local Reader. After editing a file, run:
 
 ```bash
 npx math-workspace finish path/to/chapter.md
 ```
 
-You can also keep a stable project script:
+`finish` replaces temporary identifiers in the target file and then runs validation. Use `verify` as the project-wide gate and `doctor` to inspect project discovery, Reader output, and optional tools.
 
-```json
-{
-  "scripts": {
-    "workspace": "math-workspace"
-  }
-}
-```
+Install the Codex plugin from the public marketplace:
 
 ```bash
-npm run workspace -- prepare
-npm run workspace -- serve .
-npm run workspace -- finish path/to/chapter.md
+codex plugin marketplace add glenzli/marketplace --ref main
+codex plugin add math-workspace@glenzli-marketplace
 ```
 
-For a first integration, use `prepare → verify → serve`; add the Codex plugin, project-specific skills, or Lean only after the scan boundary and Reader are correct. See [docs/install.md](docs/install.md) for the full workflow and troubleshooting.
+The plugin carries its own CLI and Reader runtime; it does not require a global `math-workspace` install. Start a new Codex task after installation or update. See the [Installation and Project Adaptation Guide](docs/install.md) for the full process.
 
-### The Problem It Solves
+### Minimal syntax
 
-A large mathematical project rarely needs only another Markdown preview. What becomes difficult after dozens of chapters and hundreds of propositions is the structure:
-
-- Handwritten numbering and prose references drift when chapters are inserted, deleted, or reordered.
-- Strict prerequisites, downstream use, and propositions with no downstream consumers are hard to inspect as a whole.
-- Dedicated and temporary notation can acquire conflicting meanings during long revision cycles.
-- Lean declarations may exist without stable manuscript anchors, build evidence, or dependency comparison.
-- Copying large passages into an AI discussion creates redundant context and a second conversation history.
-
-Math Workspace approaches these problems source-first. Stable identity stays in source, the Reader interprets and organizes it, and every review result leads back to a concrete file, line range, or `h-*` anchor.
-
-### Workspace Capabilities
-
-#### Stable Identity and References
-
-Pages, sections, theorem-like objects, equations, figures, and tables use stable hashes while reader-facing numbers are derived from the current structure. `@h-...` references survive insertion, deletion, and chapter reordering. `finish` turns `tmp-*` placeholders written by an author or AI into permanent identities, while `verify` checks broken references, temporary-ID residue, and migration leftovers.
-
-Definitions and symbols remain separate lookup systems; indexing them does not make them theorem-numbering objects. Deliberately named concept, terminology, and notation appendices can be used as project knowledge sources.
-
-#### Local Reader
-
-The Reader is the primary supported interface. It provides:
-
-- Multi-volume chapter navigation, contents, definition lookup, current-page symbols, and reference recall.
-- Strict dependency markers for theorem-like objects, chapter relationship graphs, endpoint review, and assisted batch review.
-- Integration status that distinguishes content already managed with stable anchors from material still awaiting migration.
-- Collapsible exploratory-draft collections that remain readable without entering formal hashes, dependencies, Lean alignment, or symbol-audit input.
-- Formal-document stages—Initial Draft, Revising, and Stable Draft—with batch updates and optional `RC1` / `v1` content checkpoints.
-- Live source refresh and a compact layout suitable for a browser side panel.
-
-The Reader reads project source but does not directly write the manuscript. Its enhanced interface is enabled only for projects containing `.math-workspace/config.json`.
-
-![Proposition dependency review (demo content redacted)](media/readme/dependency-review.png)
-
-#### Symbol Audit
-
-Symbol audit looks for identical notation with different meanings and for reuse that may confuse readers. It never runs silently:
-
-1. The user chooses the whole project, one volume, or selected chapters, then chooses a Codex model and reasoning effort.
-2. The model extracts dedicated and temporary symbol bindings, including structure, scope, and meaning.
-3. Local logic produces same-shape candidates; semantic reconciliation then distinguishes the same binding, specialization, compatible reuse, conflict, and uncertainty.
-4. Only high-confidence conflicts involving at least one dedicated symbol enter the hard-conflict list. Everything else remains for human review.
-
-Extractions are cached by file-content hash, model, and prompt version, so unchanged chapters are not extracted again. The interface reports activity, model calls, and token usage when Codex exposes it. Results open as a standalone report with rendered LaTeX. Audit findings remain advisory: they never enter the `verify` gate and never rename a symbol automatically.
-
-![Symbol audit report (demo content redacted)](media/readme/symbol-audit-report.png)
-
-#### Lean Alignment
-
-Once Lean projects are configured, Math Workspace scans stable manuscript anchors from declaration docstrings and provides:
-
-- Anchor indexes and coverage-candidate reports.
-- Reviewed manuscript–declaration contract baselines.
-- Recorded Lake build results.
-- Comparison between direct Lean declaration dependencies and strict manuscript dependencies.
-- Lightweight `L` marks in the Reader and proposition graph.
-
-This evidence means that an anchor exists, a baseline was reviewed, a build passed, or a dependency was observed. It does not establish semantic equivalence, complete formalization, or 100% proof coverage.
-
-#### Codex Collaboration
-
-The in-document marking tools support text selection, lasso, whole-proposition selection, and erasing. A mark stores only a project-local Markdown location, any available formal or equation anchor, and a source hash. It does not copy the manuscript or create another chat.
-
-When the discussion continues in a native Codex task, MCP can return those locators and Codex can read the corresponding source. The repository exposes these read-only tools:
-
-- `read_marks` returns deliberate, active marks.
-- `lookup_formal_object` looks up one formal object by stable ID.
-- `inspect_dependencies` returns a bounded strict upstream/downstream slice.
-- `inspect_lean_alignment` returns Lean anchor, build, and dependency evidence.
-- `lookup_knowledge` searches maintained definitions, aliases, notation, and named knowledge sources.
-- `read_symbol_audit` reads a cached audit that the user has already run.
-- `verify` performs an in-memory, read-only validation scan.
-- `open` starts or reuses the local workspace.
-
-```bash
-math-workspace mcp
-```
-
-Real discussion, edits, and approvals therefore remain in native Codex task history; Math Workspace supplies project structure and precise source locations. It currently does not attempt to inject Reader messages into native Codex conversations.
-
-#### Publication
-
-Stable source anchors do not leak into reader-facing numbering. Export commands generate publication-ready Markdown or call local Pandoc and LaTeX tooling to produce PDF:
-
-```bash
-math-workspace export-md book/ --out dist/book.md
-math-workspace export-md-split book/ --out dist/public
-math-workspace export-pdf book/ --out dist/book.pdf
-```
-
-The PDF workflow supports covers, publication metadata, front matter, a table of contents, and project-level layout settings. Math Workspace does not bundle Pandoc or a LaTeX engine.
-
-### The VS Code Extension Is Retired
-
-The former VS Code preview extension is frozen under `legacy/vscode-extension/` only for understanding older projects and historical implementation:
-
-- It is excluded from current builds, tests, packages, and releases.
-- It receives no new capabilities, compatibility fixes, or product support.
-- It should not be copied into a new editor installation.
-
-The local Reader now owns navigation, recall, lookup, proposition review, Lean alignment, symbol audit, and Codex context marking. If you must reproduce the old VS Code workflow, pin the last repository revision that supported it.
-
-### Minimal Syntax
-
-Start new structure with temporary identities:
+Use temporary identifiers for new structure:
 
 ```markdown
 # #tmp-1 Basic Topology
@@ -171,56 +83,24 @@ Proof: ...
 By @tmp-3, every open cover has a finite subcover.
 ```
 
-Then run:
+After `finish`, `tmp-*` identifiers become stable identifiers. Prose references use `@h-...`, `@h-....title`, or `@h-....full`. Definitions and symbols use separate lookup data and do not participate in proposition numbering. See the [Usage Guide](docs/usage.md) for full syntax, migrations, graph queries, configuration, and PDF options.
+
+### Common commands
 
 ```bash
+math-workspace init
+math-workspace open
 math-workspace finish path/to/chapter.md
+math-workspace verify
+math-workspace doctor
+math-workspace mcp
+
+math-workspace export-md book/ --out dist/book.md
+math-workspace export-md-split book/ --out dist/public
+math-workspace export-pdf book/ --out dist/book.pdf
 ```
 
-Basic rules:
-
-- `#h-...` and `#tmp-*` only declare object identity.
-- Prose references use `@h-...`, `@h-....title`, or `@h-....full`.
-- New objects use `tmp-1`, `tmp-2`, and so on; never manufacture permanent hashes by hand.
-- Definitions do not receive hashes. Standard `Definition (Term): ...` / `定义（术语）：...` entries are scanned by the lookup system.
-- Only project-specific notation with an explicit semantic change belongs in `.math-workspace/symbols.json`; symbol audit separately observes temporary bindings in manuscript prose.
-
-See [docs/usage.md](docs/usage.md) for complete syntax, migrations, graph queries, configuration, and PDF options.
-
-### Project Data and Trust Boundary
-
-Each target project owns its configuration and generated metadata:
-
-```text
-.math-workspace/
-  config.json
-  definitions.json
-  symbols.json
-  project-analysis.json
-  project-analysis.md
-  workspace-index.json
-  reference-map.md
-  report.md
-```
-
-`workspace-index.json` is an inspectable structural snapshot, not the Reader's runtime database; the Reader rebuilds state in memory from current source. Discussion marks, recent projects, and symbol-audit caches are local user state and are not written into the manuscript.
-
-Deterministic commands own identity, references, scanning, and validation. Model-backed features such as symbol audit and assisted quick review call Codex only after explicit user action and remain cancellable, cacheable, and non-authoritative.
-
-### AI and Skill Artifacts
-
-The release and npm package ship reviewable AI artifacts:
-
-- `skills/editor.md` contains target-project writing rules.
-- `skills/math-writing.md` contains project-neutral mathematical writing, revision, and proof-audit rules.
-- `skills/integrator.md` explains how to merge those rules into existing project constraints.
-- `skills/lean-formalization.md` defines Lean anchoring, implementation, and validation rules.
-- `vasm-catalog/vasmc-catalog.yaml` provides exports whose hashes can be locked by a VASMC lockfile.
-
-These rules are never installed or updated remotely without review. A target project should inspect them first, then merge them into its own `AGENTS.md`, skill, or project guide.
-`skills-src/*.vasm.md` is the sole content source for generic rules. `npm run content:build` generates `skills/`, plugin `SKILL.md` files, and the hashed catalog. Do not edit those generated files directly; target projects should consume a reviewed release or catalog.
-
-The recommended AI adaptation order is: read the target repository's own rules first, select only the required `math-writing`, `editor`, or `lean-formalization` artifacts, then use `integrator` to reconcile overlap and project-specific constraints. The [Installation and Project Adaptation Guide](docs/install.md) includes a copyable task brief, Codex plugin setup, and update instructions.
+Lean projects can also use `math-workspace lean scan|coverage|verify|capture|build|dependencies`. See the [Usage Guide](docs/usage.md) for command options and project configuration.
 
 ### Development
 
@@ -232,25 +112,13 @@ npm run build
 npm test
 ```
 
-Use `npm link` for local CLI and Codex plugin development. Public documentation sources live under `docs-src/**/*.vasm.md`. After editing them, run:
+`npm run build` also stages the compiled CLI and Reader under the source plugin's ignored output directory for local development. Public documentation sources are under `docs-src/**/*.vasm.md`. Run `npm run content:build` after editing them to generate the English and Chinese documents. See the [Release Guide](docs/release.md) for release contents and checks.
 
-```bash
-vasmc build --dry-run
-npm run content:build
-```
+Project links:
 
-See [docs/release.md](docs/release.md) for publishing. Common checks:
-
-```bash
-npm run release:local
-npm run release:check
-npm audit --registry=https://registry.npmjs.org --omit=optional
-```
-
-Bundled CLI and Reader output has no npm runtime dependencies. Development dependencies cover TypeScript, Vite, Markdown, and LaTeX rendering.
-
-### Repositories
-
+- [Installation and project adaptation](docs/install.md)
+- [Usage guide](docs/usage.md)
+- [Release guide](docs/release.md)
 - [GitHub](https://github.com/glenzli/math-workspace)
 - [GitLab](https://gitlab.com/glenzli/math-workspace)
 
@@ -263,154 +131,66 @@ MIT License.
 ## 🇨🇳 中文
 
 
-Math Workspace 是一个面向长篇数学写作与形式化协作的本地工作区。它让正文保持适合人和 AI 阅读的 Markdown，同时把稳定编号、引用、命题依赖、符号使用、Lean 锚点、审阅与发布组织成一套可检查的工作流。
+Math Workspace 是一组用于长篇数学写作的本地工具。正文保存在 Markdown 中；CLI 和 Reader 处理稳定标识、引用、命题依赖、符号检查、Lean 对齐记录与发布导出。
 
-当前版本以 Markdown 作为书稿源层，以 `math-workspace` 作为包名和 CLI 名称；产品边界并不止于 Markdown。Reader、Lean 工具链和 Codex MCP 共同面向的是数学项目本身：正文如何演化、命题如何相互支撑、符号是否漂移、形式化实现与原文是否仍然对齐。
+> **开发预览。** 当前版本仍在调整命令、配置和生成数据格式。建议在版本控制下使用，并为重要书稿保留备份。
 
-Math Workspace 不会替你证明数学结论，也不会在后台悄悄改写书稿。确定性的扫描与校验负责可以机械判断的部分；模型辅助能力必须由用户显式启动，其结果作为审阅意见而不是事实来源。
+项目以源码为准。生成的索引和报告可以检查、删除并重新生成。结构扫描负责发现引用、标识和依赖问题；数学结论仍由作者、审阅者和所使用的形式化工具确认。
 
-需要把已有数学仓库接入 Math Workspace，或让 Codex/其他 AI 继承项目规则时，先阅读 [安装与项目适配指南](docs/install.md)。它分别说明 CLI、Reader、Codex plugin、skill 组合与可选 Lean 接入，不要求一次启用全部能力。
+![命题依赖审阅（演示内容已脱敏）](media/readme/dependency-review.png)
 
-## 快速开始
+## 当前可用
 
-在数学项目中安装：
+- **稳定标识与引用**：章节、小节、命题类对象、公式、图和表可以使用稳定的 `h-*` 标识；读者编号根据当前结构生成。`finish` 固化 `tmp-*` 临时标识，`verify` 检查断裂引用、残留临时标识和迁移问题。
+- **本地 Reader**：提供多卷导航、目录、定义查询、当前页符号、引用回溯、正文刷新和命题关系查看。Reader 只监听 `127.0.0.1`，并且只在包含 `.math-workspace/config.json` 的项目中启用工作区界面。
+- **依赖审阅**：读取命题中明确声明的严格依赖，生成上下游关系、章节图和端点报告。普通说明文字不会自动成为依赖边。
+- **符号审计**：用户可以显式调用 Codex 检查同形符号及其作用域和含义。结果按内容缓存，作为审阅报告展示，不会自动改写正文，也不进入 `verify` 门禁。
+- **Lean 对齐**：配置 Lean 项目后，可以扫描声明 docstring 中的正文锚点，记录 Lake 构建结果，并对照 Lean 直接依赖与正文严格依赖。
+- **Codex 上下文**：Reader 中的标记保存文件位置、可用锚点和来源 hash。只读 MCP 工具可以查询标记、命题、有限深度依赖、Lean 状态、项目术语、既有符号审计和校验结果。
+- **发布导出**：可以生成合并或分文件 Markdown，也可以调用本机 Pandoc 与 LaTeX 工具链生成 PDF。
+
+![符号审计报告（演示内容已脱敏）](media/readme/symbol-audit-report.png)
+
+## 当前边界
+
+- 配置、Reader 交互和生成数据格式仍可能变化，当前版本适合在可回滚的写作项目中试用。
+- `verify` 检查可机械判断的结构一致性。数学正确性、证明完整性和论证质量仍需单独审阅。
+- 符号审计和辅助审阅依赖用户显式启动的 Codex，并保持为建议性结果。
+- Lean 状态记录锚点、构建和依赖证据。正文与声明之间的语义对应及形式化覆盖范围需要人工确认。
+- Reader 不修改 Markdown 正文；用户明确操作后，它可以写入文档阶段、检查点和本机标记等工作区状态。
+- PDF 导出依赖本机安装的 Pandoc 和 LaTeX 引擎。
+- 早期 VS Code 扩展已冻结在 `legacy/vscode-extension/`，不参与当前构建、发布和支持。
+
+## 接入项目
+
+在数学写作项目中安装：
 
 ```bash
 npm install -D math-workspace
-npx math-workspace prepare
-npx math-workspace serve .
+npx math-workspace init
+npx math-workspace open
 ```
 
-`prepare` 会创建或补全 `.math-workspace/config.json` 并生成可检查的项目索引；`serve` 启动只监听 `127.0.0.1` 的本地 Reader。编辑一章后，用 `finish` 固化临时锚点并完成校验：
+`init` 创建或补全 `.math-workspace/config.json`，并生成第一次项目索引。`open` 从当前目录向上查找项目根目录，再启动本地 Reader。编辑文件后运行：
 
 ```bash
 npx math-workspace finish path/to/chapter.md
 ```
 
-也可以在目标项目中保留一个稳定脚本：
+`finish` 会固化目标文件中的临时标识，然后执行校验。`verify` 用于只读的整项目门禁，`doctor` 用于检查项目发现、Reader 产物和可选工具链。
 
-```json
-{
-  "scripts": {
-    "workspace": "math-workspace"
-  }
-}
-```
+Codex plugin 从公开 marketplace 安装：
 
 ```bash
-npm run workspace -- prepare
-npm run workspace -- serve .
-npm run workspace -- finish path/to/chapter.md
+codex plugin marketplace add glenzli/marketplace --ref main
+codex plugin add math-workspace@glenzli-marketplace
 ```
 
-首次接入建议从 `prepare → verify → serve` 开始；确认扫描边界和 Reader 正常后，再接入 Codex plugin、项目特化 skill 或 Lean。完整步骤与故障排查见 [docs/install.md](docs/install.md)。
-
-## 它解决什么问题
-
-大型数学项目很少只缺一个 Markdown 预览器。真正容易失控的是跨越数十章、数百个命题之后的结构：
-
-- 插入、删除或重排章节后，手写编号和正文引用开始漂移。
-- 一个命题的严格前提、后续用途与无下游端点难以整体观察。
-- 专用符号与临时符号在长期修订中可能发生语义冲突。
-- Lean 声明虽然存在，却缺少稳定的正文锚点、构建证据与依赖对照。
-- 与 AI 讨论时，复制大段正文会制造额外上下文和第二套会话历史。
-
-Math Workspace 采用 source-first 的方式处理这些问题：稳定身份保存在源码中，Reader 只负责解释和组织，所有审阅结果都能回到具体文件、行号或 `h-*` 锚点。
-
-## 工作区能力
-
-### 稳定身份与引用
-
-章节、小节、命题类对象、公式、图和表使用稳定 hash，而读者看到的编号由当前结构生成。`@h-...` 引用可以承受插入、删除和章节重排；`finish` 将 AI 或作者写下的 `tmp-*` 占位符固化为正式身份，`verify` 检查断裂引用、残留临时 ID 和迁移遗留问题。
-
-定义和符号保持为独立的查询系统，不会因为进入索引而自动参与命题编号。明确命名的概念、术语与符号附录可以作为项目知识来源。
-
-### 本地 Reader
-
-Reader 是当前受支持的主要界面，提供：
-
-- 多卷到章节的导航、目录、定义查询、当前页符号和引用回溯。
-- 命题类对象的严格依赖标记、章节关系图、端点审阅与批量辅助审阅。
-- 内容接管状态，用于区分已经使用稳定锚点管理的章节与仍待迁移的内容。
-- 可折叠的探索稿集合；探索稿继续可读，但不进入正式 hash、依赖、Lean 或符号审计流程。
-- 正式文档的“初稿 / 修订中 / 稳定稿”阶段、批量状态修改与可选 `RC1` / `v1` 版本里程碑。
-- 正文实时刷新，以及适合浏览器侧栏的紧凑阅读布局。
-
-Reader 只读取项目源码，不直接写入书稿。增强界面只会在存在 `.math-workspace/config.json` 的项目中启用。
-
-![命题依赖审阅（演示内容已脱敏）](media/readme/dependency-review.png)
-
-### 符号审计
-
-符号审计用于发现“同形但不同义”以及可能造成阅读混淆的复用。它不会静默运行：
-
-1. 用户选择全部、单卷或若干章节，并指定 Codex 模型与推理强度。
-2. 模型提取专用符号和临时符号的结构、作用域与意义。
-3. 本地逻辑生成同形候选，再由语义复核区分同一绑定、特化、兼容复用、冲突与不确定项。
-4. 只有高置信、涉及专用符号且被复核为冲突的项目进入硬冲突；其余进入人工审阅。
-
-提取结果按文件内容 hash、模型与提示版本缓存；未变化的章节不会重复提取。运行状态、模型调用和可获得的 token 用量会在界面中反馈，结果可以在独立报告中用 LaTeX 正常阅读。审计结果始终是辅助意见，不会进入 `verify` 门禁，也不会自动修改符号。
-
-![符号审计报告（演示内容已脱敏）](media/readme/symbol-audit-report.png)
-
-### Lean 对齐
-
-配置 Lean 项目后，Math Workspace 从声明 docstring 扫描稳定正文锚点，并提供：
-
-- 锚点索引与覆盖候选报告。
-- 已审阅的正文—声明契约基线。
-- 可记录的 Lake 构建结果。
-- Lean 声明直接依赖与正文严格依赖的对照。
-- Reader 正文与命题图中的轻量 `L` 标记。
-
-这些证据说明“存在锚点、曾经审阅、构建通过或观察到某些依赖”，不表示语义等价、完整形式化或百分之百证明覆盖。
-
-### Codex 协作
-
-正文标记工具支持普通选区、圈选、整条命题和擦除。一个标记只保存项目内的 Markdown 位置、可用的 formal/公式锚点和来源 hash，不复制正文，也不创建另一套聊天。
-
-在原生 Codex 任务中讨论时，MCP 可以读取这些定位，再由 Codex 打开对应源码。仓库提供的只读工具包括：
-
-- `read_marks`：读取当前主动标记的位置。
-- `lookup_formal_object`：按稳定 ID 查询一个 formal 对象。
-- `inspect_dependencies`：读取有限深度的严格上下游。
-- `inspect_lean_alignment`：查询 Lean 锚点、构建和依赖证据。
-- `lookup_knowledge`：按术语、别名或符号查询项目维护的知识。
-- `read_symbol_audit`：读取用户已经运行并缓存的符号审计结果。
-- `verify`：在内存中执行只读校验。
-- `open`：启动或复用本地工作区。
-
-```bash
-math-workspace mcp
-```
-
-这种设计让真实讨论、修改和审批继续留在 Codex 原生任务历史中；Math Workspace 只提供项目结构和精确位置。当前不会尝试从 Reader 向 Codex 原生会话注入消息。
-
-### 发布
-
-源码中的稳定锚点不会直接暴露为读者编号。导出命令会生成可发布的 Markdown，或调用本机 Pandoc 与 LaTeX 引擎生成 PDF：
-
-```bash
-math-workspace export-md book/ --out dist/book.md
-math-workspace export-md-split book/ --out dist/public
-math-workspace export-pdf book/ --out dist/book.pdf
-```
-
-PDF 流程支持封面、出版元数据页、前置声明、目录与项目级版式配置；Math Workspace 不捆绑 Pandoc 或 LaTeX 引擎。
-
-## VS Code 扩展已经退役
-
-早期的 VS Code 预览扩展已经冻结在 `legacy/vscode-extension/`，仅用于理解旧项目和历史实现：
-
-- 不参与当前构建、测试、打包或发布。
-- 不再获得新能力、兼容性修复或产品支持。
-- 不建议复制到新的编辑器安装中。
-
-本地 Reader 已经接管导航、引用回溯、查询、命题审阅、Lean 对齐、符号审计和 Codex 上下文标记。确实需要复现旧 VS Code 工作流时，请固定到最后支持它的历史仓库版本。
+plugin 自带 CLI 和 Reader 运行时，不要求全局安装 `math-workspace`。安装或更新后新建 Codex 任务。首次接入建议先确认扫描范围和 Reader，再按需要配置项目写作规则或 Lean。完整步骤见[安装与项目适配指南](docs/install.md)。
 
 ## 最小语法
 
-新增结构时先使用临时身份：
+新增结构时先使用临时标识：
 
 ```markdown
 # #tmp-1 基础拓扑
@@ -424,56 +204,24 @@ PDF 流程支持封面、出版元数据页、前置声明、目录与项目级�
 由 @tmp-3 可知，每个开覆盖都有有限子覆盖。
 ```
 
-然后运行：
+运行 `finish` 后，`tmp-*` 会转换为稳定标识。正文引用使用 `@h-...`、`@h-....title` 或 `@h-....full`。定义和符号使用各自的查询数据，不参与命题编号。完整语法、迁移、图查询、配置和 PDF 选项见[使用指南](docs/usage.md)。
+
+## 常用命令
 
 ```bash
+math-workspace init
+math-workspace open
 math-workspace finish path/to/chapter.md
+math-workspace verify
+math-workspace doctor
+math-workspace mcp
+
+math-workspace export-md book/ --out dist/book.md
+math-workspace export-md-split book/ --out dist/public
+math-workspace export-pdf book/ --out dist/book.pdf
 ```
 
-基本规则：
-
-- `#h-...` 和 `#tmp-*` 只声明对象身份。
-- 正文引用使用 `@h-...`、`@h-....title` 或 `@h-....full`。
-- 新对象使用 `tmp-1`、`tmp-2` 等；不要手工制造正式 hash。
-- 定义不加 hash；标准 `定义（术语）：...` / `Definition (Term): ...` 由查询系统扫描。
-- 只有发生显式语义变化的项目专用记号进入 `.math-workspace/symbols.json`；符号审计会另外观察正文中的临时绑定。
-
-完整语法、迁移、图查询、配置和 PDF 选项见 [docs/usage.md](docs/usage.md)。
-
-## 项目数据与信任边界
-
-目标项目拥有自己的配置和生成元数据：
-
-```text
-.math-workspace/
-  config.json
-  definitions.json
-  symbols.json
-  project-analysis.json
-  project-analysis.md
-  workspace-index.json
-  reference-map.md
-  report.md
-```
-
-`workspace-index.json` 是可检查的结构快照，不是 Reader 的运行时数据库；Reader 会从当前源码在内存中重建状态。讨论标记、最近项目与符号审计缓存属于本机用户状态，不会写进书稿。
-
-确定性命令负责身份、引用、扫描与校验。符号审计和辅助快审等模型能力只在用户明确触发时调用 Codex，并且保持可取消、可缓存和非权威。
-
-## AI 与 Skill 产物
-
-release 和 npm 包提供可审阅的 AI artifact：
-
-- `skills/editor.md`：目标项目的写作规则。
-- `skills/math-writing.md`：与具体理论无关的数学撰写、修订和证明审计规则。
-- `skills/integrator.md`：把规则融合进既有项目约束的组合指南。
-- `skills/lean-formalization.md`：Lean 锚定、实现和验证规则。
-- `vasm-catalog/vasmc-catalog.yaml`：可由 VASMC lockfile 固定 hash 的 exports。
-
-这些规则不会远程自动安装或更新。目标项目应先审阅，再融合进自己的 `AGENTS.md`、skill 或项目指南。
-`skills-src/*.vasm.md` 是通用规则的唯一内容源；`npm run content:build` 生成 `skills/`、plugin 内的 `SKILL.md` 和带 hash 的 catalog。不要直接修改这些生成文件，目标项目应消费经过审阅的 release 或 catalog。
-
-面向 AI 的推荐适配顺序是：先读取目标仓库自身规则，再按任务引入 `math-writing`、`editor` 或 `lean-formalization`，最后用 `integrator` 消解重复和项目特化冲突。可复制的接入清单、Codex plugin 安装和更新方式见 [安装与项目适配指南](docs/install.md)。
+Lean 项目还可以使用 `math-workspace lean scan|coverage|verify|capture|build|dependencies`。命令参数和项目配置见[使用指南](docs/usage.md)。
 
 ## 开发
 
@@ -485,25 +233,13 @@ npm run build
 npm test
 ```
 
-本机联调 CLI 与 Codex plugin 时可以使用 `npm link`。公开文档的维护源在 `docs-src/**/*.vasm.md`，修改后运行：
+`npm run build` 同时把编译后的 CLI 和 Reader 放入源码 plugin 的忽略目录，供本地开发安装。公开文档的维护源位于 `docs-src/**/*.vasm.md`。修改后运行 `npm run content:build` 生成中英文文档。发布内容和检查流程见[发布说明](docs/release.md)。
 
-```bash
-vasmc build --dry-run
-npm run content:build
-```
+项目入口：
 
-发布说明见 [docs/release.md](docs/release.md)。常用检查：
-
-```bash
-npm run release:local
-npm run release:check
-npm audit --registry=https://registry.npmjs.org --omit=optional
-```
-
-构建后的 CLI 与 Reader 保持无 npm 运行时依赖；开发依赖用于 TypeScript、Vite、Markdown 与 LaTeX 渲染。
-
-## 仓库
-
+- [安装与项目适配](docs/install.md)
+- [使用指南](docs/usage.md)
+- [发布说明](docs/release.md)
 - [GitHub](https://github.com/glenzli/math-workspace)
 - [GitLab](https://gitlab.com/glenzli/math-workspace)
 

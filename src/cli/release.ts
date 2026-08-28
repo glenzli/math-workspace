@@ -1,9 +1,36 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { assemblePluginSnapshot, stageSourcePluginRuntime, syncPluginToMarketplace } from './plugin-release';
 
 const ROOT = process.cwd();
 const DIST_DIR = path.join(ROOT, 'dist');
+
+function parseReleaseArgs(args: string[]): { marketplaceRoot?: string; stagePluginRuntime?: boolean } {
+    let marketplaceRoot: string | undefined;
+    let stagePluginRuntime = false;
+    for (let index = 0; index < args.length; index++) {
+        const arg = args[index];
+        if (arg === '--marketplace-root') {
+            marketplaceRoot = args[++index];
+            if (!marketplaceRoot) throw new Error('--marketplace-root requires a directory.');
+            continue;
+        }
+        if (arg.startsWith('--marketplace-root=')) {
+            marketplaceRoot = arg.slice('--marketplace-root='.length);
+            continue;
+        }
+        if (arg === '--stage-plugin-runtime') {
+            stagePluginRuntime = true;
+            continue;
+        }
+        throw new Error(`Unknown release option: ${arg}`);
+    }
+    return {
+        marketplaceRoot: marketplaceRoot ? path.resolve(ROOT, marketplaceRoot) : undefined,
+        stagePluginRuntime
+    };
+}
 
 async function readJson(filePath: string): Promise<any> {
     return JSON.parse(await fs.readFile(filePath, 'utf8'));
@@ -128,7 +155,7 @@ Language: [English](#english) | [中文](#中文)
 
 ## English
 
-This release bundle contains Math Workspace, the CLI runtime, Codex MCP plugin, documentation, AI workflow artifacts, and a VASMC catalog for lockable reuse.
+This release bundle contains Math Workspace, the CLI runtime, a self-contained Codex MCP plugin, documentation, AI workflow artifacts, and a VASMC catalog for lockable reuse.
 
 ### Artifacts
 
@@ -150,15 +177,14 @@ Open the printed localhost URL in your preferred browser or local side panel. Ma
 
 ### Use the Codex MCP Plugin
 
-Install the bundled CLI so \`math-workspace\` is on \`PATH\`, then add the release bundle as a marketplace:
+Add the release bundle as a marketplace, then install the plugin:
 
 \`\`\`bash
-npm install -g ./cli
 codex plugin marketplace add /path/to/math-workspace-release
 codex plugin add math-workspace@personal
 \`\`\`
 
-The plugin returns a local URL for browser-based Math Workspace; it does not embed or replace the workspace UI.
+The plugin carries its own CLI and Reader runtime. It returns a local URL for browser-based Math Workspace and does not require a global \`math-workspace\` command.
 
 ### Vendor CLI
 
@@ -187,7 +213,7 @@ Review \`skills/editor.md\`, \`skills/math-writing.md\`, and \`skills/integrator
 
 ## 中文
 
-这个 release 包包含本地 Math Workspace、CLI 运行时、Codex MCP plugin、文档、面向 AI 的工作流 artifact，以及可锁定复用的 VASMC catalog。
+这个 release 包包含本地 Math Workspace、CLI 运行时、自包含的 Codex MCP plugin、文档、面向 AI 的工作流 artifact，以及可锁定复用的 VASMC catalog。
 
 ### 产物
 
@@ -209,15 +235,14 @@ node cli/out/cli/math-workspace.js serve /path/to/project
 
 ### 使用 Codex MCP Plugin
 
-先安装 bundle 内的 CLI，使 \`math-workspace\` 位于 \`PATH\`，再将 release 根目录作为 marketplace 添加：
+将 release 根目录作为 marketplace 添加，然后安装 plugin：
 
 \`\`\`bash
-npm install -g ./cli
 codex plugin marketplace add /path/to/math-workspace-release
 codex plugin add math-workspace@personal
 \`\`\`
 
-plugin 返回浏览器 Math Workspace 的本地 URL，不嵌入或替代工作区 UI。
+plugin 自带 CLI 和 Reader 运行时，不依赖全局 \`math-workspace\` 命令；它会返回浏览器 Math Workspace 的本地 URL。
 
 ### Vendoring CLI
 
@@ -245,6 +270,13 @@ cp -R cli/* tools/math-workspace/
 }
 
 async function main(): Promise<void> {
+    const options = parseReleaseArgs(process.argv.slice(2));
+    if (options.stagePluginRuntime) {
+        const staged = await stageSourcePluginRuntime(ROOT);
+        console.log(`OK plugin runtime: ${toPosix(path.relative(ROOT, staged))}`);
+        return;
+    }
+
     const pkg = await readJson(path.join(ROOT, 'package.json'));
     const releaseRoot = DIST_DIR;
     const cliRoot = path.join(releaseRoot, 'cli');
@@ -266,6 +298,7 @@ async function main(): Promise<void> {
     await requiredPath(path.join(ROOT, 'docs', 'release.md'));
     await requiredPath(path.join(marketplaceRoot, 'marketplace.json'));
     await requiredPath(path.join(pluginRoot, 'math-workspace', '.codex-plugin', 'plugin.json'));
+    await requiredPath(path.join(pluginRoot, 'math-workspace', 'scripts', 'launch_math_workspace_mcp'));
 
     await cleanDir(releaseRoot);
 
@@ -274,7 +307,10 @@ async function main(): Promise<void> {
     await copyDir(path.join(ROOT, 'media', 'readme'), path.join(releaseRoot, 'media', 'readme'));
     await copyDir(path.join(ROOT, 'skills'), path.join(releaseRoot, 'skills'));
     await copyDir(marketplaceRoot, path.join(releaseRoot, '.agents', 'plugins'));
-    await copyDir(pluginRoot, path.join(releaseRoot, 'plugins'));
+    const pluginSnapshotRoot = await assemblePluginSnapshot(
+        ROOT,
+        path.join(releaseRoot, 'plugins', 'math-workspace')
+    );
     await copyDir(catalogRoot, path.join(releaseRoot, 'vasm-catalog'));
     await copyPublicDocs(path.join(releaseRoot, 'docs'));
     await writeText(path.join(releaseRoot, 'INSTALL.md'), releaseInstallDoc(pkg));
@@ -309,8 +345,8 @@ async function main(): Promise<void> {
             codexMcpPlugin: {
                 marketplace: '.agents/plugins/marketplace.json',
                 plugin: 'plugins/math-workspace',
-                command: 'math-workspace mcp',
-                mode: 'Codex MCP launcher that returns a localhost URL for the independent browser-based Math Workspace; install cli/ first so math-workspace is on PATH.'
+                command: './scripts/launch_math_workspace_mcp mcp',
+                mode: 'Self-contained Codex MCP plugin with bundled CLI and Reader runtime; no global math-workspace command is required.'
             },
             skills: {
                 path: 'skills',
@@ -329,6 +365,11 @@ async function main(): Promise<void> {
     });
 
     await writeChecksums(releaseRoot);
+
+    if (options.marketplaceRoot) {
+        const published = await syncPluginToMarketplace(pluginSnapshotRoot, options.marketplaceRoot);
+        console.log(`Marketplace plugin: ${toPosix(published)}`);
+    }
 
     console.log(`OK release: ${toPosix(path.relative(ROOT, releaseRoot))}`);
     console.log(`Manifest: ${toPosix(path.relative(ROOT, path.join(releaseRoot, 'manifest.json')))}`);

@@ -5,7 +5,7 @@
 - Preserve source-first behavior: skeletons and skills orient agents, but source and tests decide facts.
 - Protect stable-ID, reference, numbering, preview, migration, graph, and export invariants.
 - Keep target-project AI material clear enough to merge into existing project instructions; executable and integrative AI artifacts belong in `skills/`, while VASMC consumers should prefer catalog exports.
-- Keep release and npm package artifacts narrow: runtime files, public docs, generated AI artifacts, and VASMC catalog exports only.
+- Keep release artifacts narrow: runtime files, a self-contained Codex plugin, public docs, generated AI artifacts, and VASMC catalog exports. Keep the npm package to CLI/Reader runtime, docs, AI artifacts, and catalog exports; publish the plugin as a copied marketplace snapshot.
 - Prefer small deterministic checks over persistent implementation summaries.
 - Challenge dependency additions unless they clearly reduce maintenance risk and are pinned and verified.
 
@@ -14,6 +14,7 @@
 - Long-lived implementation KBs, source indexes, call graphs, or architecture mirrors.
 - Release inclusion of repository-only development context such as `DEV_SKELETON.md`, `REVIEW_SKELETON.md`, or `AGENTS.md`.
 - Release inclusion of `docs-src/`, `skills-src/`, `.vasmc/`, or VASMC build-state files.
+- Plugin releases that depend on a globally installed `math-workspace` command or omit their bundled CLI/Reader runtime.
 - Changes that damage math, LaTeX, Markdown, or PDF export fidelity for formal writing content.
 - Changes that make enhanced preview affect workspaces without formal configuration.
 - Changes that make definitions or symbols participate in theorem-like numbering by default.

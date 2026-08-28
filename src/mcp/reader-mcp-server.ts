@@ -1,8 +1,8 @@
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { findMathWorkspaceRoot } from '../project-root';
 import { startReaderServer, type FormalReaderServer } from '../reader/server';
 import { WorkspaceQueries } from './workspace-queries';
 
@@ -15,14 +15,6 @@ interface ReaderLaunch extends Record<string, unknown> {
     rootPath?: string;
     pagePath?: string;
     url: string;
-}
-
-async function isFormalProject(rootPath: string): Promise<boolean> {
-    try {
-        return (await fs.stat(path.join(rootPath, '.math-workspace', 'config.json'))).isFile();
-    } catch (_error) {
-        return false;
-    }
 }
 
 function normalizePagePath(value: string | undefined): string | undefined {
@@ -41,12 +33,12 @@ class ReaderServerRegistry {
 
     async open(projectRoot?: string, pagePath?: string): Promise<ReaderLaunch> {
         const requestedRoot = projectRoot || this.options.rootPath || process.cwd();
-        const rootPath = path.resolve(requestedRoot);
+        const rootPath = await findMathWorkspaceRoot(path.resolve(requestedRoot));
         const page = normalizePagePath(pagePath);
 
-        if (!(await isFormalProject(rootPath))) {
+        if (!rootPath) {
             if (projectRoot || this.options.rootPath) {
-                throw new Error('The Math Workspace project needs .math-workspace/config.json. Run `math-workspace prepare` first.');
+                throw new Error('No Math Workspace project was found at or above that path. Run `math-workspace init` first.');
             }
             return this.openLauncher();
         }
