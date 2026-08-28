@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Math Workspace">
-  <rect width="512" height="512" rx="112" fill="#14202C"/>
-  <path d="M108 332 178 178l78 142 78-142 70 154" fill="none" stroke="#F3F4EE" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M112 334c64-52 114-50 164 2 42 43 82 43 124-1" fill="none" stroke="#67A5EE" stroke-width="13" stroke-linecap="round" opacity=".92"/>
-  <circle cx="178" cy="178" r="25" fill="#54BCAF"/>
-  <circle cx="256" cy="320" r="27" fill="#67A5EE"/>
-  <circle cx="334" cy="178" r="25" fill="#54BCAF"/>
-  <circle cx="404" cy="332" r="16" fill="#E0AD4D"/>
-</svg>

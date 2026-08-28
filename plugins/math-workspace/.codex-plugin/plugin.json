@@ -1,6 +1,6 @@
 {
   "name": "math-workspace",
-  "version": "0.2.0+codex.20260828134955",
+  "version": "0.2.0+codex.20260828145735",
   "description": "Query local Math Workspace context from Codex.",
   "author": {
     "name": "Glen Li",
@@ -30,10 +30,10 @@
     "defaultPrompt": [
       "Open Math Workspace for the current project."
     ],
-    "brandColor": "#3478D4",
-    "composerIcon": "./assets/icon.svg",
-    "logo": "./assets/icon.svg",
-    "logoDark": "./assets/icon-dark.svg"
+    "brandColor": "#2C2E33",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png",
+    "logoDark": "./assets/icon.png"
   },
   "mcpServers": "./.mcp.json"
 }
