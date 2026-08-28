@@ -1,12 +1,16 @@
 {
   "name": "math-workspace",
   "description": "Local workspace for mathematical writing, formal review, and project navigation",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "glenzli",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://gitlab.com/glenzli/math-workspace.git"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "bin": {
     "math-workspace": "out/cli/math-workspace.js"
@@ -39,13 +43,16 @@
     "workspace": "npm run --silent build:cli:quiet && npm run --silent build:reader:quiet && node out/cli/math-workspace.js",
     "check": "npm run build && npm run workspace -- verify",
     "test:migrations": "node tests/math-workspace.test.mjs",
+    "test:release": "node tests/publish-release.test.mjs",
     "test": "npm run check && npm run test:migrations",
     "content:build": "vasmc build && node scripts/postprocess-skills.js && node scripts/postprocess-readme.js",
     "docs:build": "npm run content:build",
     "prepack": "npm run content:build && npm run build",
     "release:local": "npm run content:build && npm run build && node out/cli/math-workspace.js verify && npm run test:migrations && node out/cli/release.js",
     "release:marketplace:local": "npm run content:build && npm run build && node out/cli/math-workspace.js verify && npm run test:migrations && node out/cli/release.js --marketplace-root ../marketplace",
-    "release:check": "node --check scripts/publish-release.js && npm run release:local && npm_config_cache=/private/tmp/math-workspace-npm-cache npm pack --dry-run --ignore-scripts && git diff --check",
+    "release:check": "node --check scripts/publish-release.js && npm run test:release && npm run release:local && npm_config_cache=/private/tmp/math-workspace-npm-cache npm pack --dry-run --ignore-scripts && git diff --check",
+    "release:prepare": "npm run release:marketplace:local && node --check scripts/publish-release.js && npm run test:release && npm_config_cache=/private/tmp/math-workspace-npm-cache npm pack --dry-run --ignore-scripts && git diff --check && git -C ../marketplace diff --check",
+    "release:preflight": "node scripts/publish-release.js --preflight --no-check",
     "release": "node scripts/publish-release.js",
     "release:github": "node scripts/publish-release.js --only github",
     "release:gitlab": "node scripts/publish-release.js --only gitlab",

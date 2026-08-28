@@ -56,7 +56,7 @@
 - Writing-rule details: start with `skills-src/editor.vasm.md` and generated `skills/editor.md`.
 - CLI or syntax behavior changes: start with `src/cli/math-workspace.ts`, `packages/core/src/formal-core.ts`, and `tests/math-workspace.test.mjs`.
 - Reader behavior changes: start with `src/reader/server.ts`, `src/reader/web/**`, `packages/core/src/formal-core.ts`, and the relevant tests or examples.
-- Release boundary changes: start with `package.json`, `src/cli/release.ts`, `docs-src/docs/release.vasm.md`, generated `docs/release.md`, and `npm run release:local`.
+- Release boundary changes: start with `package.json`, `src/cli/release.ts`, `scripts/publish-release.js`, `tests/publish-release.test.mjs`, `docs-src/docs/release.vasm.md`, generated `docs/release.md`, and the `release:prepare` / `release:check` gates.
 
 ## Refresh Triggers
 

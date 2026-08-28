@@ -35,6 +35,7 @@
 
 - Run `npm test` for behavior, scanner, CLI, migration, export, or release-sensitive changes.
 - Run `npm run release:local` when changing packaging, release docs, `package.json.files`, skills, or public docs copied to release.
+- Run `npm run release:prepare` when the public Codex plugin snapshot or the cross-repository publication workflow changes.
 - Use `npm run content:build -- --dry-run` or `npm run content:build -- --plan` to inspect documentation or skill-source build plans without writes.
 - Run `npm run content:build` after changing public documentation or skill sources, then handle any `.vasmc/build-report.yaml` actions before committing generated outputs.
 - Run focused manual preview checks when changing webview UI, preview scripts, styles, navigation, search, hover, symbol panels, or Markdown-It rendering.

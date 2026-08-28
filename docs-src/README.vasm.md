@@ -43,7 +43,7 @@ Math Workspace 是一组用于长篇数学写作的本地工具。正文保存�
 
 ## 接入项目
 
-在数学写作项目中安装：
+npm 版本发布后，可在数学写作项目中安装：
 
 ```bash
 npm install -D math-workspace
@@ -113,7 +113,7 @@ npm run build
 npm test
 ```
 
-`npm run build` 同时把编译后的 CLI 和 Reader 放入源码 plugin 的忽略目录，供本地开发安装。公开文档的维护源位于 `docs-src/**/*.vasm.md`。修改后运行 `npm run content:build` 生成中英文文档。发布内容和检查流程见[发布说明](docs/release.md)。
+`npm run build` 同时把编译后的 CLI 和 Reader 放入源码 plugin 的忽略目录，供本地开发安装。公开文档的维护源位于 `docs-src/**/*.vasm.md`。修改后运行 `npm run content:build` 生成中英文文档。维护者用 `npm run release:prepare` 生成待审阅的 npm 包和 marketplace 快照；登录、推送和发布在提交完成后单独执行。完整流程见[发布说明](docs/release.md)。
 
 项目入口：
 

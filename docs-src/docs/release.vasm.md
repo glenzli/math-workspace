@@ -76,7 +76,7 @@ dist/
 
 ## npm 包
 
-npm 包用于安装 CLI、本地 Math Workspace、AI artifacts 和 VASMC catalog。Codex plugin 由 marketplace 单独分发：
+npm 包用于安装 CLI、本地 Math Workspace、AI artifacts 和 VASMC catalog。Codex plugin 由 marketplace 单独分发。npm 版本发布后安装：
 
 ```bash
 npm install -D math-workspace
@@ -252,31 +252,51 @@ npm run release:marketplace:local
 
 ## 发布编排
 
-`release:local` 只构建本地产物。真正发布到平台时使用发布编排脚本：
+`release:local` 只构建本地产物。正式发布从一个未使用过的版本号开始；已有 tag 不改写、不复用。npm package version 与 plugin version 的基础部分必须一致，plugin 可以追加 Codex cachebuster。
+
+先生成待审阅的 npm 包和 marketplace 快照：
 
 ```bash
+npm run release:prepare
+```
+
+`release:prepare` 会生成 public docs 和 plugin，运行完整构建与测试，把 plugin 快照复制到同级 `marketplace` 仓库，执行 npm pack dry-run，并检查两个仓库的 patch。检查 `dist/manifest.json`、`dist/checksums.txt`、npm pack 文件表和两个仓库的 diff；然后分别提交 source 与 marketplace。真实发布要求两个 worktree 都干净。
+
+发布脚本固定使用 `https://registry.npmjs.org`，不依赖用户级 registry 配置。登录由发布者在最后执行：
+
+```bash
+npm_config_cache=/private/tmp/math-workspace-npm-cache npm login --registry=https://registry.npmjs.org
+npm_config_cache=/private/tmp/math-workspace-npm-cache npm whoami --registry=https://registry.npmjs.org
+```
+
+独立 cache 避免用户目录中旧 npm cache 的权限或镜像状态影响发布。发布脚本对 npm ping、查询、发布和回读使用同一路径。
+
+提交并登录后，先运行只读 preflight 和 dry-run：
+
+```bash
+npm run release:preflight
 npm run release -- --dry-run
-npm run release -- --only github,npm
-npm run release -- --skip gitlab
 ```
 
-快捷命令：
+preflight 检查 source 与 marketplace 的版本、快照和 clean state，读取 Git remotes 与既有 tags，检查 `gh`、`glab` 和 npm 登录状态，并区分 npm 上的未发布版本与 registry/auth 错误。它不创建 tag、不推送、不发布。
+
+确认后执行默认发布：
 
 ```bash
-npm run release:github
-npm run release:gitlab
-npm run release:npm
+npm run release
 ```
 
-发布前门禁：
+变更顺序固定为：
 
-```bash
-npm run release:check
-```
+1. 推送 marketplace branch；
+2. 创建 source tag，并推送 source branch/tag 到 GitHub 与 GitLab；
+3. 创建 GitHub 与 GitLab release；
+4. 最后执行 `npm publish`；
+5. 回读 Git refs、release 状态与 npm package metadata。
 
-`release:check` 会检查发布脚本语法、运行 `release:local`、执行 npm pack dry-run，并运行 `git diff --check`。
+npm 放在最后，避免 package 已公开而源码 tag 或 marketplace 快照尚未发布。脚本遇到已有同版本 npm package 时只做回读校验；遇到指向其他 commit 的同名 tag 时停止，要求提升版本。
 
-默认发布目标是：
+默认目标职责：
 
 - `npm`：发布 `math-workspace` npm 包，包内包含 CLI、Math Workspace、public docs、`skills/` 与 `vasm-catalog/`。Codex plugin 由 marketplace 发布面提供。
 - `github`：推送当前 branch 和 release tag 到 `github` remote，并用 `gh` 创建 GitHub release。
@@ -288,17 +308,18 @@ GitHub/GitLab release 会附带：
 - `dist/checksums.txt`
 - `dist/INSTALL.md`
 
-常用参数：
+常用控制参数：
 
 ```bash
-npm run release -- --tag v0.1.0
 npm run release -- --npm-tag latest
 npm run release -- --otp 123456
-npm run release -- --github-repo glenzli/math-workspace
-npm run release -- --gitlab-repo glenzli/math-workspace
+npm run release -- --skip gitlab
+npm run release -- --only github,npm
 ```
 
-真实发布会要求 Git worktree 干净。`--dry-run` 允许在 dirty worktree 下预览命令，但会提示真实发布会停止。
+`release:github`、`release:gitlab` 和 `release:npm` 用于失败后的单平台恢复。首次 npm 发布不能只运行 `release:npm`：匹配当前 commit 的 tag 必须已经存在于 GitHub 或 GitLab。`--skip-marketplace` 只用于 marketplace 已由另一条受控流程发布的情况。
+
+`package.json` 或本地构建产物中的版本号不代表 npm 已发布；以官方 registry 的回读结果为准。
 
 ## 依赖策略
 

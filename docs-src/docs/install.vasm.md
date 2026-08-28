@@ -20,7 +20,7 @@ Math Workspace 可以分层接入。CLI 与 Reader 是基础；Codex plugin、�
 
 ## 2. 安装 CLI 并准备项目
 
-在目标项目中安装并保留稳定脚本：
+npm 版本发布后，在目标项目中安装并保留稳定脚本：
 
 ```bash
 npm install -D math-workspace
