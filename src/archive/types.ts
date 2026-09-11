@@ -1,5 +1,6 @@
 /** Portable evidence belongs to the writing project; views and verification are derived. */
 export interface ArchiveIdentity { identity: string; issuer: string }
+export interface ArchiveAuthentication { url: string; code: string }
 export interface ArchiveScope { paths: string[]; extensions: string[]; maxDepth?: number; exclude?: string[] }
 export interface ArchivePolicy {
     schema: 'math-workspace.archive-policy/v1';

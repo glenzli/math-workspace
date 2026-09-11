@@ -2,8 +2,8 @@ import * as path from 'node:path';
 import { ARCHIVE_DIRECTORY, atomicWrite, canonical, digest, exists, MAX_SOURCE_BYTES, parseJson, readFile, readObject, relative, safePath, sha256, withLock, writeObject } from './io';
 import { cachedObjects, exportExchange, importExchange, inputId, projectInputs, readCatalog, readHead } from './catalog';
 import { projectArchiveRecord, validScope } from './formats';
-import { defaultVerifier, runProcess, sameIdentity, SigstoreVerifier, validIdentity } from './sigstore';
-import type { ArchiveExchange, ArchiveNativeRecord, ArchivePointer, ArchivePolicy, ArchiveRecordView, ArchiveScope, ArchiveVerifier } from './types';
+import { defaultVerifier, deviceAuthentication, runProcess, sameIdentity, SigstoreVerifier, validIdentity } from './sigstore';
+import type { ArchiveAuthentication, ArchiveExchange, ArchiveNativeRecord, ArchivePointer, ArchivePolicy, ArchiveRecordView, ArchiveScope, ArchiveVerifier } from './types';
 const fs = require('node:fs/promises');
 
 export function validPolicy(value: any): ArchivePolicy {
@@ -153,7 +153,7 @@ export class AcademicArchive {
                 changes: compareFiles(headRecord?.files || {}, hashes), signatureCreated: false };
         });
     }
-    async sign(prepared: string, signer?: (recordPath: string, bundlePath: string) => Promise<void>) {
+    async sign(prepared: string, signer?: (recordPath: string, bundlePath: string) => Promise<void>, onAuthentication?: (value: ArchiveAuthentication) => void) {
         digest(prepared); const policy = await this.policy(), policyBytes = await readFile(this.directory, 'policy.json');
         return withLock(this.directory, async () => {
             const pending = await safePath(this.directory, `pending/${prepared}`), destination = await safePath(this.directory, `entries/${prepared}`);
@@ -184,9 +184,18 @@ export class AcademicArchive {
             if (!await exists(bundlePath)) {
                 if (signer) await signer(recordPath, bundlePath);
                 else {
-                    const args = ['sign-blob', '--yes', '--oidc-disable-ambient-providers', '--bundle', bundlePath, recordPath];
+                    const args = ['sign-blob', '--yes', '--oidc-disable-ambient-providers', '--timeout', '15m', '--bundle', bundlePath, recordPath];
                     if (this.verifier instanceof SigstoreVerifier && this.verifier.trustedRoot) args.push('--trusted-root', this.verifier.trustedRoot);
-                    await runProcess('cosign', args, { timeout: 15 * 60 * 1000, stream: true });
+                    const output = { stdout: '', stderr: '' }; let authenticationUrl = '';
+                    await runProcess('cosign', args, { timeout: 15 * 60 * 1000, stream: true,
+                        onOutput: (chunk, stream) => {
+                            output[stream] = (output[stream] + chunk).slice(-16000);
+                            const authentication = deviceAuthentication(output[stream]);
+                            if (authentication && authentication.url !== authenticationUrl) {
+                                authenticationUrl = authentication.url; onAuthentication?.(authentication);
+                            }
+                        }
+                    });
                 }
             }
             if (!(await readFile(directory, 'record.json')).equals(payload)) throw new Error('The prepared record changed during authentication.');

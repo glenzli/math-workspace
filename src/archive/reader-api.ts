@@ -1,6 +1,7 @@
 import { AcademicArchive, compareFiles } from './store';
 import { convertOetArchive, discoverOetArchives } from './oet-converter';
 import { digest } from './io';
+import type { ArchiveAuthentication } from './types';
 const crypto = require('node:crypto');
 
 export interface ArchiveJob {
@@ -8,6 +9,7 @@ export interface ArchiveJob {
     action: string;
     state: 'running' | 'completed' | 'failed';
     progress?: { done: number; total: number };
+    authentication?: ArchiveAuthentication;
     result?: any;
     error?: string;
 }
@@ -54,7 +56,7 @@ export class ArchiveReaderApi {
                 const archive = await this.service(root);
                 if (body.action === 'verify') job.result = await archive.verify(body.expectedHead || undefined, progress);
                 else if (body.action === 'prepare') job.result = await archive.prepare(body.label);
-                else if (body.action === 'sign') job.result = await archive.sign(body.prepared);
+                else if (body.action === 'sign') job.result = await archive.sign(body.prepared, undefined, authentication => { job.authentication = authentication; });
                 else if (body.action === 'initialize') job.result = await archive.initialize(body.policy);
                 else {
                     const converted = await convertOetArchive(root, body.source);
@@ -67,6 +69,7 @@ export class ArchiveReaderApi {
                 }
                 job.state = 'completed';
             } catch (error) { job.state = 'failed'; job.error = error instanceof Error ? error.message : String(error); }
+            finally { delete job.authentication; }
         })();
         return job;
     }

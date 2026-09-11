@@ -1,21 +1,34 @@
-import type { ArchiveBundleInfo, ArchiveIdentity, ArchiveVerifier } from './types';
+import type { ArchiveAuthentication, ArchiveBundleInfo, ArchiveIdentity, ArchiveVerifier } from './types';
 import { digest, exists, sha256 } from './io';
 import * as path from 'node:path';
 const { spawn } = require('node:child_process');
 const fs = require('node:fs/promises');
 const os = require('node:os');
+const { URL } = require('node:url');
 
-export function runProcess(command: string, args: string[], options: { input?: any; timeout?: number; stream?: boolean; cwd?: string } = {}): Promise<string> {
+export function runProcess(command: string, args: string[], options: { input?: any; timeout?: number; stream?: boolean; cwd?: string; onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void } = {}): Promise<string> {
     return new Promise((resolve, reject) => {
         const child = spawn(command, args, { cwd: options.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
         let output = '', errorOutput = '', overflow = false;
         const timer = setTimeout(() => child.kill('SIGTERM'), options.timeout || 30000);
-        child.stdout.on('data', chunk => { output += String(chunk); if (output.length > 8 * 1024 * 1024) { overflow = true; child.kill(); } });
-        child.stderr.on('data', chunk => { errorOutput = (errorOutput + String(chunk)).slice(-16000); if (options.stream) process.stderr.write(chunk); });
+        child.stdout.on('data', chunk => { output += String(chunk); if (options.stream) process.stderr.write(chunk); options.onOutput?.(String(chunk), 'stdout'); if (output.length > 8 * 1024 * 1024) { overflow = true; child.kill(); } });
+        child.stderr.on('data', chunk => { errorOutput = (errorOutput + String(chunk)).slice(-16000); if (options.stream) process.stderr.write(chunk); options.onOutput?.(String(chunk), 'stderr'); });
         child.once('error', error => { clearTimeout(timer); reject(error); });
         child.once('close', code => { clearTimeout(timer); code === 0 && !overflow ? resolve(output) : reject(new Error(`${command} did not complete (${code}): ${errorOutput}`)); });
         child.stdin.on('error', () => {}); child.stdin.end(options.input);
     });
+}
+/** Only the public device handoff is exposed; raw process output never enters Reader jobs. */
+export function deviceAuthentication(output: string): ArchiveAuthentication | undefined {
+    const pattern = /Enter the verification code ([A-Z0-9-]{4,32}) in your browser at:\s*(https:\/\/[^\s]+)[\r\n]/g;
+    for (const match of output.matchAll(pattern)) {
+        try {
+            const url = new URL(match[2]);
+            if (url.origin !== 'https://oauth2.sigstore.dev' || url.pathname !== '/auth/device'
+                || url.username || url.password || url.searchParams.get('user_code') !== match[1]) continue;
+            return { url: `https://oauth2.sigstore.dev/auth/device?user_code=${encodeURIComponent(match[1])}`, code: match[1] };
+        } catch (_) { /* Ignore unrelated or incomplete process output. */ }
+    }
 }
 export function sameIdentity(a: ArchiveIdentity, b: ArchiveIdentity): boolean { return a?.identity === b?.identity && a?.issuer === b?.issuer; }
 export function validIdentity(value: any): ArchiveIdentity {

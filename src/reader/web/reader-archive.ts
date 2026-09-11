@@ -24,6 +24,7 @@ const copy = {
         noMatch: '在现有版本记录中未找到匹配内容。', removed: '移除', added: '新增', modified: '修改',
         initHint: '选择已有 OET 留档导入，或使用 archive init 声明作品范围与身份。',
         previewOnly: '转换保留原始字节；导入不会创建新签名。', signatureScope: '签名核验不表示数学证明已经完成。',
+        authenticate: '打开认证页面', authenticationHint: '请在认证页面完成登录，随后会自动继续签署。', code: '验证码',
         newSnapshot: '新版本记录', showDetails: '证据详情', returnList: '返回历史', retry: '重新读取'
     },
     en: {
@@ -43,6 +44,7 @@ const copy = {
         noMatch: 'No matching source was found in the available archives.', removed: 'Removed', added: 'Added', modified: 'Modified',
         initHint: 'Import an existing OET archive, or use archive init to declare a work scope and identity.',
         previewOnly: 'Conversion preserves original bytes. Importing creates no new signature.', signatureScope: 'Signature verification does not establish mathematical correctness.',
+        authenticate: 'Open authentication page', authenticationHint: 'Complete sign-in on the authentication page. Signing will then continue automatically.', code: 'Verification code',
         newSnapshot: 'New version record', showDetails: 'Evidence details', returnList: 'Back to history', retry: 'Read again'
     }
 };
@@ -142,10 +144,11 @@ export class ReaderArchive {
     }
     private renderPrepare(): void {
         const w = this.words(), details = element('details', '', 'archive-management');
+        details.open = Boolean(this.state.pending?.length);
         details.append(element('summary', w.prepare));
         const label = element('input'); label.placeholder = w.label; label.setAttribute('aria-label', w.label);
         const scope = element('pre', JSON.stringify(this.state.policy.scope, null, 2));
-        details.append(element('p', w.scope), scope, label, button(w.prepare, () => void this.startJob({ action: 'prepare', label: label.value })));
+        details.append(element('p', `${w.signer}: ${this.state.policy.signingIdentity.identity}`), element('p', w.scope), scope, label, button(w.prepare, () => void this.startJob({ action: 'prepare', label: label.value })));
         for (const pending of this.state.pending || []) {
             const row = element('div', '', 'archive-pending');
             const preview = element('details'); preview.append(element('summary', `${pending.files} ${w.files} · ${pending.changes.length} ${w.modified}`));
@@ -266,7 +269,16 @@ export class ReaderArchive {
         while (this.dialog && generation === this.generation) {
             const job = await this.request('/api/archive/job?id=' + encodeURIComponent(id));
             if (generation !== this.generation) return;
-            if (job.state === 'running') { this.report(this.words().importing + (job.progress ? ` ${job.progress.done}/${job.progress.total}` : '')); await new Promise(resolve => setTimeout(resolve, 1000)); continue; }
+            if (job.state === 'running') {
+                const w = this.words(), auth = job.authentication;
+                if (auth && this.live) {
+                    if (this.live.querySelector('a')?.getAttribute('href') !== auth.url) {
+                        const link = element('a', w.authenticate); link.href = auth.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+                        this.live.replaceChildren(link, element('span', ` · ${w.code}: ${auth.code}. ${w.authenticationHint}`));
+                    }
+                } else this.report(w.importing + (job.progress ? ` ${job.progress.done}/${job.progress.total}` : ''));
+                await new Promise(resolve => setTimeout(resolve, 1000)); continue;
+            }
             this.job = undefined;
             if (job.state === 'completed') {
                 if (job.action === 'verify') this.verified = new Set((job.result.records || []).map((row: ArchiveRow) => row.id));

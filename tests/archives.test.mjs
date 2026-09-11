@@ -247,8 +247,29 @@ export async function testArchiveReaderApi() {
     await fs.mkdir(path.join(f.root, '.math-workspace')); await fs.writeFile(path.join(f.root, '.math-workspace/config.json'), '{"language":"en"}');
     const cli = path.join(repo, 'out/cli/math-workspace.js');
     const stateRoot = path.join(f.root, '.reader-state'); await fs.mkdir(stateRoot);
+    const bin = path.join(f.root, 'bin'); await fs.mkdir(bin);
+    const finishAuthentication = path.join(f.root, 'finish-authentication');
+    // A subprocess fixture exercises the production stdout -> signing -> HTTP handoff without signing anything.
+    await fs.writeFile(path.join(bin, 'cosign'), '#!' + process.execPath + '\n' + `
+        const fs = require('node:fs');
+        const finish = ${JSON.stringify(finishAuthentication)};
+        process.stdout.write('private output is not job data\\n');
+        process.stdout.write('Enter the verification code EVIL-CODE in your browser at: https://example.invalid/auth/device?user_code=EVIL-CODE\\n');
+        process.stdout.write('Enter the verification code MATH-TEST in your browser at: https://oauth2.sigstore.dev/auth/device?user_code=WRONG\\n');
+        const timer = setInterval(() => {
+            if (!fs.existsSync(finish)) return;
+            if (fs.readFileSync(finish, 'utf8') === 'emit' && !global.sent) {
+                global.sent = true;
+                process.stdout.write('Enter the verification code MATH-TEST in your browser at: https://oauth2.sigstore.dev/auth/de');
+                setTimeout(() => process.stdout.write('vice?user_code=MATH-TEST\\nCode will be valid for 300 seconds\\n'), 20);
+            } else if (fs.readFileSync(finish, 'utf8') === 'finish') {
+                clearInterval(timer); process.stderr.write('Test authentication ended without signing.'); process.exit(1);
+            }
+        }, 20);
+        setTimeout(() => process.exit(1), 10000).unref();
+    `, { mode: 0o755 });
     const child = spawn(process.execPath, [cli, 'serve', f.root, '--port', '0'], { cwd: f.root,
-        env: { ...process.env, MATH_WORKSPACE_STATE: path.join(stateRoot, 'projects.json'), MATH_WORKSPACE_READER_INSTANCES: path.join(stateRoot, 'instances.json') },
+        env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, MATH_WORKSPACE_STATE: path.join(stateRoot, 'projects.json'), MATH_WORKSPACE_READER_INSTANCES: path.join(stateRoot, 'instances.json') },
         stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     try {
@@ -275,6 +296,28 @@ export async function testArchiveReaderApi() {
         const after = await (await fetch(url + '/api/archive', { headers })).json();
         assert.equal(after.pending.length, 1); assert.equal(after.pending[0].changes.length, 1); assert.equal(after.pending[0].currentMatches, true);
         assert.deepEqual(await fs.readFile(f.source), source); assert.equal(await exists(path.join(f.store, 'HEAD.json')), false);
+        const signResponse = await fetch(url + '/api/archive/action', { method: 'POST', headers,
+            body: JSON.stringify({ action: 'sign', prepared: after.pending[0].prepared }) });
+        assert.equal(signResponse.status, 202); let signing = await signResponse.json();
+        for (let tries = 0; tries < 100 && !output.includes('user_code=WRONG'); tries++) await new Promise(resolve => setTimeout(resolve, 20));
+        assert(output.includes('user_code=WRONG'), output);
+        signing = await (await fetch(`${url}/api/archive/job?id=${signing.id}`, { headers })).json();
+        assert.equal(signing.state, 'running'); assert.equal(signing.authentication, undefined);
+        await fs.writeFile(finishAuthentication, 'emit');
+        for (let tries = 0; tries < 100 && !signing.authentication && signing.state === 'running'; tries++) {
+            await new Promise(resolve => setTimeout(resolve, 20));
+            signing = await (await fetch(`${url}/api/archive/job?id=${signing.id}`, { headers })).json();
+        }
+        assert.equal(signing.state, 'running', signing.error);
+        assert.deepEqual(signing.authentication, { url: 'https://oauth2.sigstore.dev/auth/device?user_code=MATH-TEST', code: 'MATH-TEST' });
+        assert.doesNotMatch(JSON.stringify(signing), /private output|EVIL-CODE|WRONG/);
+        await fs.writeFile(finishAuthentication, 'finish');
+        for (let tries = 0; tries < 100 && signing.state === 'running'; tries++) {
+            await new Promise(resolve => setTimeout(resolve, 20));
+            signing = await (await fetch(`${url}/api/archive/job?id=${signing.id}`, { headers })).json();
+        }
+        assert.equal(signing.state, 'failed'); assert.equal(signing.authentication, undefined);
+        assert.equal(await exists(path.join(f.store, 'HEAD.json')), false); assert.deepEqual(await fs.readFile(f.source), source);
         const wrongProject = await fetch(url + '/api/archive/action', { method: 'POST', headers: { ...headers, 'x-math-workspace-project': '0'.repeat(64) }, body: JSON.stringify({ action: 'prepare', label: 'wrong project' }) });
         assert.equal(wrongProject.status, 409);
         assert.equal((await fetch(url + '/api/archive', { method: 'DELETE', headers })).status, 405);
@@ -284,7 +327,7 @@ export async function testArchiveReaderApi() {
         if (child.exitCode === null) { const exited = new Promise(resolve => child.once('exit', resolve)); child.kill('SIGTERM'); await exited; }
         await fs.rm(f.root, { recursive: true, force: true });
     }
-    console.log('Academic archive Reader: token, project binding, async preparation, source preservation and CLI admission passed.');
+    console.log('Academic archive Reader: token, project binding, async preparation, authentication handoff, source preservation and CLI admission passed.');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
