@@ -21,10 +21,12 @@ import {
 import { ReaderProjectRegistry } from './projects';
 import { ReaderWorkspace, type WorkspaceSnapshot } from './workspace';
 import { updateDocumentState, type DocumentLifecycleUpdate } from './document-state';
+import { ArchiveReaderApi } from '../archive/reader-api';
 import { readLeanBuild } from '../lean/lean-state';
 import { readLeanDependencyArtifact } from '../lean/lean-dependencies';
 import { SymbolAuditService } from './symbol-audit-service';
 import type { SymbolAuditScope, SymbolAuditSettings } from './symbol-audit';
+import { registerReaderInstance, unregisterReaderInstance } from './location-bridge';
 
 const http = require('node:http');
 const { URL } = require('node:url');
@@ -65,6 +67,7 @@ export interface FormalReaderServerOptions {
     staticRoot?: string;
     recentProjectsPath?: string;
     discussionMarksPath?: string;
+    locationRegistryPath?: string;
     chooseProjectDirectory?: () => Promise<string | undefined>;
 }
 
@@ -95,6 +98,7 @@ function displayLabel(label: LabelData, config: any, pagesByPath: Map<string, Pa
     }
     const number = formatDisplayNumber(label);
     const name = typeName(config, label.type);
+    if (label.type === 'solution') return config.language === 'en' ? `Solution to Exercise ${number}` : `习题 ${number} 的解答`;
     return number ? name + ' ' + number : name;
 }
 
@@ -108,7 +112,7 @@ function decoratePage(page: PageData, config: any, lifecycle?: unknown): Record<
 }
 
 function labelSummary(label: LabelData, config: any, pagesByPath: Map<string, PageData>): Record<string, unknown> {
-    const { content: _content, ...summary } = label;
+    const { content: _content, proofContent: _proof, supportContent: _support, ...summary } = label;
     return { ...summary, display: displayLabel(label, config, pagesByPath) };
 }
 
@@ -119,6 +123,12 @@ function labelsForContent(snapshot: WorkspaceSnapshot, content: string): Record<
     let match: RegExpExecArray | null;
     while ((match = marker.exec(content))) {
         if (snapshot.state.labels?.[match[1]]) ids.add(match[1]);
+    }
+    for (const id of [...ids]) {
+        const label = snapshot.state.labels[id];
+        for (const related of [...(label.solutions || []), ...(label.solutionOf ? [label.solutionOf] : [])]) {
+            if (snapshot.state.labels[related]) ids.add(related);
+        }
     }
     return Object.fromEntries(Array.from(ids, id => [id, labelSummary(snapshot.state.labels[id], snapshot.state.config, pagesByPath)]));
 }
@@ -193,6 +203,7 @@ function stateProjection(snapshot: WorkspaceSnapshot, rootPath: string): Record<
         revision: snapshot.revision,
         refreshedAt: snapshot.refreshedAt,
         rootName: path.basename(rootPath),
+        projectId: createHash('sha256').update(rootPath).digest('hex'),
         language: snapshot.state.config?.language || 'zh',
         pages: pages.map((page: PageData) => decoratePage(page, snapshot.state.config, snapshot.state.documentState?.lifecycles?.[page.filePath])),
         definitions: definitions.map(definitionSummary),
@@ -450,22 +461,45 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
     const symbolAudit = new SymbolAuditService();
     // This token only authorizes same-origin mutations from the current Math Workspace page.
     const requestToken = randomBytes(24).toString('hex');
+    const archiveApi = new ArchiveReaderApi();
     let rootPath: string | undefined;
     let workspace: ReaderWorkspace | undefined;
     let unsubscribe = () => {};
     const eventResponses = new Set<any>();
+    const bridgeToken = randomBytes(24).toString('hex');
+    let serverUrl = '';
+
+    const broadcastEvent = (name: string, value: unknown): number => {
+        const event = `event: ${name}\ndata: ${JSON.stringify(value)}\n\n`;
+        eventResponses.forEach(response => response.write(event));
+        return eventResponses.size;
+    };
 
     const broadcast = (snapshot: WorkspaceSnapshot | undefined, changedPaths: string[], projectChanged = false): void => {
-        const event = `event: workspace-update\ndata: ${JSON.stringify({
+        broadcastEvent('workspace-update', {
             revision: snapshot?.revision || 0,
             refreshedAt: snapshot?.refreshedAt || '',
             changedPaths,
             projectChanged
-        })}\n\n`;
-        eventResponses.forEach(response => response.write(event));
+        });
+    };
+
+    const syncReaderInstance = async (previousRoot?: string): Promise<void> => {
+        if (!serverUrl) return;
+        try {
+            if (previousRoot && previousRoot !== rootPath) {
+                await unregisterReaderInstance(serverUrl, options.locationRegistryPath);
+            }
+            if (rootPath) {
+                await registerReaderInstance({ rootPath, url: serverUrl, token: bridgeToken }, options.locationRegistryPath);
+            }
+        } catch (error) {
+            console.warn(`[math-workspace] Could not publish Reader location bridge: ${error instanceof Error ? error.message : String(error)}`);
+        }
     };
 
     const activateProject = async (inputPath: string): Promise<void> => {
+        const previousRoot = rootPath;
         if (rootPath) await symbolAudit.cancel(rootPath);
         const project = await projects.remember(inputPath);
         const nextWorkspace = new ReaderWorkspace(project.rootPath);
@@ -477,6 +511,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
         unsubscribe = nextWorkspace.onChange(({ snapshot, changedPaths }) => broadcast(snapshot, changedPaths));
         previousUnsubscribe();
         await previousWorkspace?.close();
+        await syncReaderInstance(previousRoot);
         broadcast(nextWorkspace.current(), [], true);
     };
 
@@ -543,6 +578,37 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                 return;
             }
 
+            if (url.pathname === '/api/open-location') {
+                if (request.method !== 'POST') {
+                    sendText(response, 405, 'Reader source locations support POST only.');
+                    return;
+                }
+                if (request.headers?.['x-math-workspace-bridge-token'] !== bridgeToken) {
+                    sendText(response, 403, 'Reader location bridge token is missing or invalid.');
+                    return;
+                }
+                if (!workspace || !rootPath) {
+                    sendText(response, 409, 'Choose a Math Workspace project first.');
+                    return;
+                }
+                const body = await readJsonRequest(request, 8 * 1024);
+                const filePath = toPosix(typeof body?.filePath === 'string' ? body.filePath : '').replace(/^\/+/, '');
+                const line = body?.line === undefined ? undefined : Number(body.line);
+                const column = body?.column === undefined ? undefined : Number(body.column);
+                if (!workspace.current().state.pages.some((page: PageData) => page.filePath === filePath)) {
+                    sendText(response, 404, 'Markdown page not found in the bound project.');
+                    return;
+                }
+                if ((line !== undefined && (!Number.isInteger(line) || line < 1))
+                    || (column !== undefined && (!Number.isInteger(column) || column < 1))) {
+                    sendText(response, 400, 'Reader source line and column must be positive integers.');
+                    return;
+                }
+                const delivered = broadcastEvent('reader-navigate', { filePath, line, column });
+                sendJson(response, 200, { delivered });
+                return;
+            }
+
             if (!workspace || !rootPath) {
                 if (url.pathname.startsWith('/api/')) {
                     sendText(response, 409, 'Choose a Math Workspace project first.');
@@ -552,6 +618,22 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                 return;
             }
             const snapshot = workspace.current();
+
+            if (url.pathname === '/api/archive' || url.pathname.startsWith('/api/archive/')) {
+                if (!requireRequestToken(request, response, requestToken)) return;
+                const archiveRoot = rootPath;
+                if (request.headers?.['x-math-workspace-project'] !== createHash('sha256').update(archiveRoot).digest('hex')) {
+                    sendText(response, 409, 'The bound archive project changed. Refresh the Reader before retrying.');
+                    return;
+                }
+                if (request.method === 'GET') {
+                    sendJson(response, 200, await archiveApi.get(archiveRoot, url.pathname, url.searchParams));
+                } else if (request.method === 'POST' && url.pathname === '/api/archive/action') {
+                    const body = await readJsonRequest(request, 32 * 1024);
+                    sendJson(response, 202, await archiveApi.start(archiveRoot, body));
+                } else sendText(response, 405, 'Archive reads use GET; explicit actions use POST.');
+                return;
+            }
 
             if (url.pathname === '/api/discussion-marks') {
                 if (!requireRequestToken(request, response, requestToken)) return;
@@ -766,6 +848,8 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
     const address = server.address();
     const port = typeof address === 'object' && address ? address.port : requestedPort;
     const url = `http://127.0.0.1:${port}`;
+    serverUrl = url;
+    await syncReaderInstance();
 
     return {
         get rootPath() {
@@ -774,6 +858,11 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
         port,
         url,
         async close() {
+            try {
+                await unregisterReaderInstance(url, options.locationRegistryPath);
+            } catch (_error) {
+                // A stale local bridge entry is pruned the next time a location is opened.
+            }
             unsubscribe();
             eventResponses.forEach(response => response.end());
             eventResponses.clear();

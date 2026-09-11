@@ -31,6 +31,7 @@ export interface LeanDependencyArtifact {
     inputFingerprint: string;
     edges: LeanDependencyEdge[];
     comparisons: Record<string, LeanDependencyComparison>;
+    solutionDependencies?: Array<{ exercise: string; solution: string; to: string }>;
     unmappedMarkdownEdges: Array<{ from: string; to: string }>;
     diagnostics: Array<{ projectKey: string; message: string }>;
     summary: {
@@ -56,7 +57,7 @@ function reportPath(workspaceRoot: string): string {
     return path.join(workspaceRoot, '.math-workspace', 'lean-dependency-report.md');
 }
 
-function strictMarkdownEdges(graph: any): Array<{ from: string; to: string }> {
+function explicitStrictEdges(graph: any): Array<{ from: string; to: string }> {
     return (Array.isArray(graph?.edges) ? graph.edges : [])
         .filter((edge: any) => edge
             && edge.relation !== 'explanatory'
@@ -64,8 +65,29 @@ function strictMarkdownEdges(graph: any): Array<{ from: string; to: string }> {
             && typeof edge.from === 'string'
             && typeof edge.to === 'string'
             && edge.from !== edge.to)
-        .map((edge: any) => ({ from: edge.from, to: edge.to }))
-        .sort((left, right) => left.from.localeCompare(right.from) || left.to.localeCompare(right.to));
+        .map((edge: any) => ({ from: edge.from, to: edge.to }));
+}
+
+function solutionDependencies(graph: any): Array<{ exercise: string; solution: string; to: string }> {
+    return explicitStrictEdges(graph).flatMap(edge => (graph?.pedagogicalLinks || [])
+        .filter((link: any) => link.solution === edge.from && link.exercise !== edge.to)
+        .map((link: any) => ({ exercise: link.exercise, solution: link.solution, to: edge.to })));
+}
+
+function strictMarkdownEdges(graph: any, index: LeanIndex): Array<{ from: string; to: string }> {
+    const edges = explicitStrictEdges(graph).flatMap(edge => {
+        const owners = (graph?.pedagogicalLinks || []).filter((link: any) => link.solution === edge.from);
+        if (!owners.length) return [edge];
+        // The question's proof may live in its linked answer. Compare its explicit premises,
+        // retaining the solution's own comparison only when it is separately anchored.
+        return [
+            ...(index.anchors[edge.from] ? [edge] : []),
+            ...owners.filter((link: any) => link.exercise !== edge.to).map((link: any) => ({ from: link.exercise, to: edge.to }))
+        ];
+    });
+    const projected = graph?.pedagogicalLinks?.length
+        ? [...new Map(edges.map(edge => [`${edge.from}:${edge.to}`, edge])).values()] : edges;
+    return projected.sort((left, right) => left.from.localeCompare(right.from) || left.to.localeCompare(right.to));
 }
 
 export function leanDependencyInputFingerprint(index: LeanIndex, graph: any): string {
@@ -73,7 +95,7 @@ export function leanDependencyInputFingerprint(index: LeanIndex, graph: any): st
         projects: Object.entries(index.projectSources)
             .map(([key, source]) => ({ key, fingerprint: source.fingerprint, module: source.module || '' }))
             .sort((left, right) => left.key.localeCompare(right.key)),
-        markdownEdges: strictMarkdownEdges(graph)
+        markdownEdges: strictMarkdownEdges(graph, index)
     }));
 }
 
@@ -197,6 +219,11 @@ export function renderLeanDependencyReport(artifact: LeanDependencyArtifact): st
         `| Unmapped Markdown edges | ${artifact.summary.unmappedMarkdownEdges} |`,
         ''
     ];
+    if (artifact.solutionDependencies?.length) {
+        lines.push('## Premises in linked solutions', '', 'Explicit references in a linked solution are compared as premises of its exercise; the ownership link itself is not a premise.', '');
+        artifact.solutionDependencies.forEach(item => lines.push(`- \`${item.exercise}\` → \`${item.to}\` via solution \`${item.solution}\``));
+        lines.push('');
+    }
     if (artifact.diagnostics.length > 0) {
         lines.push('## Query diagnostics', '');
         artifact.diagnostics.forEach(diagnostic => lines.push(`- **${diagnostic.projectKey}**: ${diagnostic.message}`));
@@ -261,7 +288,7 @@ export async function collectLeanDependencies(workspaceRoot: string, index: Lean
         }
     }
 
-    const markdownEdges = strictMarkdownEdges(graph);
+    const markdownEdges = strictMarkdownEdges(graph, index);
     const anchoredIds = new Set(Object.keys(index.anchors));
     const comparableMarkdownEdges = markdownEdges.filter(edge => anchoredIds.has(edge.from) && anchoredIds.has(edge.to));
     const unmappedMarkdownEdges = markdownEdges.filter(edge => !anchoredIds.has(edge.from) || !anchoredIds.has(edge.to));
@@ -298,6 +325,7 @@ export async function collectLeanDependencies(workspaceRoot: string, index: Lean
             || left.where.localeCompare(right.where)
         )),
         comparisons,
+        ...(solutionDependencies(graph).length ? { solutionDependencies: solutionDependencies(graph) } : {}),
         unmappedMarkdownEdges,
         diagnostics,
         summary: {

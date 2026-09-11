@@ -1,4 +1,8 @@
 import * as path from 'node:path';
+import { FORMAL_KIND_POLICIES, DEFAULT_LEAN_COVERAGE_TYPES, FORMAL_TYPES, THEOREM_COUNTER_TYPES, DEPENDENCY_NODE_TYPES, RECALL_TYPES, SECTION_TYPES, HASH_ID_RE, TMP_ID_RE, FORMAL_TYPE_PATTERN, normalizeFormalKind, formalDictionary, isPedagogicalKind, isMainlineKind } from './formal-kinds';
+import { collectExerciseContent, connectExerciseSolutions, solutionTarget, type ExerciseSupportRange } from './exercise-structure';
+export * from './formal-kinds';
+export { associatedProofContent, exerciseSupportKind } from './exercise-structure';
 import { analyzeProjectKnowledge, type ProjectKnowledgeSourceKind, type ProjectStructureAnalysis } from './project-knowledge';
 
 export { analyzeProjectKnowledge } from './project-knowledge';
@@ -22,6 +26,14 @@ export interface LabelData {
     volumeTitle?: string;
     volumeOrder?: number;
     content?: string;
+    proofContent?: string;
+    supportContent?: string;
+    supportRanges?: ExerciseSupportRange[];
+    bodyEndLine?: number;
+    solutionOf?: string;
+    solutions?: string[];
+    solutionExerciseNumber?: string;
+    solutionExerciseTitle?: string;
     startLine?: number;
     endLine?: number;
     definitionOrigin?: DefinitionOrigin;
@@ -197,6 +209,7 @@ export interface DependencyGraphEdge {
     kind: 'explicit_ref';
     where: DependencyEdgeWhere;
     relation: DependencyEdgeRelation;
+    layer?: 'mathematical' | 'pedagogical';
     path: string;
     line: number;
 }
@@ -225,6 +238,7 @@ export interface DependencyGraph {
     generatedBy: 'math-workspace';
     nodes: DependencyGraphNode[];
     edges: DependencyGraphEdge[];
+    pedagogicalLinks?: Array<{ solution: string; exercise: string }>;
     ambientReferences: DependencyGraphAmbientReference[];
     cycles: DependencyGraphCycle[];
     diagnostics: DependencyGraphDiagnostic[];
@@ -232,6 +246,8 @@ export interface DependencyGraph {
         nodes: number;
         theoremLikeNodes: number;
         supplementalRemarkNodes: number;
+        pedagogicalNodes?: number;
+        pedagogicalEdges?: number;
         edges: number;
         theoremLikeEdges: number;
         supplementalRemarkEdges: number;
@@ -305,17 +321,10 @@ export interface FormalMarker {
     markerText: string;
     rest: string;
     level?: number;
+    solutionOf?: string;
 }
 
-export const FORMAL_TYPES = ['prop', 'lemma', 'theorem', 'cor', 'def', 'remark', 'example', 'section', 'equation', 'figure', 'table'];
-export const THEOREM_COUNTER_TYPES = new Set(['prop', 'lemma', 'theorem', 'cor']);
-// Proof-backed remarks are graph nodes but deliberately stay outside theorem numbering.
-export const DEPENDENCY_NODE_TYPES = new Set([...THEOREM_COUNTER_TYPES, 'remark']);
-export const RECALL_TYPES = new Set(['prop', 'lemma', 'theorem', 'cor', 'remark', 'example']);
-export const SECTION_TYPES = new Set(['section']);
 const PAGE_LABEL_TYPES = new Set(['chapter', 'intro', 'summary', 'appendix']);
-export const HASH_ID_RE = /^h-[a-f0-9]{16,32}$/;
-export const TMP_ID_RE = /^tmp-[A-Za-z0-9_-]+$/;
 const SYMBOL_PLACEHOLDER_RE = /\$\{([A-Za-z][A-Za-z0-9_]*)\}/g;
 const SYMBOL_SAMPLE_VALUES: Record<string, string> = {
     operator: 'T',
@@ -337,8 +346,8 @@ const STRUCTURED_NUMBERED_TYPES = new Set(['equation', 'figure', 'table']);
 export const DEFAULT_CONFIG = {
     language: 'zh',
     dictionary: {
-        zh: { theorem: '定理', lemma: '引理', prop: '命题', cor: '推论', def: '定义', remark: '注', example: '例', section: '§', equation: '公式', figure: '图', table: '表' },
-        en: { theorem: 'Theorem', lemma: 'Lemma', prop: 'Proposition', cor: 'Corollary', def: 'Definition', remark: 'Remark', example: 'Example', section: '§', equation: 'Equation', figure: 'Figure', table: 'Table' }
+        zh: formalDictionary('zh'),
+        en: formalDictionary('en')
     },
     ui: {
         zh: {
@@ -388,7 +397,7 @@ export const DEFAULT_CONFIG = {
     },
     lean: {
         projects: [],
-        coverageTypes: ['theorem', 'lemma', 'prop', 'cor', 'remark']
+        coverageTypes: DEFAULT_LEAN_COVERAGE_TYPES
     },
     render: {
         pageHeadingStyle: 'label-title'
@@ -1296,47 +1305,6 @@ export function stripIgnoredMarkdown(content: string): string {
         .replace(/`[^`\n]*`/g, '');
 }
 
-const MARKER_TYPE_ALIASES: Record<string, string> = {
-    '命题': 'prop',
-    '引理': 'lemma',
-    '定理': 'theorem',
-    '推论': 'cor',
-    '定义': 'def',
-    '注': 'remark',
-    '例': 'example',
-    '公式': 'equation',
-    '方程': 'equation',
-    '图': 'figure',
-    '图示': 'figure',
-    '表': 'table',
-    '表格': 'table',
-    proposition: 'prop',
-    prop: 'prop',
-    lemma: 'lemma',
-    lem: 'lemma',
-    theorem: 'theorem',
-    thm: 'theorem',
-    corollary: 'cor',
-    cor: 'cor',
-    definition: 'def',
-    def: 'def',
-    remark: 'remark',
-    rem: 'remark',
-    example: 'example',
-    ex: 'example',
-    equation: 'equation',
-    eq: 'equation',
-    formula: 'equation',
-    figure: 'figure',
-    fig: 'figure',
-    table: 'table',
-    tab: 'table'
-};
-
-function normalizeMarkerType(value: string): string | undefined {
-    return MARKER_TYPE_ALIASES[value.toLowerCase()] || MARKER_TYPE_ALIASES[value];
-}
-
 function cleanMarkerTitle(title: string): string {
     const trimmed = title.trim();
     const strong = trimmed.match(/^(\*\*|__)\s*([\s\S]+?)\s*\1$/);
@@ -1396,11 +1364,11 @@ export function parseFormalMarkerLine(line: string): FormalMarker | undefined {
     }
 
     const text = normalizeLeadingMarkerEmphasis(line);
-    const typePattern = '定理|引理|命题|推论|定义|注|例|公式|方程|图示|图|表格|表|Theorem|Thm\\.?|Lemma|Lem\\.?|Proposition|Prop\\.?|Corollary|Cor\\.?|Definition|Def\\.?|Remark|Rem\\.?|Example|Ex\\.?|Equation|Eq\\.?|Formula|Figure|Fig\\.?|Table|Tab\\.?';
+    const typePattern = FORMAL_TYPE_PATTERN;
     const typed = text.match(new RegExp(`^(${typePattern})\\s*([\\s\\S]*)$`, 'i'));
     if (!typed) return undefined;
 
-    const type = normalizeMarkerType(typed[1].replace(/\.$/, ''));
+    const type = normalizeFormalKind(typed[1]);
     if (!type) return undefined;
 
     if (type === 'def') {
@@ -1420,10 +1388,13 @@ export function parseFormalMarkerLine(line: string): FormalMarker | undefined {
     if (!match) return undefined;
 
     const rest = match[3] || '';
+    const parsedTitle = extractMarkerTitle(type, rest);
+    const solution = type === 'solution' ? solutionTarget(parsedTitle) : undefined;
     return {
         type,
         id: match[2],
-        title: extractMarkerTitle(type, rest),
+        title: solution ? solution.title : parsedTitle,
+        solutionOf: solution?.id,
         markerText: `${match[1]} #${match[2]}`,
         rest
     };
@@ -2057,12 +2028,7 @@ export function scanFormalDocuments(documents: FormalDocument[], configInput: an
 
     for (const groupFiles of unitFiles.values()) {
         groupFiles.sort((a, b) => a.filePath.localeCompare(b.filePath));
-        let itemCounter = 1;
-        let sectionCounter = 1;
-        let exampleCounter = 1;
-        let equationCounter = 1;
-        let figureCounter = 1;
-        let tableCounter = 1;
+        const counters: Record<string, number> = {};
 
         for (const unitFile of groupFiles) {
             const lines = unitFile.content.split(/\r?\n/);
@@ -2081,22 +2047,25 @@ export function scanFormalDocuments(documents: FormalDocument[], configInput: an
                 if (marker.type === 'def') continue;
                 issues.push(...lintStructuredNumberedMarker(marker, lines, lineIndex, unitFile.filePath));
 
-                let markerNumber: number | undefined;
-                if (THEOREM_COUNTER_TYPES.has(marker.type)) {
-                    markerNumber = itemCounter++;
-                } else if (SECTION_TYPES.has(marker.type)) {
-                    markerNumber = sectionCounter++;
-                } else if (marker.type === 'example') {
-                    markerNumber = exampleCounter++;
-                } else if (marker.type === 'equation') {
-                    markerNumber = equationCounter++;
-                } else if (marker.type === 'figure') {
-                    markerNumber = figureCounter++;
-                } else if (marker.type === 'table') {
-                    markerNumber = tableCounter++;
-                }
-                const content = collectMarkerContent(lines, lineIndex, marker);
+                const counter = FORMAL_KIND_POLICIES[marker.type]?.counter;
+                const markerNumber = counter ? (counters[counter] = (counters[counter] || 0) + 1) : undefined;
+                const exerciseContent = isPedagogicalKind(marker.type)
+                    ? collectExerciseContent(lines, lineIndex, marker, parseFormalMarkerLine) : undefined;
+                const content = exerciseContent || collectMarkerContent(lines, lineIndex, marker);
                 const label = makeLabelData(marker, unitFile, lineIndex, content.contentLines, markerNumber, content.endLine);
+                if (exerciseContent) {
+                    label.bodyEndLine = exerciseContent.bodyEndLine;
+                    label.supportRanges = exerciseContent.support;
+                    label.supportContent = exerciseContent.support.map(range => lines.slice(range.startLine, range.endLine + 1).join('\n')).join('\n');
+                    label.solutionOf = marker.solutionOf;
+                    if (marker.type === 'solution') label.proofContent = lines.slice(lineIndex, exerciseContent.bodyEndLine + 1).join('\n');
+                    else label.proofContent = exerciseContent.support.filter(range => range.kind === 'solution').map(range => lines.slice(range.startLine, range.endLine + 1).join('\n')).join('\n');
+                } else {
+                    const proof = findProofRange(lines, lineIndex + 1, content.endLine + 1);
+                    if (proof.proofStartLine !== undefined && proof.proofEndLine !== undefined) {
+                        label.proofContent = lines.slice(proof.proofStartLine - 1, proof.proofEndLine).join('\n');
+                    }
+                }
                 labels[marker.id!] = label;
                 definitions.push({
                     id: marker.id!,
@@ -2109,6 +2078,8 @@ export function scanFormalDocuments(documents: FormalDocument[], configInput: an
             }
         }
     }
+
+    issues.push(...connectExerciseSolutions(definitions, labels));
 
     const customDefinitionResult = parseFormalDefinitions(definitionsInput, files, config);
     for (const customDefinition of customDefinitionResult.definitions) {
@@ -2495,6 +2466,7 @@ function compareDefinitionRecords(a: FormalDefinition, b: FormalDefinition): num
 }
 
 export function formatLabelNumber(label: LabelData): string {
+    if (label.type === 'solution') return label.solutionExerciseNumber || '';
     if (label.type === 'remark' || PAGE_LABEL_TYPES.has(label.type)) return '';
     const prefix = label.unitLabel || (label.chapter !== undefined ? String(label.chapter) : label.appendix || '');
     return prefix && label.number !== undefined ? `${prefix}.${label.number}` : '';
@@ -2507,6 +2479,10 @@ export function formatDisplayNumber(label: LabelData): string {
 
 export function displayLabel(def: FormalDefinition, config: any): string {
     const name = typeName(config, def.type);
+    if (def.type === 'solution') {
+        const number = formatLabelNumber(def.label);
+        return getLanguage(config) === 'en' ? `Solution to Exercise ${number}`.trim() : `习题 ${number} 的解答`;
+    }
     if (def.type === 'section') {
         const number = formatLabelNumber(def.label);
         return number ? `${name} ${number}` : name;
@@ -2677,12 +2653,18 @@ function dependencySourceBlocks(definitions: FormalDefinition[], documents: Form
         const startLine = def.line;
         const labelEndLine = typeof def.label.endLine === 'number' ? def.label.endLine + 1 : startLine;
         const statementEndLine = Math.max(startLine, labelEndLine);
-        const proofRange = findProofRange(lines, startLine, statementEndLine);
+        const pedagogical = isPedagogicalKind(def.type);
+        const bodyEndLine = (def.label.bodyEndLine ?? def.label.endLine ?? startLine - 1) + 1;
+        const proofRange = pedagogical ? {
+            proofStartLine: def.type === 'solution' ? startLine : statementEndLine + 1,
+            proofEndLine: bodyEndLine,
+            endLine: bodyEndLine
+        } : findProofRange(lines, startLine, statementEndLine);
         const block: DependencySourceBlock = {
             id: def.id,
             file: def.file,
             startLine,
-            statementEndLine,
+            statementEndLine: def.type === 'solution' ? startLine - 1 : statementEndLine,
             proofStartLine: proofRange.proofStartLine,
             proofEndLine: proofRange.proofEndLine,
             endLine: Math.max(statementEndLine, proofRange.endLine)
@@ -2824,9 +2806,15 @@ export function buildDependencyGraph(state: any, documents: FormalDocument[]): D
     const edges: DependencyGraphEdge[] = [];
     const ambientReferences: DependencyGraphAmbientReference[] = [];
     const diagnostics: DependencyGraphDiagnostic[] = [];
+    const pedagogicalLinks = dependencyDefinitions
+        .filter(def => def.type === 'solution' && state.labels?.[def.label.solutionOf || '']?.type === 'exercise')
+        .map(def => ({ solution: def.id as string, exercise: def.label.solutionOf as string }));
 
     for (const ref of references) {
         const sourceBlock = findDependencySourceBlock(blocksByFile.get(ref.file), ref.line);
+        // The header target identifies the question; it is not a proof premise.
+        if (sourceBlock && ref.line === sourceBlock.startLine
+            && pedagogicalLinks.some(link => link.solution === sourceBlock.id && link.exercise === ref.id)) continue;
         if (sourceBlock) {
             const targets = sourceReferences.get(sourceBlock.id) || new Set<string>();
             targets.add(ref.id);
@@ -2847,12 +2835,19 @@ export function buildDependencyGraph(state: any, documents: FormalDocument[]): D
             continue;
         }
 
+        const sourceNode = nodeById.get(sourceBlock.id);
+        const pedagogical = isPedagogicalKind(sourceNode?.kind || '') || isPedagogicalKind(target.kind);
+        if (isMainlineKind(sourceNode?.kind || '') && isPedagogicalKind(target.kind)) {
+            diagnostics.push({ severity: 'warn', code: 'mainline-references-exercise', file: ref.file, line: ref.line,
+                message: 'A mainline result references an exercise or solution. Keep any required claim and proof in the main text.' });
+        }
         const where = dependencyEdgeWhere(sourceBlock, ref.line);
         const sourceLine = linesByFile.get(ref.file)?.[ref.line - 1] || '';
         edges.push({
             from: sourceBlock.id,
             to: ref.id,
             kind: 'explicit_ref',
+            layer: pedagogical ? 'pedagogical' : 'mathematical',
             where,
             relation: where === 'body' ? 'explanatory' : dependencyEdgeRelation(sourceLine, ref.id),
             path: ref.file,
@@ -2884,23 +2879,26 @@ export function buildDependencyGraph(state: any, documents: FormalDocument[]): D
     const isCrossVolume = (edge: DependencyGraphEdge) => (nodeById.get(edge.from)?.volumeKey || '') !== (nodeById.get(edge.to)?.volumeKey || '');
     const isCrossChapter = (edge: DependencyGraphEdge) => (nodeById.get(edge.from)?.unitKey || '') !== (nodeById.get(edge.to)?.unitKey || '');
     const isSupplementalRemark = (node: DependencyGraphNode | undefined) => node?.kind === 'remark';
-    const isTheoremLikeEdge = (edge: DependencyGraphEdge) => !isSupplementalRemark(nodeById.get(edge.from)) && !isSupplementalRemark(nodeById.get(edge.to));
+    const isTheoremLikeEdge = (edge: DependencyGraphEdge) => isMainlineKind(nodeById.get(edge.from)?.kind || '') && isMainlineKind(nodeById.get(edge.to)?.kind || '');
 
     return {
         schemaVersion: 1,
         generatedBy: 'math-workspace',
         nodes,
         edges,
+        pedagogicalLinks,
         ambientReferences,
         cycles,
         diagnostics,
         summary: {
             nodes: nodes.length,
-            theoremLikeNodes: nodes.filter(node => node.kind !== 'remark').length,
+            theoremLikeNodes: nodes.filter(node => isMainlineKind(node.kind)).length,
+            pedagogicalNodes: nodes.filter(node => isPedagogicalKind(node.kind)).length,
+            pedagogicalEdges: edges.filter(edge => edge.layer === 'pedagogical').length,
             supplementalRemarkNodes: nodes.filter(node => node.kind === 'remark').length,
             edges: edges.length,
             theoremLikeEdges: edges.filter(isTheoremLikeEdge).length,
-            supplementalRemarkEdges: edges.filter(edge => !isTheoremLikeEdge(edge)).length,
+            supplementalRemarkEdges: edges.filter(edge => edge.layer !== 'pedagogical' && !isTheoremLikeEdge(edge)).length,
             isolated: nodes.filter(node => (incoming.get(node.id) || 0) === 0 && (outgoing.get(node.id) || 0) === 0).length,
             cycles: cycles.length,
             crossBookEdges: edges.filter(isCrossBook).length,
@@ -2943,7 +2941,7 @@ function isSupplementalRemarkNode(node: DependencyGraphNode | undefined): boolea
 }
 
 function dependencyNodeKindLabel(node: DependencyGraphNode): string {
-    return isSupplementalRemarkNode(node) ? 'Supplemental remark' : 'Theorem-like';
+    return isPedagogicalKind(node.kind) ? (node.kind === 'exercise' ? 'Exercise' : 'Solution') : isSupplementalRemarkNode(node) ? 'Supplemental remark' : 'Theorem-like';
 }
 
 function pushLimitedRows<T>(lines: string[], rows: T[], limit: number, render: (row: T) => string, moreRow?: (remaining: number) => string) {
@@ -2966,6 +2964,9 @@ export function renderDependencyReport(graph: DependencyGraph): string {
         `- Nodes: ${graph.summary.nodes}`,
         `- Theorem-like nodes: ${graph.summary.theoremLikeNodes}`,
         `- Supplemental fact remarks: ${graph.summary.supplementalRemarkNodes}`,
+        `- Exercises and solutions: ${graph.summary.pedagogicalNodes || 0}`,
+        `- Pedagogical reference edges: ${graph.summary.pedagogicalEdges || 0}`,
+        `- Solution associations (excluded from proof cycles): ${graph.pedagogicalLinks?.length || 0}`,
         `- Explicit edges: ${graph.summary.edges}`,
         `- Mainline theorem-like edges: ${graph.summary.theoremLikeEdges}`,
         `- Edges involving supplemental remarks: ${graph.summary.supplementalRemarkEdges}`,
@@ -2980,7 +2981,8 @@ export function renderDependencyReport(graph: DependencyGraph): string {
         ''
     ];
 
-    const outgoing = dependencyDegreeRows(graph, 'outgoing');
+    const mathematicalEdges = graph.edges.filter(edge => edge.layer !== 'pedagogical');
+    const outgoing = dependencyDegreeRows(graph, 'outgoing', mathematicalEdges);
     lines.push('## High Outgoing Dependencies', '');
     if (outgoing.length === 0) {
         lines.push('No outgoing dependencies.', '');
@@ -2991,7 +2993,7 @@ export function renderDependencyReport(graph: DependencyGraph): string {
         lines.push('');
     }
 
-    const incoming = dependencyDegreeRows(graph, 'incoming');
+    const incoming = dependencyDegreeRows(graph, 'incoming', mathematicalEdges);
     lines.push('## High Incoming Dependencies', '');
     if (incoming.length === 0) {
         lines.push('No incoming dependencies.', '');
@@ -3038,7 +3040,7 @@ export function renderDependencyReport(graph: DependencyGraph): string {
         outgoingCounts.set(edge.from, (outgoingCounts.get(edge.from) || 0) + 1);
     }
     const isolated = graph.nodes.filter(node => (incomingCounts.get(node.id) || 0) === 0 && (outgoingCounts.get(node.id) || 0) === 0);
-    const isolatedTheoremLike = isolated.filter(node => !isSupplementalRemarkNode(node));
+    const isolatedTheoremLike = isolated.filter(node => isMainlineKind(node.kind));
     const isolatedRemarks = isolated.filter(isSupplementalRemarkNode);
     lines.push('## Isolated Nodes', '');
     lines.push(`- Mainline theorem-like: ${isolatedTheoremLike.length}`);
@@ -3091,7 +3093,7 @@ function dependencyFilteredSummary(graph: DependencyGraph, where: DependencyGrap
     const isCrossBook = (edge: DependencyGraphEdge) => (nodeById.get(edge.from)?.bookKey || '') !== (nodeById.get(edge.to)?.bookKey || '');
     const isCrossVolume = (edge: DependencyGraphEdge) => (nodeById.get(edge.from)?.volumeKey || '') !== (nodeById.get(edge.to)?.volumeKey || '');
     const isCrossChapter = (edge: DependencyGraphEdge) => (nodeById.get(edge.from)?.unitKey || '') !== (nodeById.get(edge.to)?.unitKey || '');
-    const isTheoremLikeEdge = (edge: DependencyGraphEdge) => !isSupplementalRemarkNode(nodeById.get(edge.from)) && !isSupplementalRemarkNode(nodeById.get(edge.to));
+    const isTheoremLikeEdge = (edge: DependencyGraphEdge) => isMainlineKind(nodeById.get(edge.from)?.kind || '') && isMainlineKind(nodeById.get(edge.to)?.kind || '');
     const cycles = dependencyGraphCycles(graph.nodes, edges);
 
     return {
@@ -3101,7 +3103,7 @@ function dependencyFilteredSummary(graph: DependencyGraph, where: DependencyGrap
         cycles,
         isolated: graph.nodes.filter(node => (incoming.get(node.id) || 0) === 0 && (outgoing.get(node.id) || 0) === 0),
         theoremLikeEdges: edges.filter(isTheoremLikeEdge).length,
-        supplementalRemarkEdges: edges.filter(edge => !isTheoremLikeEdge(edge)).length,
+        supplementalRemarkEdges: edges.filter(edge => edge.layer !== 'pedagogical' && !isTheoremLikeEdge(edge)).length,
         crossBookEdges: edges.filter(isCrossBook).length,
         crossVolumeEdges: edges.filter(isCrossVolume).length,
         crossChapterEdges: edges.filter(isCrossChapter).length,
@@ -3142,6 +3144,9 @@ export function renderDependencyGraphSummary(graph: DependencyGraph, where: Depe
         `- Nodes: ${graph.nodes.length}`,
         `- Theorem-like nodes: ${graph.summary.theoremLikeNodes}`,
         `- Supplemental fact remarks: ${graph.summary.supplementalRemarkNodes}`,
+        `- Exercises and solutions: ${graph.summary.pedagogicalNodes || 0}`,
+        `- Pedagogical reference edges: ${graph.summary.pedagogicalEdges || 0}`,
+        `- Solution associations (excluded from proof cycles): ${graph.pedagogicalLinks?.length || 0}`,
         `- Explicit edges: ${summary.edges.length}`,
         `- Mainline theorem-like edges: ${summary.theoremLikeEdges}`,
         `- Edges involving supplemental remarks: ${summary.supplementalRemarkEdges}`,
@@ -3205,6 +3210,12 @@ function dependencyReachable(graph: DependencyGraph, rootId: string, direction: 
         } else {
             adjacency.get(edge.to)?.add(edge.from);
         }
+    }
+
+    // Question and answer edits require mutual review; these links never enter proof-cycle analysis.
+    if (direction === 'impact') for (const link of graph.pedagogicalLinks || []) {
+        adjacency.get(link.exercise)?.add(link.solution);
+        adjacency.get(link.solution)?.add(link.exercise);
     }
 
     const visited = new Map<string, number>([[rootId, 0]]);
@@ -3291,7 +3302,7 @@ export function renderDependencyGraphFocus(graph: DependencyGraph, id: string, d
 
 export function renderDependencyGraphIsolated(graph: DependencyGraph, where: DependencyGraphWhereFilter = 'all'): string {
     const summary = dependencyFilteredSummary(graph, where);
-    const theoremLike = summary.isolated.filter(node => !isSupplementalRemarkNode(node));
+    const theoremLike = summary.isolated.filter(node => isMainlineKind(node.kind));
     const remarks = summary.isolated.filter(isSupplementalRemarkNode);
     const lines = [
         `# Isolated Dependency Nodes${dependencyWhereSuffix(where)}`,
@@ -3380,7 +3391,7 @@ export function renderDependencyGraphMatrix(graph: DependencyGraph, scope: Depen
 }
 
 export function renderDependencyGraphBridges(graph: DependencyGraph, where: DependencyGraphWhereFilter = 'all'): string {
-    const edges = filteredDependencyEdges(graph, where);
+    const edges = filteredDependencyEdges(graph, where).filter(edge => edge.layer !== 'pedagogical');
     const nodeById = dependencyNodeById(graph);
     const incoming = new Map(graph.nodes.map(node => [node.id, 0]));
     const outgoing = new Map(graph.nodes.map(node => [node.id, 0]));
@@ -3407,7 +3418,7 @@ export function renderDependencyGraphBridges(graph: DependencyGraph, where: Depe
         .filter(row => row.incoming > 0 && row.outgoing > 0)
         .sort((a, b) => b.crossScope - a.crossScope || (b.incoming + b.outgoing) - (a.incoming + a.outgoing) || dependencyNodeTitle(a.node).localeCompare(dependencyNodeTitle(b.node)));
 
-    const theoremLikeRows = rows.filter(row => !isSupplementalRemarkNode(row.node));
+    const theoremLikeRows = rows.filter(row => isMainlineKind(row.node.kind));
     const remarkRows = rows.filter(row => isSupplementalRemarkNode(row.node));
     const lines = [
         `# Bridge Candidates${dependencyWhereSuffix(where)}`,
@@ -3456,8 +3467,9 @@ export function renderAgentGuide(state: any): string {
         '- Chapter/page anchors: put `#h-...` / `#tmp-*` on the file\'s unique highest-level heading when the page needs stable refs. The hash is hidden in preview and does not create a section number. Use `@h-...`, `@h-....title`, or `@h-....full` from `reference-map.md` to reference the page.',
         '- Compatibility chapter/page refs: `@chapter:book1/02-main.md`, `@chapter:book1/02-main.md.title`, or `@chapter:book1/02-main.md.full` still work; paths are relative to the formal root that owns `.math-workspace/`. `@page:path.md` is for intro, summary, and appendix pages. Prefer page hashes when available. `finish` normalizes `./` and `../` input sugar to root-relative paths.',
         '- Theorem-like recall captures the statement before `证明` / `Proof`; keep proofs after an explicit proof marker.',
-        '- Dependency graph: `.math-workspace/dependency-graph.json` is the canonical explicit reference graph. It uses only `@h-...` references between propositions/lemmas/theorems/corollaries and proof-backed hash remarks, and marks edges as `statement`, `proof`, or `body`. Edges introduced as explanatory navigation (`见 @h-...`, `参见 @h-...`, or `see @h-...`) are preserved with relation `explanatory`; the Reader relation map excludes them, body references, and self-references from its strict dependency view. `.math-workspace/dependency-report.md` separates mainline theorem-like and supplemental remark statistics. Use `npm run workspace -- graph summary`, `graph impact <h-id>`, `graph upstream <h-id>`, `graph focus <h-id> --depth 2`, `graph bridges`, `graph isolated`, `graph cycles`, or `graph matrix chapter|volume|book` for Markdown analysis. Add `--where statement|proof|body` to filter edge placement. These are structural graph tools, not domain interpretation.',
+        '- Dependency graph: `.math-workspace/dependency-graph.json` is the canonical explicit reference graph. It uses only `@h-...` references between mainline claims, proof-backed hash remarks, exercises and solutions; pedagogical references carry `layer: pedagogical`, while `pedagogicalLinks` keeps solution ownership separate from proof cycles, and marks edges as `statement`, `proof`, or `body`. Edges introduced as explanatory navigation (`见 @h-...`, `参见 @h-...`, or `see @h-...`) are preserved with relation `explanatory`; the Reader relation map excludes them, body references, and self-references from its strict dependency view. `.math-workspace/dependency-report.md` separates mainline theorem-like and supplemental remark statistics. Use `npm run workspace -- graph summary`, `graph impact <h-id>`, `graph upstream <h-id>`, `graph focus <h-id> --depth 2`, `graph bridges`, `graph isolated`, `graph cycles`, or `graph matrix chapter|volume|book` for Markdown analysis. Add `--where statement|proof|body` to filter edge placement. These are structural graph tools, not domain interpretation.',
         '- Definitions and project knowledge: lookup is a tool-first, AI-exception workflow. The tool scans standard `定义（Term）：...` / `Definition (Term): ...` definitions and deliberately named concept/glossary appendices; `.math-workspace/project-analysis.md` records detected concept, notation, and summary pages. Do not refresh `.math-workspace/definitions.json` after ordinary edits. Use it only for nonstandard phrases, aliases/bilingual lookup, stable multi-paragraph previews, or a boundary the deterministic extractor cannot represent; include Markdown `content` for those entries. Reader task context carries detected sources from the current book. Full rendered lookup previews are only guaranteed for definitions in the currently previewed file; cross-file search is primarily for locating and jumping.',
+        '- Exercises use `习题 #tmp-e（Title）：...` / `Exercise #tmp-e (Title): ...`, with an independent chapter counter. Solutions use a separate ID and `解答 #tmp-s（对应 @tmp-e）：...` / `Solution #tmp-s (for @tmp-e): ...`; they may live in the same book’s final appendix and retain the original exercise number. Separate hint/answer paragraphs from the prompt with a blank line. Prompt recall excludes hints and answers; exports include them. Keep stable IDs and Lean declarations when converting existing results; required mainline claims and proofs stay in the main text.',
         '- Explanatory remarks stay plain: `注（Title）：...` / `Remark (Title): ...`, without hash. Non-mainline fact remarks that need a proof or later citation use `注 #tmp-*（Title）：...`; `> 注 #tmp-*（Title）：...` is also recognized inside standard blockquotes. A hash remark is an unnumbered supplemental dependency node and supports recall; a plain remark never enters the dependency graph or Reader dependency markers. Examples stay plain by default; only explicitly cited examples use `例 #tmp-*` / `Example #tmp-*` and remain numbered.',
         '- Symbols: maintain only project-specific `source`, `pattern`, and `meaning` entries in `.math-workspace/symbols.json` when explicit notation semantics change; patterns describe the notation itself with balanced delimiters, not whole equations or open-ended formula fragments. Detected notation appendices are context only and do not infer symbol meanings. The navigation symbol table lists symbols matched in the current preview file. Symbols are not inline formula refs and are not searched through the definition search box.',
         '- Appendices use the appendix file prefix, so markers in `appendix-a-*.md` render as `A.1`, `A.2`, etc. `00-introduction.md`, `intro.md`, and `introduction.md` are intro pages, not chapter 0.',

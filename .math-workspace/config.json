@@ -2,26 +2,30 @@
   "language": "zh",
   "dictionary": {
     "zh": {
-      "theorem": "定理",
-      "lemma": "引理",
       "prop": "命题",
+      "lemma": "引理",
+      "theorem": "定理",
       "cor": "推论",
       "def": "定义",
       "remark": "注",
       "example": "例",
+      "exercise": "习题",
+      "solution": "解答",
       "section": "§",
       "equation": "公式",
       "figure": "图",
       "table": "表"
     },
     "en": {
-      "theorem": "Theorem",
-      "lemma": "Lemma",
       "prop": "Proposition",
+      "lemma": "Lemma",
+      "theorem": "Theorem",
       "cor": "Corollary",
       "def": "Definition",
       "remark": "Remark",
       "example": "Example",
+      "exercise": "Exercise",
+      "solution": "Solution",
       "section": "§",
       "equation": "Equation",
       "figure": "Figure",
@@ -120,7 +124,8 @@
       "lemma",
       "prop",
       "cor",
-      "remark"
+      "remark",
+      "exercise"
     ]
   },
   "debug": {

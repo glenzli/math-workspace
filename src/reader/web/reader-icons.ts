@@ -9,7 +9,9 @@ import {
     Copy,
     Eraser,
     GitBranch,
+    History,
     ListTree,
+    ListOrdered,
     LocateFixed,
     MousePointer2,
     Bookmark,
@@ -44,6 +46,8 @@ export type ReaderIconName =
     | 'marker-select'
     | 'propositions'
     | 'contents'
+    | 'history'
+    | 'line-numbers'
     | 'eraser'
     | 'navigation-close'
     | 'navigation-open'
@@ -72,6 +76,8 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     'marker-formal': MousePointer2,
     propositions: GitBranch,
     contents: ListTree,
+    history: History,
+    'line-numbers': ListOrdered,
     eraser: Eraser,
     'navigation-close': PanelLeftClose,
     'navigation-open': PanelLeftOpen,

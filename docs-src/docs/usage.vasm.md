@@ -57,6 +57,36 @@ vasm:
 
 不要在正文里写声明语法。应写 `由 @h-... 可得`，不要写 `由定理 #h-... 可得`。
 
+## 习题与解答
+
+习题按章独立编号，不占用定理编号。题目和解答分别持有稳定 ID，解答用显式目标关联题目：
+
+```markdown
+习题 #tmp-ex（有限求和）：计算下式。
+
+$$
+\sum_{k=1}^{n} k
+$$
+
+**(a)** 先检验小规模情形。
+
+提示：考虑首尾配对。
+```
+
+可以把解答放到同一本书的最后一个题解附录，使用如下声明：
+
+```markdown
+解答 #tmp-sol（对应 @tmp-ex）：将首尾项配对，再求和。
+```
+
+英文写法为 `Exercise #tmp-ex (Title): ...` 和 `Solution #tmp-sol (for @tmp-ex): ...`。可选解答标题写作 `（对应 @tmp-ex；另一种方法）`。多个解答可以关联同一道题，各自使用不同 ID；解答显示原题编号，例如“习题 2.3 的解答”，不使用所在附录的新编号。缺失、非习题或跨书目标会报错。跨文件临时引用用 `finish --all` 一并固化。
+
+题面延续到下一个正式对象或 Markdown 标题，包含多段文字、公式、列表和分问。分问用列表或加粗标签；不要用会结束题面的 Markdown 标题。独立段落中的 `提示：` / `Hint:`、`解答：` / `Solution:` 开始辅助内容；这些标记与前文之间留一个空行。提示和解答不会进入题面 recall，Reader 默认折叠它们；题目与附录解答支持双向跳转。Markdown 与 PDF 导出保留完整提示及解答，并统一编译原题编号和引用。
+
+依赖图保留习题、解答的显式引用，标记 `layer: pedagogical`；`pedagogicalLinks` 单独保存题解关联，不参与证明循环。`graph impact` 会沿引用和题解关联追踪影响；Reader 主线重要性和 `graph bridges` 不计教学引用。正文主线引用习题或解答时会提示审查：必要命题及证明应保留在正文，避免让题解承担主线缺失的论证。
+
+已形式化的命题改为习题时保留原 hash 与 Lean 声明。习题进入默认 `coverageTypes`；即便自定义类型列表遗漏习题，已有 Lean 锚点的习题仍计入覆盖分母，解答不在默认分母中重复计数。Lean 契约分别记录题面、相关提示/证明/跨文件解答和声明签名；修改题解会使题目待复核，修改题面也会使锚定解答待复核。Lean 依赖比对会把关联解答中的显式严格引用计作原题的证明前提，并保留题解来源；关联本身不是前提。`lean-index.json` 的 `status.markdownChanges` 区分 `statement` 与 `proof` 变化。旧版缺少证明指纹的契约显示 `untracked`；审阅原文及对应声明后运行 `lean capture` 建立基线，不要用 capture 掩盖未审阅的修改。
+
 ## 编号对象
 
 支持的声明形式：
@@ -198,7 +228,10 @@ npm run workspace -- serve
 - 仅在需要时加载的命题类 recall；
 - 全书定义查找与当前页符号表；
 - 命题、引理、定理、推论和带 hash 补充注释旁的页内依赖标记；
+- 可切换并在本机记忆的源码块起始行号；
 - 源文件改动后的实时刷新。
+
+工具栏的行号按钮在正文左侧显示每个可定位源码块的起始行。它用于从渲染结果回到 Markdown 位置，不把视觉换行伪装成源码行，也不改变正文排版；默认关闭，选择只保存在当前浏览器。
 
 依赖标记只读取显式 `@h-...` 关系。圆点上方的短线表示该陈述或证明显式引用了 formal 对象（可为小节、定义或命题）；下方纵线表示后续依赖对象依赖它，分叉表示多个直接下游。主线命题使用常规颜色；带 hash 的、可证明的补充注释使用低强调度的注释颜色。灰色是没有下游对象的终点，蓝色表示被直接引用，绿色分叉表示既有显式前提也被后续对象引用。悬停可查看引用数与传递影响范围；这些是结构信号，不等同于数学重要性。权威依赖图包含命题/引理/定理/推论之间的边，也包含带 hash 补充注释的入边、出边；普通 `注（...）` 不进入图，也没有标记。
 
@@ -271,6 +304,87 @@ codex plugin add math-workspace@personal
 发布版本同样可以从安装包根目录添加 marketplace。插件调用 `open` 打开当前项目或某个项目相对 Markdown 页面；`read_marks` 返回当前标记的轻量源码定位，`lookup_formal_object`、`inspect_dependencies`、`lookup_knowledge`、`inspect_lean_alignment`、`read_symbol_audit` 与 `verify` 提供按需的窄范围上下文。符号审计接口只读取用户已经运行的缓存结果，不会静默调用模型；没有可用项目时会打开 Math Workspace 的本机项目启动台。
 
 MCP 与 Math Workspace 一样只绑定 `127.0.0.1`，不写入书稿或 `.math-workspace/` 产物。
+
+## 学术留档
+
+学术留档把原稿、签名材料及版本关系保存在项目内的 `.math-archive/`。它独立于可重建的 Reader 索引，也独立于文档的“草稿 / 修订 / 稳定”标签。只有显式 `archive sign` 或 Reader 中的“认证并签署”会发起新签名；查看、转换、导入、核验和准备快照均不签署，也不修改正文、提交 Git 或发布作品。
+
+新项目先声明稳定作品 ID、文件范围和签署身份：
+
+```bash
+math-workspace archive init --work-id my-book --title "My Book" --path book --identity author@example.com --issuer https://accounts.google.com
+math-workspace archive prepare --label "September draft"
+math-workspace archive sign --prepared <返回的完整摘要>
+math-workspace archive verify
+```
+
+`--path` 可重复，默认递归采集范围内的 `.md` 文件；`--extension`、`--depth` 和 `--exclude` 可进一步声明范围。明确指定的单个文件按原字节纳入。目录遍历跳过隐藏目录、Git、依赖及生成输出，拒绝符号链接。Lean 源码或构建材料需要明确纳入范围；签署一份构建记录不等于重新运行证明，也不表示全书已形式化。
+
+准备阶段冻结原始文件字节，记录相对路径、完整 SHA-256、范围、版本名称、签署身份及前驱。后继同时绑定前一份记录和前一份原始 bundle 的摘要；首次通用记录绑定已导入历史的索引摘要。`preparedAt` 和 Git 基础提交仅作定位信息，不替代签名时间。记录按 UTF-8 JSON 编码，键按 UTF-8 字节顺序排序，不留多余空格，末尾一个 LF，数值限于安全整数。
+
+认证完成后再次检查正文集合、范围、身份、前驱及历史对象，再原子更新链头。失败时不覆盖原有有效 bundle；用同一个 `--prepared` 摘要恢复。若进程退出留下本机锁，`archive recover-lock` 仅在记录的本机进程已不存在时释放它。历史记录保持原字节；策略文件可显式编辑，但应保留仍需核验的旧签署身份。
+
+Reader 工具栏的历史图标（提示为“版本记录”）打开时间线，默认显示作品快照，可加入分卷记录，查看原稿、源码、缺失引用、文件差异以及按稳定 ID 找到的历史声明。原稿阅读不套用当前工作区正文或引用目标。界面分别显示签名核验、原稿完整性与当前内容是否被链头覆盖；Lean 状态仍由原有 Lean 功能解释。某个对象在现有材料中的最早出现不是原创性或优先权裁定。
+
+### OET 格式转换与兼容
+
+内置适配器支持 `oet.legacy-signatures/v1` 和 `oet.sign-record/v1`。它读取原始索引、MANIFEST、bundle 和内容对象，不重签旧记录，不改变旧时间，也不为独立旧签名补造前驱。三种原清单哈希均须匹配；未找到的原稿继续列为缺口。OET/IDFS 的 Git 历史搜集和临时清单恢复仍由 OET 工具负责，通用导入器验证转换结果。
+
+在包含 OET 作品目录的仓库中执行：
+
+```bash
+math-workspace archive sources
+math-workspace archive convert --format oet --from the-operator-evolution-theory/.signatures --out oet-archive.json
+math-workspace archive import-oet --from the-operator-evolution-theory/.signatures --initialize
+```
+
+`convert` 输出标准交换文件及建议的项目策略。`import-oet --initialize` 采用该作品声明的范围和身份，并执行完整验签；已有策略不同时拒绝覆盖。Reader 的导入流程先展示这些范围和身份，待用户明确执行后才写入。旧 OET 工具继续维护原格式；之后产生的新旧记录可再次转换、导入。新通用签署不依赖逐卷 MANIFEST bundle，直接签署已声明范围内的原稿快照。
+
+### 格式接口与验证材料
+
+`archive formats` 列出支持的证据格式。转换器交换格式为 `math-workspace.archive-exchange/v1`：
+
+- `workId`：稳定作品 ID；
+- `records[]`：`format`、原始 `payload` 摘要、原始 `bundle` 摘要及可选 `metadata`；
+- `objects`：完整 SHA-256 到原始字节 base64 的映射。
+
+转换器不提供可信的“已验签”结论。导入器逐对象验哈希，由对应 `ArchiveFormat.project` 从原签名载荷解析文件范围和关系，再调用 Cosign 核验签名、身份、透明日志及时间材料。新格式需要增加明确的格式校验适配器，不能把任意旧载荷换成新的 JSON 后沿用原签名。项目配置不会自动执行外部转换程序。可复用的类型和本地接口随 `out/cli/archive.js` 提供，命令入口与 Reader 使用相同实现。
+
+```bash
+math-workspace archive export --out evidence.json
+math-workspace archive import --from evidence.json
+math-workspace archive history --formal-id h-0123456789abcdef
+math-workspace archive show --record <记录 ID> --file book/01.md
+math-workspace archive compare --left <记录 ID> --right <记录 ID>
+math-workspace archive verify --expected-head <独立保存的链头摘要>
+```
+
+导出材料包含原稿和原始证据，可在另一项目副本中按所选择的信任策略独立核验。导入保留原记录及原关系，接收项目后续首次签署通过导入索引接续这些材料；不会把导入时间视为历史签署时间。只有提供独立保存的链头才能检查是否回退，单独验证一段历史不能证明它是完整的最新历史。没有对外发布动作；导出包含私人原稿，是否分享由作者决定。
+
+运行签署或密码学核验需要可用的 `cosign` 与 `openssl`。默认采用本地 Sigstore TrustedRoot 缓存，或者 Cosign 自身的信任根获取流程；`--trusted-root` 或 `MATH_WORKSPACE_SIGSTORE_TRUSTED_ROOT` 可指定可信根文件。机器路径不进入签署记录。
+
+MCP `read_archives` 以 `list`、`history`、`source` 提供分页只读查询。先读归档原稿，再解释历史结论；未经本次核验的材料明确标为 `unchecked`。
+
+## Codex 文件链接定位
+
+Codex Desktop 支持用户级自定义文件处理器。安装 Math Workspace 处理器后，Codex 回复中的 Markdown 文件链接可以从“Open in / 打开方式”菜单交给 Reader：
+
+```bash
+math-workspace codex-handler install
+```
+
+安装命令只维护 `~/.codex/config.toml` 中带有 Math Workspace 起止注释的一小段配置，不覆盖其他 Codex 设置。重启 Codex Desktop 后，在文件链接的打开菜单中选择 Math Workspace；也可以把它保存为当前项目的首选处理器。Codex 会传递绝对文件路径以及可用的行列位置。
+
+如果对应项目的 Reader 页面已经打开，处理器会复用本机服务并让现有页面原位跳转；如果服务存在但没有页面连接，则打开精确的 `path + line` URL；如果服务尚未启动，则先启动一个本地 Reader。目标文件必须是已初始化 Math Workspace 项目内的 Markdown 文件。
+
+检查或移除这项用户级集成：
+
+```bash
+math-workspace codex-handler status
+math-workspace codex-handler remove
+```
+
+这项能力只接管文件定位，不改变 Codex 生成的链接格式，也不把 Math Workspace 变成第二套编辑器或对话界面。
 
 ## AI 工作流接入
 
@@ -399,11 +513,11 @@ npm run workspace -- lean build [--project <key>]
 npm run workspace -- lean dependencies
 ```
 
-`scan` 重建索引，`coverage` 打印锚点报告，`verify` 在锚点无法解析、源码根不可读或 docstring 后没有受支持的具名声明时失败。`capture` 把当前正文类型、标题、内容与锚定声明签名作为显式审阅基线；基线后的正文或声明改动会显示为漂移。`build` 在每个已配置项目根执行 `lake build [target]` 并记录结果；任何源码变动都会使旧构建结果过期。
+`scan` 重建索引，`coverage` 打印锚点报告，`verify` 在锚点无法解析、源码根不可读或 docstring 后没有受支持的具名声明时失败。`capture` 把当前正文类型、标题、题面、相关提示/证明/解答与锚定声明签名作为显式审阅基线；基线后的正文或声明改动会显示为漂移。`build` 在每个已配置项目根执行 `lake build [target]` 并记录结果；任何源码变动都会使旧构建结果过期。
 
 `dependencies` 通过 Lean elaborator 读取锚定声明的直接类型与证明值引用，并只与正文中显式、严格的 `@h-...` 边比较。Markdown-only 边是需要核对的候选；Lean-only 边通常是实现细节或复用支撑，仅作为补充上下文。两者都不自动构成数学冲突，也不证明语义等价。
 
-Reader 在命题正文与关系图节点上用轻量 `L` 表示存在一个或多个 Lean 声明锚点。点击正文中的 `L` 可查看锚定声明、正文/声明契约、最近构建和依赖比对状态。这个标记不声称完整形式化或证明覆盖；覆盖数字只统计配置的 `coverageTypes`，不能替代范围声明。
+Reader 在命题正文与关系图节点上用轻量 `L` 表示存在一个或多个 Lean 声明锚点。点击正文中的 `L` 可查看锚定声明、正文/声明契约、最近构建和依赖比对状态。这个标记不声称完整形式化或证明覆盖；覆盖以配置的 `coverageTypes` 为基础，并始终保留已锚定习题；数字不能替代范围声明。
 
 ## 项目结构
 
@@ -464,7 +578,7 @@ multi-volume-book/
         "anchorPrefix": "Book anchor:"
       }
     ],
-    "coverageTypes": ["theorem", "lemma", "prop", "cor", "remark"]
+    "coverageTypes": ["theorem", "lemma", "prop", "cor", "remark", "exercise"]
   },
   "render": {
     "pageHeadingStyle": "label-title"

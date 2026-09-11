@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 
-import type { LabelData } from '@math-workspace/core';
+import { associatedProofContent, type LabelData } from '@math-workspace/core';
 import type { LeanIndex } from './lean-index';
 import { leanDependencyInputFingerprint, readLeanDependencyArtifact, type LeanDependencyState } from './lean-dependencies';
 
@@ -21,6 +21,7 @@ export interface LeanProjectSourceState {
 
 export interface LeanAnchorStatus {
     contract: LeanContractState;
+    markdownChanges?: Array<'statement' | 'proof'>;
     build: LeanBuildState;
     dependencies: LeanDependencyState;
 }
@@ -34,6 +35,7 @@ export interface LeanWorkspaceStatusSummary {
 
 export interface LeanContractRecord {
     formalFingerprint: string;
+    proofFingerprint?: string;
     declarationFingerprint: string;
 }
 
@@ -69,8 +71,7 @@ function normalizeContractContent(value: string): string {
     return String(value || '')
         .normalize('NFKC')
         .replace(/<!--[\s\S]*?-->/g, ' ')
-        .replace(/```[\s\S]*?```/g, ' ')
-        .replace(/#(?:h-[0-9a-f]{16}|tmp-[A-Za-z0-9_-]+)/gi, '#id')
+        .replace(/#(?:h-[0-9a-f]{16,32}|tmp-[A-Za-z0-9_-]+)/gi, '#id')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -139,6 +140,7 @@ export function captureLeanContracts(index: LeanIndex, labels: Record<string, La
         if (!label) continue;
         anchors[id] = {
             formalFingerprint: formalFingerprint(label),
+            proofFingerprint: fingerprint(normalizeContractContent(associatedProofContent(label, labels))),
             declarationFingerprint: declarationFingerprint(index, id)
         };
     }
@@ -190,9 +192,11 @@ export async function applyLeanWorkspaceStatus(workspaceRoot: string, index: Lea
     for (const [id, anchor] of Object.entries(index.anchors)) {
         const label = labels[id];
         const baseline = contracts?.anchors?.[id];
-        const markdownChanged = !!baseline && !!label && baseline.formalFingerprint !== formalFingerprint(label);
+        const statementChanged = !!baseline && !!label && baseline.formalFingerprint !== formalFingerprint(label);
+        const proofChanged = !!baseline?.proofFingerprint && !!label && baseline.proofFingerprint !== fingerprint(normalizeContractContent(associatedProofContent(label, labels)));
+        const markdownChanged = statementChanged || proofChanged;
         const declarationChanged = !!baseline && baseline.declarationFingerprint !== declarationFingerprint(index, id);
-        const contract: LeanContractState = !baseline
+        const contract: LeanContractState = !baseline || baseline.proofFingerprint === undefined
             ? 'untracked'
             : markdownChanged && declarationChanged
                 ? 'drifted'
@@ -220,7 +224,8 @@ export async function applyLeanWorkspaceStatus(workspaceRoot: string, index: Lea
                     : comparison?.leanOnly.length
                         ? 'supplemental'
                     : 'matched';
-        anchor.status = { contract, build: buildState, dependencies: dependencyState };
+        anchor.status = { contract, build: buildState, dependencies: dependencyState,
+            ...(markdownChanged ? { markdownChanges: [...(statementChanged ? ['statement' as const] : []), ...(proofChanged ? ['proof' as const] : [])] } : {}) };
         contractsSummary[contract]++;
         buildsSummary[buildState]++;
         dependenciesSummary[dependencyState]++;

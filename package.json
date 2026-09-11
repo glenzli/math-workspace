@@ -18,6 +18,7 @@
   "files": [
     "out/",
     "docs/",
+    "media/plugin/",
     "skills/",
     "vasm-catalog/",
     "README.md",

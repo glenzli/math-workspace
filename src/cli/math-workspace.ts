@@ -5,6 +5,9 @@ import * as crypto from 'node:crypto';
 
 import {
     DEFAULT_CONFIG,
+    FORMAL_KIND_POLICIES,
+    FORMAL_TYPE_PATTERN,
+    stripSolutionAssociation,
     HASH_ID_RE,
     TMP_ID_RE,
     buildReaderIndex,
@@ -43,6 +46,8 @@ import { findMathWorkspaceRoot } from '../project-root';
 import { renderLeanReport, scanLeanWorkspace } from '../lean/lean-index';
 import { buildLeanWorkspace, captureLeanContracts, writeLeanContracts } from '../lean/lean-state';
 import { collectLeanDependencies } from '../lean/lean-dependencies';
+import { runCodexFileHandler } from '../codex/file-handler';
+import { runArchiveCli } from '../archive/cli';
 
 let ROOT = process.cwd();
 let CACHE_DIR = path.join(ROOT, '.math-workspace');
@@ -838,7 +843,8 @@ function compileFormalMarkerLine(line, state) {
     }
 
     const replacement = displayMarkerDeclaration(marker, state);
-    return line.replace(marker.markerText, replacement);
+    const compiled = line.replace(marker.markerText, replacement);
+    return marker.type === 'solution' ? stripSolutionAssociation(compiled) : compiled;
 }
 
 function rewriteFormalRefsForExport(text, sourceFilePath, state) {
@@ -1773,85 +1779,11 @@ function numberedReferenceAliases(def, config) {
     if (!number) return [];
 
     const aliases = [];
-    const zhTypes = {
-        theorem: '定理',
-        lemma: '引理',
-        prop: '命题',
-        cor: '推论',
-        remark: '注',
-        example: '例',
-        section: '节',
-        equation: '公式',
-        figure: '图',
-        table: '表'
-    };
-    const enTypes = {
-        theorem: 'Theorem',
-        lemma: 'Lemma',
-        prop: 'Proposition',
-        cor: 'Corollary',
-        remark: 'Remark',
-        example: 'Example',
-        section: 'Section',
-        equation: 'Equation',
-        figure: 'Figure',
-        table: 'Table'
-    };
-    const shortEnTypes = {
-        theorem: 'Thm.',
-        lemma: 'Lem.',
-        prop: 'Prop.',
-        cor: 'Cor.',
-        remark: 'Rem.',
-        example: 'Ex.',
-        section: 'Sec.',
-        equation: 'Eq.',
-        figure: 'Fig.',
-        table: 'Tab.'
-    };
-    const shortEnNoDotTypes = {
-        theorem: 'Thm',
-        lemma: 'Lem',
-        prop: 'Prop',
-        cor: 'Cor',
-        remark: 'Rem',
-        example: 'Ex',
-        section: 'Sec',
-        equation: 'Eq',
-        figure: 'Fig',
-        table: 'Tab'
-    };
-
-    const zh = zhTypes[def.type];
-    if (zh) {
-        aliases.push(`${zh}${number}`, `${zh} ${number}`);
-        if (def.type === 'equation') {
-            aliases.push(`${zh}(${number})`, `${zh} (${number})`, `${zh}（${number}）`);
-        }
-    }
-
-    const en = enTypes[def.type];
-    if (en) {
-        aliases.push(`${en} ${number}`);
-        if (def.type === 'equation') {
-            aliases.push(`${en} (${number})`);
-        }
-    }
-
-    const shortEn = shortEnTypes[def.type];
-    if (shortEn) {
-        aliases.push(`${shortEn} ${number}`);
-        if (def.type === 'equation') {
-            aliases.push(`${shortEn} (${number})`);
-        }
-    }
-
-    const shortEnNoDot = shortEnNoDotTypes[def.type];
-    if (shortEnNoDot) {
-        aliases.push(`${shortEnNoDot} ${number}`);
-        if (def.type === 'equation') {
-            aliases.push(`${shortEnNoDot} (${number})`);
-        }
+    if (def.type === 'solution') return []; // Multiple answers share one exercise number.
+    const names = def.type === 'section' ? ['节', 'Section', 'Sec.', 'Sec'] : FORMAL_KIND_POLICIES[def.type]?.aliases || [];
+    for (const name of names) {
+        aliases.push(`${name}${number}`, `${name} ${number}`);
+        if (def.type === 'equation') aliases.push(`${name}(${number})`, `${name} (${number})`, `${name}（${number}）`);
     }
 
     if (def.type === 'section') {
@@ -1873,7 +1805,7 @@ function numberedReferenceAliases(def, config) {
 
     // Honor custom dictionary labels as aliases when they are numbered.
     const configuredName = typeName(config, def.type);
-    if (configuredName && configuredName !== zh && configuredName !== en) {
+    if (configuredName) {
         aliases.push(`${configuredName}${number}`, `${configuredName} ${number}`);
         if (def.type === 'equation') {
             aliases.push(`${configuredName}(${number})`, `${configuredName} (${number})`, `${configuredName}（${number}）`);
@@ -1898,10 +1830,8 @@ function buildTextReferenceIndex(definitions, config) {
 function normalizeTextReferenceAlias(value) {
     const alias = value.trim().replace(/．/g, '.').replace(/\s+/g, ' ');
     const number = `(${TEXT_REF_NUMBER.replace(/．/g, '.')})`;
-    const cjk = alias.match(new RegExp(`^(定理|引理|命题|推论|注|例|公式|方程|图|表)\\s*[（(]?${number}[）)]?$`));
-    if (cjk) return `${cjk[1]}${normalizeReferenceNumber(cjk[2])}`;
-    const enTyped = alias.match(new RegExp(`^(Theorem|Lemma|Proposition|Corollary|Remark|Example|Equation|Formula|Figure|Table|Thm\\.?|Lem\\.?|Prop\\.?|Cor\\.?|Rem\\.?|Ex\\.?|Eq\\.?|Fig\\.?|Tab\\.?)\\s*[（(]?${number}[）)]?$`, 'i'));
-    if (enTyped) return `${enTyped[1].replace(/\s+/g, ' ')} ${normalizeReferenceNumber(enTyped[2])}`;
+    const typed = alias.match(new RegExp(`^(${FORMAL_TYPE_PATTERN})\\s*[（(]?${number}[）)]?$`, 'i'));
+    if (typed) return `${typed[1].toLowerCase()} ${normalizeReferenceNumber(typed[2])}`;
     const cjkSectionPrefix = alias.match(new RegExp(`^第\\s*${number}\\s*节$`));
     if (cjkSectionPrefix) return `§${normalizeReferenceNumber(cjkSectionPrefix[1])}`;
     const cjkSectionName = alias.match(new RegExp(`^(?:节|小节|章节)\\s*${number}$`));
@@ -1914,52 +1844,9 @@ function normalizeTextReferenceAlias(value) {
 }
 
 function makeTextReferencePattern(config) {
-    const configuredTypes = ['prop', 'lemma', 'theorem', 'cor', 'section', 'equation', 'figure', 'table']
-        .map(type => typeName(config, type))
-        .filter(name => name && name !== '§');
-    const typeWords = unique([
-        '定理',
-        '引理',
-        '命题',
-        '推论',
-        '公式',
-        '方程',
-        '图',
-        '表',
-        '节',
-        'Theorem',
-        'Lemma',
-        'Proposition',
-        'Corollary',
-        'Remark',
-        'Example',
-        'Equation',
-        'Formula',
-        'Figure',
-        'Table',
-        'Section',
-        'Thm\\.',
-        'Thm',
-        'Lem\\.',
-        'Lem',
-        'Prop\\.',
-        'Prop',
-        'Cor\\.',
-        'Cor',
-        'Rem\\.',
-        'Rem',
-        'Ex\\.',
-        'Ex',
-        'Eq\\.',
-        'Eq',
-        'Fig\\.',
-        'Fig',
-        'Tab\\.',
-        'Tab',
-        'Sec\\.',
-        'Sec',
-        ...configuredTypes.map(escapeRegExp)
-    ]).join('|');
+    const configuredTypes = Object.keys(FORMAL_KIND_POLICIES).filter(kind => kind !== 'solution')
+        .map(type => typeName(config, type)).filter(name => name && name !== '§');
+    const typeWords = [FORMAL_TYPE_PATTERN, 'Section', 'Sec\\.?', '节', ...configuredTypes.map(escapeRegExp)].join('|');
     const typedNumber = `[（(]?(?:${TEXT_REF_NUMBER})[）)]?`;
     const alternatives = [
         `(?:(?:${typeWords})\\s*${typedNumber})`,
@@ -1968,7 +1855,7 @@ function makeTextReferencePattern(config) {
         `(?:第\\s*(?:${TEXT_REF_NUMBER})\\s*节)`,
         `(?:(?:小节|章节)\\s*(?:${TEXT_REF_NUMBER}))`
     ].filter(Boolean).join('|');
-    return new RegExp(`(^|[^@#A-Za-z0-9_])(${alternatives})(?![A-Za-z0-9_-]|\\.\\d)`, 'g');
+    return new RegExp(`(^|[^@#A-Za-z0-9_])(${alternatives})(?![A-Za-z0-9_-]|\\.\\d)`, 'gi');
 }
 
 function describeTextReference(alias, byAlias) {
@@ -2287,7 +2174,7 @@ function hasBareReferenceCue(before, after) {
 }
 
 function isTypedNumberContext(before, after) {
-    return /(定理|引理|命题|推论|注|例|公式|方程|图|表|Theorem|Lemma|Proposition|Corollary|Remark|Example|Equation|Formula|Figure|Table|Thm\.?|Lem\.?|Prop\.?|Cor\.?|Rem\.?|Ex\.?|Eq\.?|Fig\.?|Tab\.?|§|第)\s*$/i.test(before)
+    return new RegExp(`(${FORMAL_TYPE_PATTERN}|§|第)\\s*$`, 'i').test(before)
         || /^\s*节/.test(after);
 }
 
@@ -2825,6 +2712,8 @@ Advanced commands:
   npm run workspace -- lean build [--project <key>]
   npm run workspace -- serve [project-dir] [--port 0]  # no project-dir opens the local launcher
   npm run workspace -- mcp [--root project-dir] [--port 0]
+  math-workspace archive help
+  math-workspace codex-handler install|remove|status
   npm run workspace -- export-md <file-or-dir> [...] --out <compiled.md>
   npm run workspace -- export-md-split <file-or-dir> [...] --out <dir>
   npm run workspace -- export-pdf <file-or-dir> [...] --out <book.pdf> [--no-toc] [--toc-depth N] [--margin 2.5cm]
@@ -2865,6 +2754,8 @@ Advanced commands:
   npm run workspace -- lean build [--project <key>]
   npm run workspace -- serve [project-dir] [--port 0]  # no project-dir opens the local launcher
   npm run workspace -- mcp [--root project-dir] [--port 0]
+  math-workspace archive help
+  math-workspace codex-handler install|remove|status
   npm run workspace -- export-md <file-or-dir> [...] --out <compiled.md>
   npm run workspace -- export-md-split <file-or-dir> [...] --out <dir>
   npm run workspace -- export-pdf <file-or-dir> [...] --out <book.pdf> [--md-out compiled.md] [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title "Title"] [--subtitle "Subtitle"] [--author Name] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--date "Revised 2026-06-26"] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title "AI Statement"] [--front-matter-toc] [--show-version-on-cover] [--documentclass ctexbook] [--title-page] [--no-title-page] [--cover-style simple] [--title-size 32pt] [--subtitle-size 18pt] [--toc-page-break] [--no-toc-page-break] [-V key:value] [--variable key:value] [--keep-md]
@@ -2956,7 +2847,7 @@ async function runReader(options: { rootPath?: string; port: number }): Promise<
     } else {
         console.log('No project is bound. Choose a recent project or select a project directory in Math Workspace.');
     }
-    console.log('Math Workspace is local-only and read-only. Source changes refresh the current view automatically.');
+    console.log('Math Workspace runs locally. Source changes refresh the view; archive actions require an explicit request.');
 
     let closing = false;
     const close = async () => {
@@ -3048,6 +2939,10 @@ async function main() {
         await serveReader(args);
     } else if (command === 'mcp') {
         await serveReaderMcp(args);
+    } else if (command === 'archive') {
+        await runArchiveCli(args);
+    } else if (command === 'codex-handler') {
+        await runCodexFileHandler(args, PACKAGE_ROOT, path.join(__dirname, 'math-workspace.js'));
     } else if (command === 'verify') {
         await verify(args);
     } else if (command === 'finalize') {

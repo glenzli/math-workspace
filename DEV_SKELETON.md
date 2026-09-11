@@ -18,6 +18,8 @@
 
 - `packages/core/src/**`: shared formal scanner, numbering, references, lookup, dependency analysis, and conservative project-knowledge discovery.
 - `src/cli/**`, `src/reader/**`: primary CLI and localhost Reader implementation.
+- `src/archive/**`: project-owned academic evidence, immutable snapshots, Sigstore verification, format conversion, and archive publication; Reader and MCP projections use this owner.
+- `src/codex/**`: explicit Codex Desktop file-handler setup and source-location handoff into the Reader.
 - `legacy/vscode-extension/**`: frozen historical VS Code implementation, excluded from builds, release artifacts, and product support.
 - `tests/math-workspace.test.mjs`: regression coverage for formal syntax, migration, export, graph, and audit behavior.
 - `examples/**`: fixtures and sample writing projects used to exercise behavior.
@@ -36,7 +38,8 @@
 - Formal IDs are stable implementation data; reader-facing numbers are rendered or exported from metadata.
 - Definitions and symbols are lookup aids, not theorem-numbering objects.
 - Project knowledge analysis may derive context from deliberately named concept/glossary, notation, and summary pages, but must not infer terms or symbol meanings from ordinary prose or rewrite source content.
-- The local Reader is opt-in for workspaces with `.math-workspace/config.json`, binds only to loopback, and is source read-only; it may write explicit document lifecycle metadata only after a deliberate local user action. Ordinary Markdown preview should stay ordinary elsewhere.
+- The local Reader is opt-in for workspaces with `.math-workspace/config.json`, binds only to loopback, and is source read-only; it may write explicit document lifecycle metadata and academic archive records only after a deliberate local user action. Academic archive actions must preserve source files and retain original signed bytes; signature, source completeness, source drift, and proof status are separate facts. Ordinary Markdown preview should stay ordinary elsewhere.
+- Codex Desktop integration is user-installed and may change only its clearly delimited block in the user configuration. File-location handoff must remain local, token-protected, and limited to prepared Markdown projects.
 - Release bundles ship runtime artifacts, a self-contained Codex plugin, public docs, generated AI artifacts under `skills/`, and VASMC catalog exports for lockable reuse. npm packages ship the CLI/Reader runtime, public docs, generated AI artifacts, and catalog exports; the public plugin is distributed as a copied marketplace snapshot.
 - Built Reader and CLI runtimes should remain dependency-free after bundling.
 - Dependency changes require caution and explicit verification because supply-chain risk matters for editor tooling.
@@ -56,6 +59,7 @@
 - Writing-rule details: start with `skills-src/editor.vasm.md` and generated `skills/editor.md`.
 - CLI or syntax behavior changes: start with `src/cli/math-workspace.ts`, `packages/core/src/formal-core.ts`, and `tests/math-workspace.test.mjs`.
 - Reader behavior changes: start with `src/reader/server.ts`, `src/reader/web/**`, `packages/core/src/formal-core.ts`, and the relevant tests or examples.
+- Codex file-link routing: start with `src/codex/file-handler.ts`, `src/reader/location-bridge.ts`, `src/reader/server.ts`, and the Reader source-location handling in `src/reader/web/main.ts`.
 - Release boundary changes: start with `package.json`, `src/cli/release.ts`, `scripts/publish-release.js`, `tests/publish-release.test.mjs`, `docs-src/docs/release.vasm.md`, generated `docs/release.md`, and the `release:prepare` / `release:check` gates.
 
 ## Refresh Triggers

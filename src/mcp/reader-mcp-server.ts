@@ -122,6 +122,15 @@ export async function runReaderMcpServer(options: ReaderMcpServerOptions = {}): 
         }
     });
 
+    server.registerTool('read_archives', {
+        title: 'Read academic archives',
+        description: 'Read original academic archive records, source lines, or stable-ID history. Report signature verification separately from source completeness and mathematical proof status; a recorded occurrence does not establish original authorship.',
+        inputSchema: { projectRoot, action: z.enum(['list', 'source', 'history']).optional(), record: z.string().optional(),
+            filePath: z.string().optional(), formalId: z.string().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(50).optional() },
+        outputSchema: { result: z.object({}).passthrough() },
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+    }, async ({ projectRoot: root, ...input }) => query(() => queries.archiveRead(input, root), 'Academic archive source evidence.'));
+
     server.registerTool('lookup_formal_object', {
         title: 'Look up a formal Markdown object',
         description: 'Return one formal object’s stable location, source excerpt, and Lean-anchor summary by h- id.',

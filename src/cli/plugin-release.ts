@@ -42,10 +42,7 @@ async function readJson(filePath: string): Promise<any> {
 async function copyPluginRuntime(rootPath: string, pluginRoot: string): Promise<void> {
     const runtimeRoot = path.join(pluginRoot, 'out');
     await cleanDir(runtimeRoot);
-    await copyFile(
-        path.join(rootPath, 'out', 'cli', 'math-workspace.js'),
-        path.join(runtimeRoot, 'cli', 'math-workspace.js')
-    );
+    await copyDir(path.join(rootPath, 'out', 'cli'), path.join(runtimeRoot, 'cli'));
     await copyDir(path.join(rootPath, 'out', 'reader'), path.join(runtimeRoot, 'reader'));
     await nodeFs.promises.chmod(path.join(pluginRoot, 'scripts', 'launch_math_workspace_mcp'), 0o755);
 }

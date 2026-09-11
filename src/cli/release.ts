@@ -316,8 +316,7 @@ async function main(): Promise<void> {
     await writeText(path.join(releaseRoot, 'INSTALL.md'), releaseInstallDoc(pkg));
 
     await writeJson(path.join(cliRoot, 'package.json'), makeCliPackageJson(pkg));
-    await copyFile(path.join(ROOT, 'out', 'cli', 'math-workspace.js'), path.join(cliRoot, 'out', 'cli', 'math-workspace.js'));
-    await copyFile(path.join(ROOT, 'out', 'cli', 'release.js'), path.join(cliRoot, 'out', 'cli', 'release.js'));
+    await copyDir(path.join(ROOT, 'out', 'cli'), path.join(cliRoot, 'out', 'cli'));
     await copyDir(path.join(ROOT, 'out', 'reader'), path.join(cliRoot, 'out', 'reader'));
     await copyDir(path.join(ROOT, 'skills'), path.join(cliRoot, 'skills'));
     await copyDir(catalogRoot, path.join(cliRoot, 'vasm-catalog'));

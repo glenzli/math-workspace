@@ -21,13 +21,19 @@
 - 从真实前提证明结论；不得把目标结论藏进宽泛的 certificate 字段后原样返回。
 - 只有确属外部背景定理的内容才可建立具名 certificate 边界，并在 docstring 中说明其外部角色。
 
+## 习题化的对齐边界
+
+- 既有命题转成习题时保留原稳定 hash 与 Lean 声明；习题在默认覆盖类型内，已有锚点的习题即便被自定义类型列表遗漏也不能从分母消失。
+- 题目和解答分别使用 ID，解答通过 `解答 #tmp-sol（对应 @tmp-ex）：...` 关联。关联本身不是证明前提；工具会把关联解答中的显式严格引用计入原题的依赖比对，并保留题解来源。默认覆盖不重复计数解答。
+- 题面或相关提示、证明、解答变化会触发契约复核；`status.markdownChanges` 区分 `statement` 和 `proof`。旧基线缺少证明指纹时显示 `untracked`，须审阅后再 capture。
+
 ## 验证闭环
 
 1. 先运行覆盖改动文件或模块的最小 Lean 检查。
 2. imports、共享定义或入口变化时，扩大到配置的项目 target。
 3. 改动锚点后运行 `math-workspace lean verify`，修复未知 hash、不可读取的源码根与未跟随具名声明的锚点。
 4. 用 `math-workspace lean coverage` 查看当前锚点队列；未锚定对象是审阅候选，不等于必须立即形式化。
-5. 在确认本轮正文与声明对应关系后运行 `math-workspace lean capture`；它记录正文对象和声明签名的审阅基线。后续改动出现 contract drift 时，先核对语义再重新 capture，不能把 capture 当作修复手段。
+5. 在确认本轮正文与声明对应关系后运行 `math-workspace lean capture`；它分别记录题面、关联提示/证明/跨文件解答和声明签名的审阅基线。后续改动出现 contract drift 时，先核对语义再重新 capture，不能把 capture 当作修复手段。
 6. 运行 `math-workspace lean build [--project <key>]` 记录配置项目的 `lake build` 结果。源码改动会使该结果过期，故在最终验收前应重新构建。
 7. 运行 `math-workspace lean dependencies` 比较正文的显式严格引用与 Lean elaborator 读取到的直接声明引用。Markdown-only 是需核对候选；Lean-only 通常是实现细节或复用支撑，不能单独当作冲突。不得用文件名、声明顺序、显示编号或共现关系替代此比较。
 8. 声明里程碑完成前，运行目标项目规定的全量 Lean build、占位符扫描与命名检查。

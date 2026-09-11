@@ -1,4 +1,6 @@
+import { revealExerciseTarget } from './reader-exercises';
 import './styles.css';
+import { ReaderArchive } from './reader-archive';
 import {
     createFormalRenderer,
     renderFormalDocument,
@@ -44,6 +46,7 @@ interface DefinitionSummary {
 }
 
 interface ReaderState {
+    projectId?: string;
     available?: boolean;
     revision: number;
     rootName: string;
@@ -165,6 +168,8 @@ const words = {
         forward: '前进',
         showNavigation: '展开书籍导航',
         hideNavigation: '折叠书籍导航',
+        showSourceLineNumbers: '显示源码行号',
+        hideSourceLineNumbers: '隐藏源码行号',
         search: '筛选章节',
         searchDefinitions: '搜索定义',
         searchAllDefinitions: '全书检索',
@@ -338,6 +343,8 @@ const words = {
         forward: 'Forward',
         showNavigation: 'Show book navigation',
         hideNavigation: 'Hide book navigation',
+        showSourceLineNumbers: 'Show source line numbers',
+        hideSourceLineNumbers: 'Hide source line numbers',
         search: 'Filter pages',
         searchDefinitions: 'Search definitions',
         searchAllDefinitions: 'Search all definitions',
@@ -438,6 +445,22 @@ function escapeHtml(value: string): string {
 
 function queryPath(): string {
     return new URLSearchParams(window.location.search).get('path') || '';
+}
+
+interface ReaderSourceLocation {
+    line: number;
+    column?: number;
+}
+
+function querySourceLocation(): ReaderSourceLocation | undefined {
+    const query = new URLSearchParams(window.location.search);
+    const line = Number(query.get('line'));
+    const column = Number(query.get('column'));
+    if (!Number.isInteger(line) || line < 1) return undefined;
+    return {
+        line,
+        ...(Number.isInteger(column) && column >= 1 ? { column } : {})
+    };
 }
 
 function queryView(): string {
@@ -560,6 +583,7 @@ const MAX_FONT_SIZE = 24;
 const FONT_SIZE_STORAGE_KEY = 'math-workspace.font-size';
 const DRAFT_COLLECTIONS_STORAGE_KEY = 'math-workspace.collapsed-draft-collections';
 const NAVIGATION_STORAGE_KEY = 'math-workspace.navigation-collapsed';
+const SOURCE_LINE_NUMBERS_STORAGE_KEY = 'math-workspace.source-line-numbers';
 
 function storedFontSize(): number {
     try {
@@ -577,6 +601,15 @@ function storedNavigationCollapsed(): boolean {
         return false;
     }
 }
+
+function storedSourceLineNumbers(): boolean {
+    try {
+        return localStorage.getItem(SOURCE_LINE_NUMBERS_STORAGE_KEY) === 'true';
+    } catch (_error) {
+        return false;
+    }
+}
+
 function storedCollapsedDraftCollections(): Set<string> {
     try {
         const value = JSON.parse(localStorage.getItem(DRAFT_COLLECTIONS_STORAGE_KEY) || '[]');
@@ -602,6 +635,8 @@ class ReaderApplication {
     private pageRequestId = 0;
     private fontSize = storedFontSize();
     private navigationCollapsed = storedNavigationCollapsed();
+    private sourceLineNumbersVisible = storedSourceLineNumbers();
+    private sourceLineNumberAlignmentFrame = 0;
     private main!: HTMLElement;
     private collapsedDraftCollections = storedCollapsedDraftCollections();
     private article!: HTMLElement;
@@ -614,6 +649,7 @@ class ReaderApplication {
     private toolbarPanel!: ReaderToolbarPanel;
     private tooltip!: ReaderTooltip;
     private propositionReview!: ReaderPropositionReview;
+    private archive!: ReaderArchive;
     private symbolAudit!: ReaderSymbolAudit;
     private symbolAuditReport!: ReaderSymbolAuditReportView;
     private symbolAuditReportOpen = false;
@@ -642,7 +678,7 @@ class ReaderApplication {
         }
         this.selectedPagePaths = [initialPath];
         this.selectionAnchorPath = initialPath;
-        await this.openPage(initialPath, 'replace');
+        await this.openPage(initialPath, 'replace', '', false, querySourceLocation());
         if (initialView === 'symbol-audit-report') await this.openSymbolAuditReport('replace');
     }
 
@@ -658,7 +694,7 @@ class ReaderApplication {
             '<button id="reader-navigation-toggle" class="icon-button reader-navigation-toggle" type="button"></button>',
             '<div class="reader-history"><button id="reader-back" class="icon-button" aria-label="Back"></button><button id="reader-forward" class="icon-button" aria-label="Forward"></button></div>',
             '<div id="reader-page-title" class="reader-page-title"></div>',
-            '<div class="reader-tools"><button class="tool-button" data-panel="contents" aria-label="Contents"></button><button class="tool-button" data-panel="definitions" aria-label="Definitions"></button><button class="tool-button" data-panel="symbols" aria-label="Symbols"></button><button class="tool-button" data-panel="propositions" aria-label="Proposition review"></button><button class="tool-button" data-panel="symbol-audit" aria-label="Symbol audit"></button><button id="reader-discussion-tools" class="tool-button" type="button" aria-label="Marking tools"></button></div>',
+            '<div class="reader-tools"><button id="reader-archive" class="tool-button" type="button" aria-label="Version history" aria-haspopup="dialog"></button><button class="tool-button" data-panel="contents" aria-label="Contents"></button><button class="tool-button" data-panel="definitions" aria-label="Definitions"></button><button class="tool-button" data-panel="symbols" aria-label="Symbols"></button><button class="tool-button" data-panel="propositions" aria-label="Proposition review"></button><button class="tool-button" data-panel="symbol-audit" aria-label="Symbol audit"></button><button id="reader-discussion-tools" class="tool-button" type="button" aria-label="Marking tools"></button><button id="reader-line-numbers" class="tool-button" type="button" aria-label="Show source line numbers" aria-pressed="false"></button></div>',
             '<div class="reader-type-control"><button type="button" class="type-size-button" data-font-size="-1" aria-label="Decrease text size">A−</button><output id="reader-font-size" aria-live="polite">' + this.fontSize + 'px</output><button type="button" class="type-size-button" data-font-size="1" aria-label="Increase text size">A+</button></div>',
             '<span id="reader-live" class="reader-live" aria-live="polite"></span>',
             '</header><article id="reader-article" class="reader-article"></article></main>',
@@ -672,6 +708,8 @@ class ReaderApplication {
         this.tooltip.bind(this.root);
         this.installToolbarIcons();
         this.updateFontSize(this.fontSize, false);
+        this.setSourceLineNumbers(this.sourceLineNumbersVisible, false);
+        window.addEventListener('resize', () => this.queueSourceLineNumberAlignment());
         (this.root.querySelector('#reader-page-filter') as HTMLInputElement).addEventListener('input', event => {
             this.renderNavigation((event.target as HTMLInputElement).value);
         });
@@ -739,6 +777,8 @@ class ReaderApplication {
                 };
             }
         });
+        this.archive = new ReaderArchive(() => ({ language: this.state?.language || 'zh', currentPath: this.currentPath, token: this.state?.requestToken || '', project: this.state?.projectId || '' }));
+        this.root.querySelector('#reader-archive')?.addEventListener('click', () => void this.archive.open());
         this.toolbarPanel = new ReaderToolbarPanel(() => ({ close: this.dictionary().close }));
         this.propositionReview = new ReaderPropositionReview({
             labels: () => {
@@ -843,6 +883,7 @@ class ReaderApplication {
 
     private applyState(state: ReaderState): void {
         this.state = state;
+        this.archive?.contextChanged();
         const dictionary = this.dictionary();
         (this.root.querySelector('#reader-page-filter') as HTMLInputElement).placeholder = dictionary.search;
         this.renderNavigation((this.root.querySelector('#reader-page-filter') as HTMLInputElement).value);
@@ -940,8 +981,16 @@ class ReaderApplication {
         increase.dataset.tooltip = dictionary.increaseFont;
         increase.setAttribute('aria-label', dictionary.increaseFont);
         this.updateNavigationToggle();
+        this.updateSourceLineNumberToggle();
         this.updateDiscussionMarkControls();
         this.updateDraftToolbarAvailability();
+        const archiveButton = this.root.querySelector<HTMLButtonElement>('#reader-archive');
+        if (archiveButton) {
+            const label = this.state?.language === 'en' ? 'Version history' : '版本记录';
+            replaceReaderButtonIcon(archiveButton, 'history');
+            archiveButton.setAttribute('aria-label', label);
+            archiveButton.dataset.tooltip = label;
+        }
     }
 
     private updateDraftToolbarAvailability(): void {
@@ -972,6 +1021,7 @@ class ReaderApplication {
         const increase = this.root.querySelector<HTMLButtonElement>('[data-font-size="1"]');
         if (decrease) decrease.disabled = this.fontSize <= MIN_FONT_SIZE;
         if (increase) increase.disabled = this.fontSize >= MAX_FONT_SIZE;
+        this.queueSourceLineNumberAlignment();
         if (!persist) return;
         try {
             localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(this.fontSize));
@@ -984,6 +1034,7 @@ class ReaderApplication {
         this.navigationCollapsed = value;
         this.root.querySelector('.reader-shell')?.classList.toggle('is-navigation-collapsed', value);
         this.updateNavigationToggle();
+        this.queueSourceLineNumberAlignment();
         if (!persist) return;
         try {
             localStorage.setItem(NAVIGATION_STORAGE_KEY, String(value));
@@ -1000,6 +1051,50 @@ class ReaderApplication {
         toggle.setAttribute('aria-label', label);
         toggle.setAttribute('aria-expanded', String(!this.navigationCollapsed));
         replaceReaderButtonIcon(toggle, this.navigationCollapsed ? 'navigation-open' : 'navigation-close', 18);
+    }
+
+    private setSourceLineNumbers(value: boolean, persist = true): void {
+        this.sourceLineNumbersVisible = value;
+        this.article.classList.toggle('shows-source-line-numbers', value);
+        this.updateSourceLineNumberToggle();
+        this.queueSourceLineNumberAlignment();
+        if (!persist) return;
+        try {
+            localStorage.setItem(SOURCE_LINE_NUMBERS_STORAGE_KEY, String(value));
+        } catch (_error) {
+            // The in-memory view remains usable when browser storage is unavailable.
+        }
+    }
+
+    private updateSourceLineNumberToggle(): void {
+        const toggle = this.root.querySelector<HTMLButtonElement>('#reader-line-numbers');
+        if (!toggle) return;
+        const label = this.sourceLineNumbersVisible
+            ? this.dictionary().hideSourceLineNumbers
+            : this.dictionary().showSourceLineNumbers;
+        toggle.dataset.tooltip = label;
+        toggle.setAttribute('aria-label', label);
+        toggle.setAttribute('aria-pressed', String(this.sourceLineNumbersVisible));
+        toggle.classList.toggle('is-active', this.sourceLineNumbersVisible);
+    }
+
+    private queueSourceLineNumberAlignment(): void {
+        if (!this.sourceLineNumbersVisible) return;
+        if (this.sourceLineNumberAlignmentFrame) cancelAnimationFrame(this.sourceLineNumberAlignmentFrame);
+        this.sourceLineNumberAlignmentFrame = requestAnimationFrame(() => {
+            this.sourceLineNumberAlignmentFrame = 0;
+            const articleBounds = this.article.getBoundingClientRect();
+            const articleStyles = getComputedStyle(this.article);
+            const contentLeft = articleBounds.left + (Number.parseFloat(articleStyles.paddingLeft) || 0);
+            this.article.querySelectorAll<HTMLElement>('.reader-source-line-entry').forEach(element => {
+                const indent = Math.max(0, element.getBoundingClientRect().left - contentLeft);
+                const elementLineHeight = Number.parseFloat(getComputedStyle(element).lineHeight) || 0;
+                const markerLineHeight = Number.parseFloat(getComputedStyle(element, '::before').lineHeight) || 0;
+                const firstLineTop = Math.max(0, (elementLineHeight - markerLineHeight) / 2);
+                element.style.setProperty('--reader-source-line-indent', indent.toFixed(2) + 'px');
+                element.style.setProperty('--reader-source-line-top', firstLineTop.toFixed(2) + 'px');
+            });
+        });
     }
 
     private setDraftCollectionCollapsed(collectionId: string, value: boolean): void {
@@ -1188,7 +1283,8 @@ class ReaderApplication {
             ['[data-panel="symbols"]', 'sigma'],
             ['[data-panel="propositions"]', 'propositions'],
             ['[data-panel="symbol-audit"]', 'scan'],
-            ['#reader-discussion-tools', 'marker']
+            ['#reader-discussion-tools', 'marker'],
+            ['#reader-line-numbers', 'line-numbers']
         ];
         icons.forEach(([selector, icon]) => {
             const button = this.root.querySelector<HTMLElement>(selector);
@@ -1283,7 +1379,13 @@ class ReaderApplication {
         });
     }
 
-    private async openPage(filePath: string, historyMode: 'push' | 'replace' | 'pop', anchor = '', preserveScroll = false): Promise<void> {
+    private async openPage(
+        filePath: string,
+        historyMode: 'push' | 'replace' | 'pop',
+        anchor = '',
+        preserveScroll = false,
+        sourceLocation?: ReaderSourceLocation
+    ): Promise<void> {
         if (!this.state || !this.state.pages.some(page => page.filePath === filePath)) return;
         if (!this.selectedPagePaths.includes(filePath)) {
             this.selectedPagePaths = [filePath];
@@ -1303,12 +1405,14 @@ class ReaderApplication {
             if (requestId !== this.pageRequestId) return;
             this.page = page;
             this.currentPath = filePath;
-            this.updateHistory(filePath, effectiveHistoryMode);
+            this.updateHistory(filePath, effectiveHistoryMode, sourceLocation);
             this.renderNavigation((this.root.querySelector('#reader-page-filter') as HTMLInputElement).value);
             this.renderArticle();
             this.updateDraftToolbarAvailability();
             if (anchor) {
                 window.requestAnimationFrame(() => this.scrollToAnchor(anchor));
+            } else if (sourceLocation) {
+                window.requestAnimationFrame(() => this.scrollToSourceLocation(sourceLocation));
             } else {
                 this.main.scrollTop = preserveScroll ? previousScroll : 0;
             }
@@ -1317,12 +1421,18 @@ class ReaderApplication {
         }
     }
 
-    private updateHistory(filePath: string, mode: 'push' | 'replace' | 'pop'): void {
+    private updateHistory(filePath: string, mode: 'push' | 'replace' | 'pop', sourceLocation?: ReaderSourceLocation): void {
+        const query = new URLSearchParams({ path: filePath });
+        if (sourceLocation) {
+            query.set('line', String(sourceLocation.line));
+            if (sourceLocation.column) query.set('column', String(sourceLocation.column));
+        }
+        const url = `?${query.toString()}`;
         if (mode === 'push' && this.historyPaths[this.historyIndex] !== filePath) {
             this.historyPaths = this.historyPaths.slice(0, this.historyIndex + 1);
             this.historyPaths.push(filePath);
             this.historyIndex = this.historyPaths.length - 1;
-            history.pushState({ filePath }, '', '?path=' + encodeURIComponent(filePath));
+            history.pushState({ filePath }, '', url);
         } else if (mode === 'replace') {
             if (this.historyIndex < 0) {
                 this.historyPaths = [filePath];
@@ -1330,7 +1440,7 @@ class ReaderApplication {
             } else {
                 this.historyPaths[this.historyIndex] = filePath;
             }
-            history.replaceState({ filePath }, '', '?path=' + encodeURIComponent(filePath));
+            history.replaceState({ filePath }, '', url);
         }
         (this.root.querySelector('#reader-back') as HTMLButtonElement).disabled = this.historyIndex <= 0;
         (this.root.querySelector('#reader-forward') as HTMLButtonElement).disabled = this.historyIndex >= this.historyPaths.length - 1;
@@ -1361,6 +1471,10 @@ class ReaderApplication {
         });
         this.page.formulas = rendered.formulas;
         this.article.innerHTML = rendered.html;
+        this.article.querySelectorAll<HTMLElement>('[data-source-start-line]').forEach(element => {
+            if (!element.parentElement?.closest('[data-source-start-line]')) element.classList.add('reader-source-line-entry');
+        });
+        this.queueSourceLineNumberAlignment();
         this.article.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((heading, index) => {
             if (!heading.id) heading.id = 'reader-heading-' + index;
         });
@@ -1396,7 +1510,29 @@ class ReaderApplication {
     private scrollToAnchor(anchor: string): void {
         const id = anchor.replace(/^#/, '');
         const target = this.article.querySelector('#' + CSS.escape(id));
+        revealExerciseTarget(target);
         target?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+
+    private scrollToSourceLocation(location: ReaderSourceLocation): void {
+        const candidates = Array.from(this.article.querySelectorAll<HTMLElement>('[data-source-line], [data-source-start-line]'));
+        const exact = this.article.querySelector<HTMLElement>(`[data-source-line="${location.line}"]`);
+        const containing = candidates.find(element => {
+            const start = Number(element.dataset.sourceStartLine || element.dataset.sourceLine);
+            const end = Number(element.dataset.sourceEndLine || element.dataset.sourceLine);
+            return Number.isFinite(start) && Number.isFinite(end) && start <= location.line && location.line <= end;
+        });
+        const nearest = candidates
+            .map(element => ({ element, line: Number(element.dataset.sourceLine || element.dataset.sourceStartLine) }))
+            .filter(item => Number.isFinite(item.line))
+            .sort((left, right) => Math.abs(left.line - location.line) - Math.abs(right.line - location.line))[0]?.element;
+        const target = exact || containing || nearest;
+        if (!target) return;
+        this.article.querySelectorAll('.is-source-location-target').forEach(element => element.classList.remove('is-source-location-target'));
+        revealExerciseTarget(target);
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        target.classList.add('is-source-location-target');
+        window.setTimeout(() => target.classList.remove('is-source-location-target'), 1800);
     }
 
     private navigateHistory(direction: -1 | 1): void {
@@ -1948,6 +2084,11 @@ class ReaderApplication {
                 this.discussionMarks.toggleTools();
                 return;
             }
+            const sourceLineNumbers = target.closest<HTMLElement>('#reader-line-numbers');
+            if (sourceLineNumbers) {
+                this.setSourceLineNumbers(!this.sourceLineNumbersVisible);
+                return;
+            }
             const navigationToggle = target.closest<HTMLElement>('#reader-navigation-toggle');
             if (navigationToggle) {
                 this.setNavigationCollapsed(!this.navigationCollapsed);
@@ -2018,6 +2159,20 @@ class ReaderApplication {
                 if (next && (next !== current || reloadCurrent)) return this.openPage(next, 'pop', '', next === current);
                 return undefined;
             }).catch(error => console.error('[math-workspace] Math Workspace update failed', error));
+        });
+        this.realtimeEvents.addEventListener('reader-navigate', event => {
+            try {
+                const location = JSON.parse((event as MessageEvent<string>).data);
+                if (typeof location?.filePath !== 'string') return;
+                const line = Number(location.line);
+                const column = Number(location.column);
+                const sourceLocation = Number.isInteger(line) && line >= 1
+                    ? { line, ...(Number.isInteger(column) && column >= 1 ? { column } : {}) }
+                    : undefined;
+                void this.openPage(location.filePath, 'push', '', false, sourceLocation);
+            } catch (error) {
+                console.error('[math-workspace] Reader location event was invalid', error);
+            }
         });
     }
 }

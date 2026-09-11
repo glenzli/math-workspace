@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { testExercises } from './exercises.test.mjs';
+import { testArchives, testArchiveReaderApi } from './archives.test.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,6 +34,23 @@ function runCliWithEnv(cwd, args, env) {
         cwd,
         encoding: 'utf8',
         env: { ...process.env, ...env }
+    });
+}
+
+function runCliAsync(cwd, args, env = {}) {
+    return new Promise((resolve, reject) => {
+        const child = spawn('node', [cliPath, ...args], {
+            cwd,
+            encoding: 'utf8',
+            env: { ...process.env, ...env },
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', chunk => { stdout += String(chunk); });
+        child.stderr.on('data', chunk => { stderr += String(chunk); });
+        child.once('error', reject);
+        child.once('close', status => resolve({ status, stdout, stderr }));
     });
 }
 
@@ -1404,6 +1423,28 @@ async function testLeanBuildAndDependencyComparison() {
     assert.equal(index.anchors['h-2222222222222222'].status.dependencies, 'matched');
     assert.ok(graph.comparisons['h-2222222222222222'].shared.includes('h-1111111111111111'));
     assert.match(await read(root, '.math-workspace/lean-dependency-report.md'), /direct references in elaborated Lean declaration types and proof values/);
+
+    // A formalized result keeps its declaration and ID when its proof moves to an answer appendix.
+    const original = await read(root, 'book1/01-foundations.md');
+    await fs.writeFile(path.join(root, 'book1/01-foundations.md'), original
+        .replace('命题 #h-2222222222222222', '习题 #h-2222222222222222')
+        .replace('Proof: by @h-1111111111111111.', ''));
+    await fs.writeFile(path.join(root, 'book1/appendix-h-solutions.md'), [
+        '# Appendix H', '',
+        '解答 #h-3333333333333333（对应 @h-2222222222222222）：由 @h-1111111111111111 成立。', ''
+    ].join('\n'));
+    const moved = runCli(root, ['lean', 'dependencies']);
+    assert.equal(moved.status, 0, combinedOutput(moved));
+    const movedGraph = JSON.parse(await read(root, '.math-workspace/lean-dependency-graph.json'));
+    const movedIndex = JSON.parse(await read(root, '.math-workspace/lean-index.json'));
+    assert.deepEqual(movedGraph.comparisons['h-2222222222222222'].shared, ['h-1111111111111111']);
+    assert.deepEqual(movedGraph.unmappedMarkdownEdges, []);
+    assert.equal(movedGraph.solutionDependencies[0].solution, 'h-3333333333333333');
+    assert.equal(movedIndex.summary.eligibleFormalObjects, 2);
+    assert.equal(movedIndex.summary.anchoredEligibleFormalObjects, 2);
+    assert.equal(movedIndex.anchors['h-2222222222222222'].status.contract, 'markdown-drifted');
+    assert.equal(movedIndex.anchors['h-2222222222222222'].status.build, 'passed');
+
 }
 
 async function testReaderServer() {
@@ -1656,6 +1697,7 @@ async function testReaderMcpServer() {
             'lookup_formal_object',
             'lookup_knowledge',
             'open',
+            'read_archives',
             'read_marks',
             'read_symbol_audit',
             'verify'
@@ -2134,6 +2176,116 @@ async function testReaderLauncher() {
     }
 }
 
+async function testCodexFileHandler() {
+    const root = await makeWorkspace('codex-file-handler');
+    const chapterPath = path.join(root, 'book1', '01-foundations.md');
+    await fs.writeFile(chapterPath, [
+        '# Foundations',
+        '',
+        'A source location handled by Math Workspace.',
+        ''
+    ].join('\n'));
+    assert.equal(runCli(root, ['prepare']).status, 0);
+
+    const codexHome = path.join(root, 'codex-home');
+    await fs.mkdir(codexHome, { recursive: true });
+    await fs.writeFile(path.join(codexHome, 'config.toml'), 'model = "fixture"\n');
+    const handlerEnv = { CODEX_HOME: codexHome };
+    const installed = runCliWithEnv(root, ['codex-handler', 'install'], handlerEnv);
+    assert.equal(installed.status, 0, combinedOutput(installed));
+    const installedAgain = runCliWithEnv(root, ['codex-handler', 'install'], handlerEnv);
+    assert.equal(installedAgain.status, 0, combinedOutput(installedAgain));
+    const config = await fs.readFile(path.join(codexHome, 'config.toml'), 'utf8');
+    assert.match(config, /\[desktop\.custom_file_handlers\.math_workspace\]/);
+    assert.match(config, /input = "json_argument"/);
+    assert.match(config, /icon = "data:image\/png;base64,/);
+    assert.match(config, /"codex-handler", "open"/);
+    assert.equal((config.match(/Math Workspace file handler >>>/g) || []).length, 1);
+    assert.match(config, /model = "fixture"/);
+    assert.doesNotMatch(config, /math-workspace-plugin-icon-source\.png/);
+    const status = runCliWithEnv(root, ['codex-handler', 'status'], handlerEnv);
+    assert.match(status.stdout, /is installed/);
+
+    const locationRegistryPath = path.join(root, 'reader-instances.json');
+    const readerEnv = {
+        MATH_WORKSPACE_STATE: path.join(root, 'reader-projects.json'),
+        MATH_WORKSPACE_READER_INSTANCES: locationRegistryPath,
+        MATH_WORKSPACE_NO_OPEN: '1'
+    };
+    const reader = await startReader(root, { env: readerEnv });
+    const eventAbort = new AbortController();
+    try {
+        const registry = JSON.parse(await fs.readFile(locationRegistryPath, 'utf8'));
+        assert.equal(registry.instances.length, 1);
+        assert.equal(registry.instances[0].rootPath, await fs.realpath(root));
+        assert.equal(registry.instances[0].url, reader.url);
+        assert.equal(typeof registry.instances[0].token, 'string');
+
+        const unauthorized = await fetch(reader.url + '/api/open-location', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ filePath: 'book1/01-foundations.md', line: 3 })
+        });
+        assert.equal(unauthorized.status, 403);
+
+        const events = await fetch(reader.url + '/api/events', { signal: eventAbort.signal });
+        const eventReader = events.body.getReader();
+        const decoder = new TextDecoder();
+        let eventText = '';
+        while (!eventText.includes('event: workspace-update')) {
+            const chunk = await eventReader.read();
+            if (chunk.done) break;
+            eventText += decoder.decode(chunk.value, { stream: true });
+        }
+
+        const opened = await runCliAsync(root, ['codex-handler', 'open', JSON.stringify({
+            target: 'custom:math_workspace',
+            path: chapterPath,
+            location: { line: 3, column: 2 }
+        })], readerEnv);
+        assert.equal(opened.status, 0, combinedOutput(opened));
+        assert.match(opened.stdout, /Located in Math Workspace/);
+
+        while (!eventText.includes('event: reader-navigate')) {
+            const chunk = await eventReader.read();
+            if (chunk.done) break;
+            eventText += decoder.decode(chunk.value, { stream: true });
+        }
+        assert.match(eventText, /event: reader-navigate/);
+        assert.match(eventText, /"filePath":"book1\/01-foundations\.md"/);
+        assert.match(eventText, /"line":3/);
+        assert.match(eventText, /"column":2/);
+    } finally {
+        eventAbort.abort();
+        await stopReader(reader.child);
+    }
+
+    await waitFor(async () => {
+        const registry = JSON.parse(await fs.readFile(locationRegistryPath, 'utf8'));
+        return registry.instances.length === 0;
+    });
+    const reopened = await runCliAsync(root, ['codex-handler', 'open', JSON.stringify({
+        target: 'custom:math_workspace',
+        path: chapterPath,
+        location: { line: 3 }
+    })], readerEnv);
+    assert.equal(reopened.status, 0, combinedOutput(reopened));
+    assert.match(reopened.stdout, /Opened Math Workspace/);
+    const restartedRegistry = JSON.parse(await fs.readFile(locationRegistryPath, 'utf8'));
+    assert.equal(restartedRegistry.instances.length, 1);
+    assert.match(restartedRegistry.instances[0].url, /^http:\/\/127\.0\.0\.1:\d+$/);
+    try {
+        const restartedState = await fetch(restartedRegistry.instances[0].url + '/api/state');
+        assert.equal(restartedState.status, 200);
+    } finally {
+        process.kill(restartedRegistry.instances[0].pid, 'SIGTERM');
+    }
+
+    const removed = runCliWithEnv(root, ['codex-handler', 'remove'], handlerEnv);
+    assert.equal(removed.status, 0, combinedOutput(removed));
+    assert.doesNotMatch(await fs.readFile(path.join(codexHome, 'config.toml'), 'utf8'), /Math Workspace file handler/);
+}
+
 async function testPageHeadingFormatting() {
     const { formatPageHeading, formatPageHeadingPrefix } = formalCore();
     const chapter = {
@@ -2539,6 +2691,9 @@ async function testAuditReport() {
 }
 
 const tests = [
+    ['academic archive evidence and compatibility', testArchives],
+    ['academic archive Reader API', testArchiveReaderApi],
+    ['native exercises, Reader, export and proof drift', testExercises],
     ['finalize cross-file safety', testFinalizeCrossFileSafety],
     ['finish finalizes and verifies', testFinishFinalizesAndVerifies],
     ['migrate-ids scoped safety', testMigrateIdsScopedSafety],
@@ -2574,6 +2729,7 @@ const tests = [
     ['simplified CLI flow', testSimplifiedCliFlow],
     ['local Reader discussion marks', testReaderDiscussionMarks],
     ['local Reader launcher', testReaderLauncher],
+    ['Codex file handler', testCodexFileHandler],
     ['page heading formatting', testPageHeadingFormatting],
     ['export-md compiles formal syntax', testExportMarkdownCompilesFormalSyntax],
     ['export-md-split compiles files', testExportMarkdownSplitCompilesFiles],

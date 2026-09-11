@@ -1,3 +1,4 @@
+import { isPedagogicalKind } from '../../packages/core/src/formal-kinds';
 export interface ReaderDependencyGraph {
     nodes?: Array<{
         id?: string;
@@ -12,6 +13,7 @@ export interface ReaderDependencyGraph {
         to?: string;
         where?: 'statement' | 'proof' | 'body';
         relation?: 'strict' | 'explanatory';
+        layer?: 'mathematical' | 'pedagogical';
     }>;
     ambientReferences?: Array<{
         to?: string;
@@ -21,7 +23,7 @@ export interface ReaderDependencyGraph {
 }
 
 export type ReaderDependencyMarkerRole = 'leaf' | 'referenced' | 'bridge';
-export type ReaderDependencyMarkerKind = 'theorem-like' | 'remark';
+export type ReaderDependencyMarkerKind = 'theorem-like' | 'remark' | 'pedagogical';
 
 export interface ReaderDependencyNeighbor {
     id: string;
@@ -87,7 +89,7 @@ function dependencyNeighbor(node: NonNullable<ReaderDependencyGraph['nodes']>[nu
         display: node.display || node.title || node.id,
         title: node.title || '',
         filePath: node.path,
-        kind: node.kind === 'remark' ? 'remark' : 'theorem-like'
+        kind: isPedagogicalKind(node.kind || '') ? 'pedagogical' : node.kind === 'remark' ? 'remark' : 'theorem-like'
     };
 }
 
@@ -102,7 +104,7 @@ function dependencyNeighbors(
 }
 
 function isStrictDependencyEdge(edge: NonNullable<ReaderDependencyGraph['edges']>[number]): boolean {
-    return edge.relation !== 'explanatory' && (edge.where === 'statement' || edge.where === 'proof');
+    return edge.layer !== 'pedagogical' && edge.relation !== 'explanatory' && (edge.where === 'statement' || edge.where === 'proof');
 }
 
 /**
@@ -166,7 +168,7 @@ export function projectReaderDependencyMarkers(
             impactCount: reachableCount(dependents, node.id),
             ambientReferenceCount: ambientReferenceCounts.get(node.id) || 0,
             role: directDependents === 0 ? 'leaf' : directDependencies > 0 ? 'bridge' : 'referenced',
-            kind: node.kind === 'remark' ? 'remark' : 'theorem-like',
+            kind: isPedagogicalKind(node.kind || '') ? 'pedagogical' : node.kind === 'remark' ? 'remark' : 'theorem-like',
             ...(leanDeclarationCount > 0 ? { leanDeclarationCount } : {}),
             ...(leanDeclarationCount > 0 && leanStatus ? { leanStatus } : {}),
             upstream: dependencyNeighbors(dependencies.get(node.id), nodeById),

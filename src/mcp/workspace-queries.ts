@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import * as path from 'node:path';
 import { buildRuntimeDefinitions, formatDisplayNumber, type LabelData, type PageData } from '@math-workspace/core';
 import { findMathWorkspaceRoot } from '../project-root';
+import { AcademicArchive } from '../archive/store';
 import { readLeanBuild } from '../lean/lean-state';
 import { readLeanDependencyArtifact } from '../lean/lean-dependencies';
 import { ReaderDiscussionMarkStore } from '../reader/discussion-marks';
@@ -144,6 +145,33 @@ export class WorkspaceQueries {
         };
     }
 
+    async archiveRead(input: { action?: string; record?: string; filePath?: string; formalId?: string; offset?: number; limit?: number }, projectRoot?: string): Promise<Record<string, unknown>> {
+        const root = await this.resolveRoot(projectRoot);
+        const archive = await AcademicArchive.open(root);
+        const offset = Math.max(0, Math.min(10000, Number(input.offset) || 0));
+        const limit = Math.max(1, Math.min(50, Number(input.limit) || 20));
+        if (input.action === 'source') {
+            const source = await archive.source(input.record || '', input.filePath || '');
+            const lines = source.content.split('\n');
+            const content = lines.slice(offset, offset + limit).join('\n');
+            return { recordId: source.record.id, filePath: source.filePath, sha256: source.sha256,
+                firstLine: offset + 1, totalLines: lines.length, content: content.slice(0, MAX_SOURCE_CHARS),
+                truncated: content.length > MAX_SOURCE_CHARS || offset + limit < lines.length, source: source.source,
+                signatureVerification: source.record.verification };
+        }
+        if (input.action === 'history') {
+            const history = await archive.history({ filePath: input.filePath, formalId: input.formalId });
+            return { ...history, matches: history.matches.slice(offset, offset + limit), total: history.matches.length, offset };
+        }
+        if (!await archive.configured()) return { configured: false };
+        const state = await archive.records();
+        return { configured: true, head: state.head, total: state.records.length, offset,
+            records: state.records.slice(offset, offset + limit).map(row => ({ id: row.id, label: row.label, kind: row.kind,
+                files: Object.keys(row.files).length, loggedAt: row.loggedAt, identity: row.identity,
+                contentComplete: row.contentComplete, missing: row.missing, verification: row.verification })),
+            interpretation: 'Read archived source before making historical claims. Signature status is separate from source completeness and proof status.' };
+    }
+
     async formalLookup(idInput: string, projectRoot?: string): Promise<Record<string, unknown>> {
         const rootPath = await this.resolveRoot(projectRoot);
         const snapshot = await loadWorkspaceSnapshot(rootPath);
@@ -161,6 +189,10 @@ export class WorkspaceQueries {
             line: (label.startLine || 0) + 1,
             endLine: label.endLine,
             pageTitle: page?.title,
+            solutionOf: label.solutionOf,
+            solutions: label.solutions,
+            supportRanges: label.supportRanges,
+            bodyEndLine: label.bodyEndLine === undefined ? undefined : label.bodyEndLine + 1,
             content: content.value,
             truncated: content.truncated,
             leanAnchor: snapshot.state.leanIndex?.anchors?.[id] ? {
@@ -207,12 +239,14 @@ export class WorkspaceQueries {
             direction,
             depth: boundedDepth,
             strictOnly: true,
+            pedagogicalLinks: (graph.pedagogicalLinks || []).filter((link: any) => selectedIds.has(link.exercise) || selectedIds.has(link.solution)),
             truncated: selectedIds.size >= MAX_GRAPH_NODES,
             nodes: Array.from(selectedIds).map(candidate => nodeSummary(snapshot, candidate)),
             edges: Array.from(selectedEdges.values()).map((edge: any) => ({
                 from: edge.from,
                 to: edge.to,
                 where: edge.where,
+                layer: edge.layer || 'mathematical',
                 filePath: edge.path,
                 line: edge.line
             }))

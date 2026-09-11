@@ -1,3 +1,5 @@
+import { FORMAL_TYPE_PATTERN, stripSolutionAssociation } from '../../../packages/core/src/formal-kinds';
+import { installExerciseRules } from './reader-exercises';
 import MarkdownIt from 'markdown-it';
 import katex from 'katex';
 import type { ReaderDependencyMarker } from '../dependency-markers';
@@ -8,6 +10,12 @@ export interface ReaderLabel {
     filePath: string;
     display?: string;
     number?: number;
+    startLine?: number;
+    endLine?: number;
+    bodyEndLine?: number;
+    solutionOf?: string;
+    solutions?: string[];
+    supportRanges?: Array<{ kind: 'hint' | 'solution'; startLine: number; endLine: number }>;
 }
 
 export interface ReaderPage {
@@ -335,11 +343,11 @@ function formatPageReference(page: ReaderPage, mode: 'title' | 'full' | undefine
 function prepareFormalMarkdown(source: string, options: FormalRenderOptions): { source: string; markersByLine: Record<number, string> } {
     const markersByLine: Record<number, string> = {};
     const pagesByPath = new Map(options.pages.map(page => [page.filePath, page]));
-    const markerTypeRe = /(命题|引理|定理|推论|注|例|公式|图|表|Proposition|Lemma|Theorem|Corollary|Remark|Example|Equation|Figure|Table)\s*$/i;
+    const markerTypeRe = new RegExp(`(${FORMAL_TYPE_PATTERN})\\s*$`, 'i');
     let inFence = false;
 
     const lines = source.split(/\r?\n/).map((line, lineIndex) => {
-        if (/^\s*(\\x60{3}|~~~)/.test(line)) {
+        if (/^\s*(```|~~~)/.test(line)) {
             inFence = !inFence;
             return line;
         }
@@ -371,7 +379,8 @@ function prepareFormalMarkdown(source: string, options: FormalRenderOptions): { 
             return before + (label.display || label.title) + line.slice(idMatch.index + idMatch[0].length);
         }
         const display = label.display || (typeMatch[1] + ' ' + String(label.number || '')).trim();
-        return before.slice(0, typeMatch.index) + display + line.slice(idMatch.index + idMatch[0].length);
+        const suffix = line.slice(idMatch.index + idMatch[0].length);
+        return before.slice(0, typeMatch.index) + display + (label.type === 'solution' ? stripSolutionAssociation(suffix) : suffix);
     });
 
     return { source: lines.join('\n'), markersByLine };
@@ -413,7 +422,7 @@ function installFormalRules(markdown: MarkdownIt): void {
             : meta.mode === 'full' && label.title
                 ? (label.display || label.type) + (env.readerLanguage === 'en' ? ': ' : '：') + label.title
                 : label.display || label.title;
-        return '<a class="formal-reference" data-formal-ref="' + escapeHtml(meta.id) + '" data-reader-page="' + escapeHtml(label.filePath) + '" href="' + makePageHref(label.filePath, meta.id) + '">' + escapeHtml(display) + '</a>';
+        return '<a class="formal-reference"' + (label.type === 'solution' ? '' : ' data-formal-ref="' + escapeHtml(meta.id) + '"') + ' data-reader-page="' + escapeHtml(label.filePath) + '" href="' + makePageHref(label.filePath, meta.id) + '">' + escapeHtml(display) + '</a>';
     };
     markdown.renderer.rules.formal_page_reference = (tokens: any[], index: number, _options: any, env: any) => {
         const meta = tokens[index].meta;
@@ -444,6 +453,7 @@ function installFormalRules(markdown: MarkdownIt): void {
                     const titleEnd = token.children.findIndex((child: any) => child.type === 'strong_close');
                     token.children.splice(titleEnd >= 0 ? titleEnd + 1 : token.children.length, 0, leanToken);
                 }
+                if (dependencyMarker.kind === 'pedagogical') continue;
                 const markerToken = new token.constructor('html_inline', '', 0);
                 markerToken.content = renderDependencyMarker(markerId, dependencyMarker, state.env.readerLanguage || 'zh');
                 token.children.push(markerToken);
@@ -491,6 +501,7 @@ export function createFormalRenderer(): MarkdownIt {
     const markdown = new MarkdownIt({ html: false, linkify: false, typographer: false });
     installMathRules(markdown);
     installFormalRules(markdown);
+    installExerciseRules(markdown);
     installWorkspaceLinkRule(markdown);
     installWorkspaceAssetRule(markdown);
     return markdown;

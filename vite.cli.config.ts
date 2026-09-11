@@ -19,7 +19,8 @@ export default defineConfig({
         lib: {
             entry: {
                 'math-workspace': 'src/cli/math-workspace.ts',
-                release: 'src/cli/release.ts'
+                release: 'src/cli/release.ts',
+                archive: 'src/archive/index.ts'
             },
             formats: ['cjs'],
             fileName: (_format, entryName) => `${entryName}.js`

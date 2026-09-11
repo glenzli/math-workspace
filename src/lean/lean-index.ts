@@ -2,13 +2,13 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 
-import { toPosix, type LabelData } from '@math-workspace/core';
+import { toPosix, HASH_ID_RE, DEFAULT_LEAN_COVERAGE_TYPES, type LabelData } from '@math-workspace/core';
 import { applyLeanWorkspaceStatus, type LeanAnchorStatus, type LeanProjectSourceState, type LeanWorkspaceStatusSummary } from './lean-state';
 
-const LEAN_ID_RE = /\bh-[0-9a-f]{16}\b/gi;
+const LEAN_ID_RE = /\bh-[0-9a-f]{16,32}\b/gi;
 const LEAN_DECLARATION_RE = /^\s*(?:@\[[^\]]*\]\s*)*(?:(?:private|protected|noncomputable|unsafe|opaque|partial)\s+)*(def|abbrev|theorem|lemma|structure|class|inductive|instance|axiom)\s+([A-Za-z_][A-Za-z0-9_'.]*)/;
 const DEFAULT_ANCHOR_PREFIX = 'Math Workspace anchor:';
-const DEFAULT_COVERAGE_TYPES = ['theorem', 'lemma', 'prop', 'cor', 'remark'];
+const DEFAULT_COVERAGE_TYPES = DEFAULT_LEAN_COVERAGE_TYPES;
 
 export interface LeanProjectConfig {
     key: string;
@@ -348,7 +348,8 @@ export async function scanLeanWorkspace(
         ? config.lean.coverageTypes.filter((value: unknown) => typeof value === 'string')
         : DEFAULT_COVERAGE_TYPES);
     const eligible = projects.length === 0 ? [] : Object.entries(labels)
-        .filter(([id, label]) => /^h-[0-9a-f]{16}$/.test(id) && coverageTypes.has(label.type))
+        .filter(([id, label]) => HASH_ID_RE.test(id) && (coverageTypes.has(label.type)
+            || (label.type === 'exercise' && anchors.has(id))))
         .map(([id, label]) => ({
             id,
             type: label.type,
@@ -413,7 +414,7 @@ export function renderLeanReport(index: LeanIndex): string {
         lines.push(
             '## Review status',
             '',
-            '> `current` means that the captured Markdown contract and anchored Lean declaration signatures are unchanged. It is a drift check, not a semantic-equivalence proof.',
+            '> `current` means that the captured Markdown statement, associated proof/solution content and anchored Lean declaration signatures are unchanged. It is a drift check, not a semantic-equivalence proof.',
             '',
             '| Contract state | Anchors |',
             '| --- | ---: |',

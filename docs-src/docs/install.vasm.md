@@ -142,7 +142,17 @@ codex plugin add math-workspace@personal
 
 接口位于 `math-workspace` MCP 命名空间内，因此工具名不再重复品牌前缀。`read_symbol_audit` 只读取用户已经运行的缓存报告，不会静默调用模型。
 
-## 6. 可选 Lean 对齐
+## 6. 可选 Codex 文件定位
+
+若希望 Codex 回复中的 `Markdown 文件:行号` 链接直接交给 Reader，可以显式安装 Desktop 文件处理器：
+
+```bash
+npm run workspace -- codex-handler install
+```
+
+重启 Codex Desktop 后，从文件链接的“Open in / 打开方式”菜单选择 Math Workspace；按项目保存为首选处理器后，普通点击也会走这条链路。已打开的 Reader 会直接跳转，未启动时则启动本地服务。该命令只维护用户 `~/.codex/config.toml` 中自己的注释块；用 `codex-handler status` 检查，用 `codex-handler remove` 移除。
+
+## 7. 可选 Lean 对齐
 
 只有在正文对象已相对稳定并且 Lean 工程可以独立构建时，才配置 `.math-workspace/config.json` 的 `lean.projects`。最小顺序是：
 
@@ -155,7 +165,7 @@ npm run workspace -- lean build
 
 锚点只表示存在对应声明；覆盖、contract、构建和依赖比较分别提供不同证据，不共同推出“完整形式化”。概念性重写期间可以保留旧 Lean 作为历史实现，而不立即 capture 新基线。
 
-## 7. 日常使用与验收
+## 8. 日常使用与验收
 
 ```bash
 # 完成一章的临时锚点并校验
@@ -176,7 +186,7 @@ npm run workspace -- open
 - 项目特化 skill 保留项目语义，没有把通用规则当作强制流程表演。
 - Codex 能在新任务中看到 Math Workspace plugin，并能读取标记或执行窄范围查询。
 
-## 8. 更新
+## 9. 更新
 
 项目内安装可以按包管理器正常更新，然后重跑只读验证：
 
@@ -188,7 +198,7 @@ npm run workspace -- verify
 
 从源码使用 plugin 时，拉取新版本后先构建并更新 cachebuster，再重新安装 plugin；已经打开的 Codex 任务不会热加载新 manifest、skill 或 MCP 定义，需要新建任务验证。更新通用 skill 后，项目特化 skill 应重新做一次融合审阅，不应被整份覆盖。
 
-## 9. 故障排查
+## 10. 故障排查
 
 - Reader 没有增强功能：确认项目根存在 `.math-workspace/config.json`，重新运行 `init`，或运行 `doctor` 查看项目发现结果。
 - Codex 找不到 MCP：确认安装的是包含 `out/cli` 与 `out/reader` 的发布 plugin，并在安装或更新后新建任务。
