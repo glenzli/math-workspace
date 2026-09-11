@@ -7,8 +7,10 @@ import {
     createElement,
     ChevronUp,
     Copy,
+    Download,
     Eraser,
     GitBranch,
+    GitCompareArrows,
     History,
     ListTree,
     ListOrdered,
@@ -21,7 +23,9 @@ import {
     Plus,
     RefreshCw,
     ScanSearch,
+    Search,
     Sigma,
+    ShieldCheck,
     Star,
     TextCursor,
     Trash2,
@@ -57,6 +61,10 @@ export type ReaderIconName =
     | 'scan'
     | 'star'
     | 'trash'
+    | 'download'
+    | 'compare'
+    | 'search'
+    | 'verify'
     | 'x';
 
 const ICONS: Record<ReaderIconName, IconNode> = {
@@ -87,6 +95,10 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     scan: ScanSearch,
     star: Star,
     trash: Trash2,
+    download: Download,
+    compare: GitCompareArrows,
+    search: Search,
+    verify: ShieldCheck,
     x: X
 };
 
