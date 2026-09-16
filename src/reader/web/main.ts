@@ -1709,25 +1709,42 @@ class ReaderApplication {
     }
 
     private renderContents(container: HTMLElement): void {
-        const headings = Array.from(this.article.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'));
-        if (headings.length === 0) {
-            container.append(this.emptyState(this.dictionary().noContents));
-            return;
-        }
+        // One selector keeps headings and formal objects in document order without duplicates.
+        const targets = Array.from(this.article.querySelectorAll<HTMLElement>(
+            'h1, h2, h3, h4, h5, h6, [id^="formal-"]'
+        ));
         const list = document.createElement('div');
         list.className = 'reader-panel-list reader-outline-list';
-        headings.forEach(heading => {
+        let headingLevel = 1;
+        targets.forEach(target => {
+            const isHeading = /^H[1-6]$/.test(target.tagName);
+            const label = this.page?.labels[target.id.slice('formal-'.length)];
+            if (!isHeading && !label) return;
+            if (isHeading) headingLevel = Number(target.tagName.slice(1));
             const button = document.createElement('button');
             button.type = 'button';
-            button.className = 'reader-outline level-' + heading.tagName.slice(1);
-            button.innerHTML = heading.innerHTML;
+            button.className = 'reader-outline level-' + (isHeading ? headingLevel : Math.min(headingLevel + 1, 6));
+            if (isHeading) {
+                const title = target.cloneNode(true) as HTMLElement;
+                title.querySelectorAll('button').forEach(element => element.remove());
+                title.querySelectorAll('[id]').forEach(element => element.removeAttribute('id'));
+                title.querySelectorAll('a').forEach(element => element.replaceWith(...Array.from(element.childNodes)));
+                button.innerHTML = title.innerHTML;
+            } else {
+                const title = label!.title
+                    ? (this.state.language === 'en' ? ` (${label!.title})` : `（${label!.title}）`)
+                    : '';
+                button.innerHTML = renderFormalInline(this.markdown,
+                    (label!.display || '') + title, this.renderOptions(this.currentPath));
+            }
             button.addEventListener('click', () => {
-                heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                revealExerciseTarget(target);
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 this.toolbarPanel.close();
             });
             list.append(button);
         });
-        container.append(list);
+        container.append(list.childElementCount ? list : this.emptyState(this.dictionary().noContents));
     }
 
     private renderDefinitions(container: HTMLElement): void {
