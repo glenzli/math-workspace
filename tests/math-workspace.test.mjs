@@ -1,3 +1,5 @@
+import { testReaderDefinitions } from './reader-definitions.test.mjs';
+import { testInteractiveFigures } from './interactive-figures.test.mjs';
 import assert from 'node:assert/strict';
 import { testExercises } from './exercises.test.mjs';
 import { testArchives, testArchiveReaderApi } from './archives.test.mjs';
@@ -2501,6 +2503,7 @@ async function testRenderPdfUsesPandocRenderer() {
     assert.doesNotMatch(coverHeader, /%/);
     assert.deepEqual(JSON.parse(await fs.readFile(logPath, 'utf8')), [
         'compiled.md',
+        '--from', 'markdown-implicit_figures',
         '-o',
         'dist/book.pdf',
         '--pdf-engine',
@@ -2691,6 +2694,8 @@ async function testAuditReport() {
 }
 
 const tests = [
+    ['Reader definition titles and navigation targets', testReaderDefinitions],
+    ['interactive figures, isolation and static export', () => testInteractiveFigures({ makeWorkspace, runCli, startReader, stopReader })],
     ['academic archive evidence and compatibility', testArchives],
     ['academic archive Reader API', testArchiveReaderApi],
     ['native exercises, Reader, export and proof drift', testExercises],

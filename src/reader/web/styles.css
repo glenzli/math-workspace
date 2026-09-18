@@ -385,6 +385,8 @@ button { cursor: pointer; }
 .reader-article a:hover { text-decoration: underline; }
 .reader-article .formal-reference { font-weight: 600; }
 .reader-article .formal-anchor { position: relative; scroll-margin-top: 80px; }
+.reader-article .reader-definition { scroll-margin-top: 80px; }
+.reader-definition-label { font-weight: 800; }
 .reader-article .formal-anchor:has(+ p), .reader-article p.formal-anchor { font-weight: 600; }
 .reader-article .formal-anchor.is-proposition-highlighted { border-radius: 3px; background: rgba(57, 129, 191, .14); box-shadow: 0 0 0 4px rgba(57, 129, 191, .12); transition: box-shadow 180ms ease, background-color 180ms ease; }
 .reader-article [data-source-start-line].is-discussion-marked {
@@ -1313,4 +1315,40 @@ button { cursor: pointer; }
     .reader-archive .archive-files button { color: #d5d9dd; }
     .archive-gap { color: #e3ba76 !important; }
     .archive-original { background: #1c1e20; }
+}
+
+
+/* Interactive figures keep the ordinary Markdown image as their print/failure fallback. */
+.reader-interactive-figure { position: relative; display: block; margin: 1.4em 0; }
+.reader-figure-toolbar { position: absolute; top: .35em; right: .35em; z-index: 2; display: flex; justify-content: flex-end; align-items: center; font: inherit; font-size: clamp(12px, .8em, 16px); line-height: 1.3; color: #53616a; }
+.reader-figure-toolbar button { font: inherit; border: 1px solid #c7ced2; border-radius: 4px; padding: .3em .65em; background: rgb(255 255 255 / 94%); color: inherit; cursor: pointer; }
+.reader-figure-toolbar button:hover { background: #edf2f5; }
+.reader-figure-toolbar button:focus-visible { outline: 2px solid #2d6488; outline-offset: 2px; }
+.reader-figure-toolbar [data-figure-status]:empty { display: none; }
+.reader-figure-toolbar [data-figure-status]:not(:empty) { position: absolute; top: calc(100% + .4em); right: 0; width: max-content; max-width: min(26em, 70vw); padding: .4em .6em; border-radius: 4px; background: white; box-shadow: 0 1px 5px #0002; }
+.reader-figure-poster, .reader-figure-stage { display: block; }
+.reader-figure-poster[hidden], .reader-figure-stage[hidden] { display: none; }
+.reader-figure-stage { position: relative; }
+.reader-figure-stage iframe.reader-figure-loading { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
+.reader-figure-stage iframe { display: block; width: 100%; height: 430px; border: 0; }
+.reader-figure-poster img { display: block; width: 100%; }
+@media print {
+    .reader-interactive-figure .reader-figure-toolbar, .reader-interactive-figure .reader-figure-stage { display: none !important; }
+    .reader-interactive-figure .reader-figure-poster { display: block !important; }
+}
+
+
+/* Captions belong to their figure, with a separate title and explanatory text. */
+.reader-article .reader-figure { margin: 1.4em 0 2.5em; break-inside: avoid; }
+.reader-article .reader-figure > p { margin: 0; }
+.reader-article .reader-figure .reader-interactive-figure { margin: 0; }
+.reader-article .reader-figure-caption { margin: .7em auto 2.5em; width: 92%; font-size: .92em; line-height: 1.65; font-weight: 400; color: #48515a; }
+.reader-article .reader-figure > .reader-figure-caption { margin-bottom: 0; }
+.reader-figure-title { display: block; text-align: center; font-weight: 600; }
+.reader-figure-description { display: block; margin-top: .35em; text-align: left; font-weight: 400; }
+@media (prefers-color-scheme: dark) {
+    .reader-article .reader-figure-caption { color: #c5cbd1; }
+}
+@media print {
+    .reader-article .reader-figure-caption { color: #404040; }
 }

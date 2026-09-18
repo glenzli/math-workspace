@@ -1,5 +1,6 @@
 import { revealExerciseTarget } from './reader-exercises';
 import './styles.css';
+import { mountInteractiveFigures } from './reader-figures';
 import { ReaderArchive } from './reader-archive';
 import {
     createFormalRenderer,
@@ -621,6 +622,7 @@ function storedCollapsedDraftCollections(): Set<string> {
 
 
 class ReaderApplication {
+    private disposeFigures: () => void = () => {};
     private readonly root = document.getElementById('reader-app') as HTMLElement;
     private readonly markdown = createFormalRenderer();
     private state: ReaderState | undefined;
@@ -1470,7 +1472,9 @@ class ReaderApplication {
             dependencyMarkers: this.page.dependencyMarkers
         });
         this.page.formulas = rendered.formulas;
+        this.disposeFigures();
         this.article.innerHTML = rendered.html;
+        this.disposeFigures = mountInteractiveFigures(this.article, this.state.language);
         this.article.querySelectorAll<HTMLElement>('[data-source-start-line]').forEach(element => {
             if (!element.parentElement?.closest('[data-source-start-line]')) element.classList.add('reader-source-line-entry');
         });
@@ -1709,9 +1713,9 @@ class ReaderApplication {
     }
 
     private renderContents(container: HTMLElement): void {
-        // One selector keeps headings and formal objects in document order without duplicates.
+        // One selector keeps headings, definitions and formal objects in source order without duplicates.
         const targets = Array.from(this.article.querySelectorAll<HTMLElement>(
-            'h1, h2, h3, h4, h5, h6, [id^="formal-"]'
+            'h1, h2, h3, h4, h5, h6, [id^="formal-"], [data-reader-definition]'
         ));
         const list = document.createElement('div');
         list.className = 'reader-panel-list reader-outline-list';
@@ -1719,7 +1723,8 @@ class ReaderApplication {
         targets.forEach(target => {
             const isHeading = /^H[1-6]$/.test(target.tagName);
             const label = this.page?.labels[target.id.slice('formal-'.length)];
-            if (!isHeading && !label) return;
+            const definitionTitle = target.dataset.readerDefinition;
+            if (!isHeading && !label && !definitionTitle) return;
             if (isHeading) headingLevel = Number(target.tagName.slice(1));
             const button = document.createElement('button');
             button.type = 'button';
@@ -1730,6 +1735,9 @@ class ReaderApplication {
                 title.querySelectorAll('[id]').forEach(element => element.removeAttribute('id'));
                 title.querySelectorAll('a').forEach(element => element.replaceWith(...Array.from(element.childNodes)));
                 button.innerHTML = title.innerHTML;
+            } else if (definitionTitle) {
+                button.innerHTML = renderFormalInline(this.markdown,
+                    definitionTitle, this.renderOptions(this.currentPath));
             } else {
                 const title = label!.title
                     ? (this.state.language === 'en' ? ` (${label!.title})` : `（${label!.title}）`)

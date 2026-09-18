@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { sendInteractiveFigure } from '../figures/server';
 import {
     buildRuntimeDefinitions,
     findSymbolsInMarkdown,
@@ -823,6 +824,11 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                     ...(Object.keys(builds).length > 0 ? { builds } : {}),
                     ...(dependencies?.comparisons?.[id] ? { comparison: dependencies.comparisons[id] } : {})
                 }));
+                return;
+            }
+
+            if (url.pathname === '/api/figure') {
+                await sendInteractiveFigure(response, workspace.rootPath, url.searchParams.get('path') || '', url.searchParams.get('mode') || 'interactive');
                 return;
             }
 

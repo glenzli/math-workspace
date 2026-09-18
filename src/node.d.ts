@@ -7,6 +7,7 @@ declare module 'fs' {
 }
 
 declare module 'node:fs/promises' {
+    export const realpath: any;
     export const access: any;
     export const copyFile: any;
     export const mkdir: any;

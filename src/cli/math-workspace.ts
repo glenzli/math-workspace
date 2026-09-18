@@ -2,6 +2,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { staticFigureMarkdown } from '../figures/reference';
+import { figureMarkdownForPdf } from '../figures/captions';
 
 import {
     DEFAULT_CONFIG,
@@ -896,7 +898,7 @@ function compileFormalMarkdownContent(content, sourceFilePath, state, options: {
         }
         if (inFence) return line;
 
-        const markerCompiled = compileFormalMarkerLine(line, state);
+        const markerCompiled = compileFormalMarkerLine(staticFigureMarkdown(line), state);
         return splitProtectedInlineSegments(markerCompiled).map(part => {
             if (part.kind === 'code') return part.text;
             if (part.kind === 'link') return rewriteMarkdownLinkTargetsForExport(part.text, sourceFilePath, linkTargetMode);
@@ -1536,6 +1538,8 @@ function buildPandocPdfArgs(inputMarkdownPath, outputPdfPath, options) {
 
     const pandocArgs = [
         relativePath(inputMarkdownPath),
+        // Formal figure captions already carry their source numbering.
+        '--from', 'markdown-implicit_figures',
         '-o',
         relativePath(outputPdfPath),
         '--pdf-engine',
@@ -1567,13 +1571,21 @@ async function renderPdfFile(inputMarkdownPath, outputPdfPath, options) {
     }
     options.includeBeforeBodyPath = preparedInclude.path;
     let result;
+    let figureInput = '';
     try {
-        result = spawnSync('pandoc', buildPandocPdfArgs(inputMarkdownPath, outputPdfPath, options), {
+        const source = await fs.readFile(inputMarkdownPath, 'utf8');
+        const formatted = figureMarkdownForPdf(source);
+        if (formatted !== source) {
+            figureInput = path.join(path.dirname(inputMarkdownPath), `.${path.basename(inputMarkdownPath)}.figures-${process.pid}-${Date.now()}.md`);
+            await fs.writeFile(figureInput, formatted, 'utf8');
+        }
+        result = spawnSync('pandoc', buildPandocPdfArgs(figureInput || inputMarkdownPath, outputPdfPath, options), {
             cwd: ROOT,
             encoding: 'utf8'
         });
     } finally {
         options.includeBeforeBodyPath = '';
+        if (figureInput) await fs.rm(figureInput, { force: true });
         await preparedInclude.cleanup();
     }
 

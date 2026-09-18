@@ -1,6 +1,8 @@
 import { FORMAL_TYPE_PATTERN, stripSolutionAssociation } from '../../../packages/core/src/formal-kinds';
 import { installExerciseRules } from './reader-exercises';
 import MarkdownIt from 'markdown-it';
+import { installInteractiveFigureRule } from './reader-figures';
+import { installFigureCaptionRule } from '../../figures/captions';
 import katex from 'katex';
 import type { ReaderDependencyMarker } from '../dependency-markers';
 
@@ -441,6 +443,29 @@ function installFormalRules(markdown: MarkdownIt): void {
             open.attrSet('data-source-line', String(line + 1));
             open.attrSet('data-source-start-line', String(line + 1));
             open.attrSet('data-source-end-line', String(token.map[1]));
+            // Named definitions use ordinary Markdown, not numbered formal IDs.
+            if (open.type === 'paragraph_open' || open.type === 'heading_open') {
+                const content = token.content.replace(/^(\*\*|__)([^\n]+?)\1/, '$2');
+                const definition = content.match(/^((?:定义|Definition)\s*[（(][^）)\n]+[）)])\s*(?:[:：]|$)/i);
+                if (definition) {
+                    open.attrSet('data-reader-definition', definition[1]);
+                    open.attrJoin('class', 'reader-definition');
+                    const first = token.children?.find((child: any) => child.type !== 'text' || child.content);
+                    if (first?.type === 'strong_open') {
+                        first.attrJoin('class', 'reader-definition-label');
+                    } else {
+                        // Build the label separately so punctuation cannot break emphasis.
+                        const titleOpen = new state.Token('strong_open', 'strong', 1);
+                        titleOpen.attrSet('class', 'reader-definition-label');
+                        const titleClose = new state.Token('strong_close', 'strong', -1);
+                        const title: any[] = [];
+                        const body: any[] = [];
+                        markdown.inline.parse(definition[1], markdown, state.env, title);
+                        markdown.inline.parse(content.slice(definition[1].length), markdown, state.env, body);
+                        token.children = [titleOpen, ...title, titleClose, ...body];
+                    }
+                }
+            }
             const markerId = markers[line];
             if (!markerId) continue;
             open.attrSet('id', 'formal-' + markerId);
@@ -504,6 +529,8 @@ export function createFormalRenderer(): MarkdownIt {
     installExerciseRules(markdown);
     installWorkspaceLinkRule(markdown);
     installWorkspaceAssetRule(markdown);
+    installInteractiveFigureRule(markdown, resolveReaderPath);
+    installFigureCaptionRule(markdown);
     return markdown;
 }
 
