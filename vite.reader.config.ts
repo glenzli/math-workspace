@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
     root: path.resolve(__dirname, 'src/reader/web'),
+    base: './',
     build: {
         outDir: path.resolve(__dirname, 'out/reader'),
         emptyOutDir: true,

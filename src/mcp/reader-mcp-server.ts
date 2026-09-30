@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { findMathWorkspaceRoot } from '../project-root';
 import { startReaderServer, type FormalReaderServer } from '../reader/server';
 import { WorkspaceQueries } from './workspace-queries';
+import { registerReaderApp } from './reader-app';
 
 export interface ReaderMcpServerOptions {
     rootPath?: string;
@@ -236,11 +237,13 @@ export async function runReaderMcpServer(options: ReaderMcpServerOptions = {}): 
         }
     });
 
+    const readerApp = registerReaderApp(server, options.rootPath || process.cwd());
     const transport = new StdioServerTransport();
     let closing = false;
     const close = async () => {
         if (closing) return;
         closing = true;
+        await readerApp.close();
         await registry.close();
         await server.close();
     };

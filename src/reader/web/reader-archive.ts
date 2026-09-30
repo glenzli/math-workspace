@@ -1,3 +1,4 @@
+import { readerFetch } from './reader-route';
 import { createFormalRenderer, renderFormalMarkdown } from './formal-renderer';
 import { readerIcon, type ReaderIconName } from './reader-icons';
 
@@ -142,7 +143,7 @@ export class ReaderArchive {
     }
     private async request(route: string, body?: unknown): Promise<any> {
         const token = this.context().token;
-        const response = await fetch(route, { method: body === undefined ? 'GET' : 'POST', cache: 'no-store',
+        const response = await readerFetch(route, { method: body === undefined ? 'GET' : 'POST', cache: 'no-store',
             headers: { 'x-math-workspace-token': token, 'x-math-workspace-project': this.project, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
             ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
         if (!response.ok) throw new Error(await response.text()); return response.json();

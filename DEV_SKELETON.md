@@ -19,6 +19,7 @@
 - `packages/core/src/**`: shared formal scanner, numbering, references, lookup, dependency analysis, and conservative project-knowledge discovery.
 - `src/cli/**`, `src/reader/**`: primary CLI and localhost Reader implementation.
 - `src/archive/**`: project-owned academic evidence, immutable snapshots, Sigstore verification, format conversion, and archive publication; Reader and MCP projections use this owner.
+- `src/mcp/reader-app*.ts`：MCP Reader UI 资源、侧边栏与会话入口，以及独立视图的本地传输和生命周期；正文渲染仍由 Reader 负责。
 - `src/codex/**`: explicit Codex Desktop file-handler setup and source-location handoff into the Reader.
 - `legacy/vscode-extension/**`: frozen historical VS Code implementation, excluded from builds, release artifacts, and product support.
 - `tests/math-workspace.test.mjs`: regression coverage for formal syntax, migration, export, graph, and audit behavior.

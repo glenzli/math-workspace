@@ -25,6 +25,7 @@ The project source is authoritative. Generated indexes and reports can be inspec
 - **Dependency review**: reads explicitly declared strict dependencies from propositions and produces upstream/downstream relationships, chapter graphs, and endpoint reports. Ordinary explanatory prose does not create dependency edges.
 - **Symbol audit**: users can explicitly ask Codex to check same-shape symbols, their scopes, and meanings. Results are cached by content and shown as a review report. They do not rewrite the manuscript or enter the `verify` gate.
 - **Lean alignment**: after a Lean project is configured, Math Workspace can scan manuscript anchors in declaration docstrings, record Lake build results, and compare direct Lean dependencies with strict manuscript dependencies.
+- **Codex reading entrypoints**: desktop hosts with plugin extension support can open the same Reader from the sidebar or beside a conversation. Each panel retains its own project and reading position; the ordinary browser entrypoint remains available.
 - **Codex context**: Reader marks store file locations, available anchors, and source hashes. Read-only MCP tools can query marks, propositions, bounded dependency slices, Lean status, project terminology, existing symbol audits, and validation results.
 - **Codex file navigation**: Math Workspace can register as a Codex Desktop file handler. Markdown file-and-line links in Codex can then locate the Reader directly, reusing and navigating an already open page.
 - **Publication exports**: generates combined or split Markdown and can call local Pandoc and LaTeX tools to produce PDF.
@@ -148,6 +149,7 @@ Math Workspace 是一组用于长篇数学写作的本地工具。正文保存�
 - **依赖审阅**：读取命题中明确声明的严格依赖，生成上下游关系、章节图和端点报告。普通说明文字不会自动成为依赖边。
 - **符号审计**：用户可以显式调用 Codex 检查同形符号及其作用域和含义。结果按内容缓存，作为审阅报告展示，不会自动改写正文，也不进入 `verify` 门禁。
 - **Lean 对齐**：配置 Lean 项目后，可以扫描声明 docstring 中的正文锚点，记录 Lake 构建结果，并对照 Lean 直接依赖与正文严格依赖。
+- **Codex 阅读入口**：支持插件扩展的桌面端可从侧边栏或会话面板打开同一个 Reader，各个面板分别保存项目与阅读位置；普通浏览器入口仍可使用。
 - **Codex 上下文**：Reader 中的标记保存文件位置、可用锚点和来源 hash。只读 MCP 工具可以查询标记、命题、有限深度依赖、Lean 状态、项目术语、既有符号审计和校验结果。
 - **Codex 文件定位**：可把 Math Workspace 注册为 Codex Desktop 的文件处理器；Codex 返回的 Markdown 文件与行号链接可以直接定位到 Reader，已打开的页面会原位跳转。
 - **发布导出**：可以生成合并或分文件 Markdown，也可以调用本机 Pandoc 与 LaTeX 工具链生成 PDF。

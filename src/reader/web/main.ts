@@ -1,5 +1,9 @@
 import { revealExerciseTarget } from './reader-exercises';
 import './styles.css';
+import { readerFetch, readerEvents, isReaderEmbedded } from './reader-route';
+import { initializeReaderHost, expandReader, readerHistory, readerSearch, type ReaderEvents } from './reader-host';
+import { mountReaderAssets } from './reader-assets';
+import { mountReaderEmbeddedView, readerViewStateChanged } from './reader-embed';
 import { mountInteractiveFigures } from './reader-figures';
 import { ReaderArchive } from './reader-archive';
 import {
@@ -445,7 +449,7 @@ function escapeHtml(value: string): string {
 }
 
 function queryPath(): string {
-    return new URLSearchParams(window.location.search).get('path') || '';
+    return new URLSearchParams(readerSearch()).get('path') || '';
 }
 
 interface ReaderSourceLocation {
@@ -454,7 +458,7 @@ interface ReaderSourceLocation {
 }
 
 function querySourceLocation(): ReaderSourceLocation | undefined {
-    const query = new URLSearchParams(window.location.search);
+    const query = new URLSearchParams(readerSearch());
     const line = Number(query.get('line'));
     const column = Number(query.get('column'));
     if (!Number.isInteger(line) || line < 1) return undefined;
@@ -465,7 +469,7 @@ function querySourceLocation(): ReaderSourceLocation | undefined {
 }
 
 function queryView(): string {
-    return new URLSearchParams(window.location.search).get('view') || '';
+    return new URLSearchParams(readerSearch()).get('view') || '';
 }
 
 function normalizeQuery(value: string): string {
@@ -623,6 +627,7 @@ function storedCollapsedDraftCollections(): Set<string> {
 
 class ReaderApplication {
     private disposeFigures: () => void = () => {};
+    private disposeAssets: () => void = () => {};
     private readonly root = document.getElementById('reader-app') as HTMLElement;
     private readonly markdown = createFormalRenderer();
     private state: ReaderState | undefined;
@@ -656,10 +661,11 @@ class ReaderApplication {
     private symbolAuditReport!: ReaderSymbolAuditReportView;
     private symbolAuditReportOpen = false;
     private discussionMarks!: ReaderDiscussionMarks;
-    private realtimeEvents: EventSource | undefined;
+    private realtimeEvents: ReaderEvents | undefined;
 
     async start(): Promise<void> {
         this.buildShell();
+        mountReaderEmbeddedView(this.main);
         await this.refreshState();
         await this.refreshDiscussionMarks();
         this.installHandlers();
@@ -696,7 +702,7 @@ class ReaderApplication {
             '<button id="reader-navigation-toggle" class="icon-button reader-navigation-toggle" type="button"></button>',
             '<div class="reader-history"><button id="reader-back" class="icon-button" aria-label="Back"></button><button id="reader-forward" class="icon-button" aria-label="Forward"></button></div>',
             '<div id="reader-page-title" class="reader-page-title"></div>',
-            '<div class="reader-tools"><button id="reader-archive" class="tool-button" type="button" aria-label="Version history" aria-haspopup="dialog"></button><button class="tool-button" data-panel="contents" aria-label="Contents"></button><button class="tool-button" data-panel="definitions" aria-label="Definitions"></button><button class="tool-button" data-panel="symbols" aria-label="Symbols"></button><button class="tool-button" data-panel="propositions" aria-label="Proposition review"></button><button class="tool-button" data-panel="symbol-audit" aria-label="Symbol audit"></button><button id="reader-discussion-tools" class="tool-button" type="button" aria-label="Marking tools"></button><button id="reader-line-numbers" class="tool-button" type="button" aria-label="Show source line numbers" aria-pressed="false"></button></div>',
+            '<div class="reader-tools">' + (isReaderEmbedded() ? '<button id="reader-expand" class="tool-button" type="button" aria-label="Expand">↗</button>' : '') + '<button id="reader-archive" class="tool-button" type="button" aria-label="Version history" aria-haspopup="dialog"></button><button class="tool-button" data-panel="contents" aria-label="Contents"></button><button class="tool-button" data-panel="definitions" aria-label="Definitions"></button><button class="tool-button" data-panel="symbols" aria-label="Symbols"></button><button class="tool-button" data-panel="propositions" aria-label="Proposition review"></button><button class="tool-button" data-panel="symbol-audit" aria-label="Symbol audit"></button><button id="reader-discussion-tools" class="tool-button" type="button" aria-label="Marking tools"></button><button id="reader-line-numbers" class="tool-button" type="button" aria-label="Show source line numbers" aria-pressed="false"></button></div>',
             '<div class="reader-type-control"><button type="button" class="type-size-button" data-font-size="-1" aria-label="Decrease text size">A−</button><output id="reader-font-size" aria-live="polite">' + this.fontSize + 'px</output><button type="button" class="type-size-button" data-font-size="1" aria-label="Increase text size">A+</button></div>',
             '<span id="reader-live" class="reader-live" aria-live="polite"></span>',
             '</header><article id="reader-article" class="reader-article"></article></main>',
@@ -709,6 +715,7 @@ class ReaderApplication {
         this.tooltip = new ReaderTooltip();
         this.tooltip.bind(this.root);
         this.installToolbarIcons();
+        this.root.querySelector('#reader-expand')?.addEventListener('click', expandReader);
         this.updateFontSize(this.fontSize, false);
         this.setSourceLineNumbers(this.sourceLineNumbersVisible, false);
         window.addEventListener('resize', () => this.queueSourceLineNumberAlignment());
@@ -841,7 +848,7 @@ class ReaderApplication {
     }
 
     private async fetchJson<T>(url: string): Promise<T> {
-        const response = await fetch(url, {
+        const response = await readerFetch(url, {
             cache: 'no-store',
             headers: (url === '/api/discussion-marks' || url === '/api/document-state' || url.startsWith('/api/symbol-audit')) && this.state?.requestToken
                 ? { 'x-math-workspace-token': this.state.requestToken }
@@ -859,7 +866,7 @@ class ReaderApplication {
         if (url === '/api/document-state' && this.state?.requestToken) {
             headers['x-math-workspace-token'] = this.state.requestToken;
         }
-        const response = await fetch(url, {
+        const response = await readerFetch(url, {
             method: 'POST',
             cache: 'no-store',
             headers,
@@ -874,7 +881,7 @@ class ReaderApplication {
         if ((url.startsWith('/api/discussion-marks') || url.startsWith('/api/symbol-audit')) && this.state?.requestToken) {
             headers['x-math-workspace-token'] = this.state.requestToken;
         }
-        const response = await fetch(url, { method: 'DELETE', cache: 'no-store', headers });
+        const response = await readerFetch(url, { method: 'DELETE', cache: 'no-store', headers });
         if (!response.ok) throw new Error(await response.text());
         return response.json() as Promise<T>;
     }
@@ -890,6 +897,7 @@ class ReaderApplication {
         (this.root.querySelector('#reader-page-filter') as HTMLInputElement).placeholder = dictionary.search;
         this.renderNavigation((this.root.querySelector('#reader-page-filter') as HTMLInputElement).value);
         this.updateToolbarLabels();
+        readerViewStateChanged();
     }
 
     private renderProjectLauncher(message = ''): void {
@@ -949,7 +957,7 @@ class ReaderApplication {
             this.currentPath = '';
             this.historyPaths = [];
             this.historyIndex = -1;
-            window.history.replaceState({}, '', window.location.pathname);
+            readerHistory('replace', {}, window.location.pathname);
             await this.refreshDiscussionMarks();
             await this.openInitialPage();
             this.installRealtimeUpdates();
@@ -961,6 +969,8 @@ class ReaderApplication {
 
     private updateToolbarLabels(): void {
         const dictionary = this.dictionary();
+        const expand = this.root.querySelector<HTMLElement>('#reader-expand');
+        if (expand) { const label = this.state?.language === 'en' ? 'Expand' : '展开'; expand.dataset.tooltip = label; expand.setAttribute('aria-label', label); }
         const back = this.root.querySelector('#reader-back') as HTMLElement;
         const forward = this.root.querySelector('#reader-forward') as HTMLElement;
         back.dataset.tooltip = dictionary.back;
@@ -1418,6 +1428,7 @@ class ReaderApplication {
             } else {
                 this.main.scrollTop = preserveScroll ? previousScroll : 0;
             }
+            readerViewStateChanged();
         } finally {
             if (requestId === this.pageRequestId) this.article.classList.remove('is-loading');
         }
@@ -1434,7 +1445,7 @@ class ReaderApplication {
             this.historyPaths = this.historyPaths.slice(0, this.historyIndex + 1);
             this.historyPaths.push(filePath);
             this.historyIndex = this.historyPaths.length - 1;
-            history.pushState({ filePath }, '', url);
+            readerHistory('push', { filePath }, url);
         } else if (mode === 'replace') {
             if (this.historyIndex < 0) {
                 this.historyPaths = [filePath];
@@ -1442,7 +1453,7 @@ class ReaderApplication {
             } else {
                 this.historyPaths[this.historyIndex] = filePath;
             }
-            history.replaceState({ filePath }, '', url);
+            readerHistory('replace', { filePath }, url);
         }
         (this.root.querySelector('#reader-back') as HTMLButtonElement).disabled = this.historyIndex <= 0;
         (this.root.querySelector('#reader-forward') as HTMLButtonElement).disabled = this.historyIndex >= this.historyPaths.length - 1;
@@ -1473,8 +1484,10 @@ class ReaderApplication {
         });
         this.page.formulas = rendered.formulas;
         this.disposeFigures();
+        this.disposeAssets();
         this.article.innerHTML = rendered.html;
         this.disposeFigures = mountInteractiveFigures(this.article, this.state.language);
+        this.disposeAssets = mountReaderAssets(this.article);
         this.article.querySelectorAll<HTMLElement>('[data-source-start-line]').forEach(element => {
             if (!element.parentElement?.closest('[data-source-start-line]')) element.classList.add('reader-source-line-entry');
         });
@@ -1548,7 +1561,7 @@ class ReaderApplication {
         if (index < 0 || index >= this.historyPaths.length) return;
         this.historyIndex = index;
         const path = this.historyPaths[index];
-        history.replaceState({ filePath: path }, '', '?path=' + encodeURIComponent(path));
+        readerHistory('replace', { filePath: path }, '?path=' + encodeURIComponent(path));
         void this.openPage(path, 'pop');
     }
 
@@ -2017,8 +2030,8 @@ class ReaderApplication {
         if (historyMode !== 'pop') {
             const url = '?path=' + encodeURIComponent(this.currentPath) + '&view=symbol-audit-report';
             const state = { filePath: this.currentPath, view: 'symbol-audit-report' };
-            if (historyMode === 'push') history.pushState(state, '', url);
-            else history.replaceState(state, '', url);
+            if (historyMode === 'push') readerHistory('push', state, url);
+            else readerHistory('replace', state, url);
         }
         this.symbolAuditReport.render(this.article, status, {
             language: this.state.language,
@@ -2039,7 +2052,7 @@ class ReaderApplication {
     private closeSymbolAuditReport(): void {
         if (!this.page) return;
         this.symbolAuditReportOpen = false;
-        history.replaceState({ filePath: this.currentPath }, '', '?path=' + encodeURIComponent(this.currentPath));
+        readerHistory('replace', { filePath: this.currentPath }, '?path=' + encodeURIComponent(this.currentPath));
         this.article.classList.remove('is-symbol-audit-report');
         this.renderArticle();
         this.renderNavigation((this.root.querySelector('#reader-page-filter') as HTMLInputElement).value);
@@ -2155,7 +2168,7 @@ class ReaderApplication {
 
     private installRealtimeUpdates(): void {
         if (this.realtimeEvents) return;
-        this.realtimeEvents = new EventSource('/api/events');
+        this.realtimeEvents = readerEvents();
         this.realtimeEvents.addEventListener('workspace-update', event => {
             let changedPaths: string[] = [];
             let revision: number | undefined;
@@ -2202,9 +2215,16 @@ class ReaderApplication {
     }
 }
 
-void new ReaderApplication().start().catch(error => {
-    const root = document.getElementById('reader-app');
-    if (!root) return;
-    const message = error instanceof Error ? error.message : String(error);
-    root.innerHTML = '<main class="reader-failure"><h1>Math Workspace</h1><pre>' + escapeHtml(message) + '</pre></main>';
-});
+function startReader(): void {
+    void initializeReaderHost().then(() => new ReaderApplication().start()).catch(error => {
+        const root = document.getElementById('reader-app');
+        if (!root) return;
+        const message = error instanceof Error ? error.message : String(error);
+        root.innerHTML = '<main class="reader-failure"><h1>Math Workspace</h1><pre>' + escapeHtml(message) + '</pre></main>';
+        const retry = document.createElement('button');
+        retry.className = 'tool-button';
+        retry.textContent = navigator.language.startsWith('zh') ? '重试' : 'Retry';
+        retry.addEventListener('click', startReader); root.firstElementChild?.append(retry);
+    });
+}
+startReader();

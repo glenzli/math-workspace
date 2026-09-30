@@ -1,3 +1,4 @@
+import { testReaderApps } from './reader-app.test.mjs';
 import { testReaderDefinitions } from './reader-definitions.test.mjs';
 import { testInteractiveFigures } from './interactive-figures.test.mjs';
 import assert from 'node:assert/strict';
@@ -1694,17 +1695,24 @@ async function testReaderMcpServer() {
         const tools = await mcp.request('tools/list');
         const names = tools.tools.map(tool => tool.name).sort();
         assert.deepEqual(names, [
+            'close_reader_view',
             'inspect_dependencies',
             'inspect_lean_alignment',
             'lookup_formal_object',
             'lookup_knowledge',
             'open',
+            'open_reader',
+            'open_workspace',
             'read_archives',
             'read_marks',
             'read_symbol_audit',
+            'reader_request',
+            'reader_updates',
+            'reader_view',
             'verify'
         ]);
-        tools.tools.forEach(tool => assert.equal(tool._meta, undefined));
+        tools.tools.filter(tool => !['open_reader', 'open_workspace', 'reader_view', 'close_reader_view', 'reader_request', 'reader_updates'].includes(tool.name))
+            .forEach(tool => assert.equal(tool._meta, undefined));
 
         const launch = await mcp.request('tools/call', {
             name: 'open',
@@ -2730,6 +2738,7 @@ const tests = [
     ['Lean build and dependency comparison', testLeanBuildAndDependencyComparison],
     ['local Reader server', testReaderServer],
     ['local Reader MCP server', testReaderMcpServer],
+    ['Reader sidebar and conversation apps', testReaderApps],
     ['Reader plugin MCP configuration', testReaderPluginMcpConfig],
     ['simplified CLI flow', testSimplifiedCliFlow],
     ['local Reader discussion marks', testReaderDiscussionMarks],

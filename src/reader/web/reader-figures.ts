@@ -1,7 +1,20 @@
+import { readerRoute, readerFetch } from './reader-route';
+import { isReaderApp } from './reader-host';
+import { emptyReaderImage } from './reader-assets';
 import type MarkdownIt from 'markdown-it';
 import { interactiveFigureReference } from '../../figures/reference';
 
 const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** A blob response cannot carry HTTP headers; apply the same policy before project scripts. */
+export function readerFigureDocument(html: string, csp: string | null): string {
+    if (!csp) throw new Error('Interactive figure policy is unavailable.');
+    const policy = csp.split(';').filter(directive => !/^\s*(?:frame-ancestors|sandbox)\b/.test(directive)).join(';');
+    const meta = '<meta http-equiv="Content-Security-Policy" content="' + escape(policy) + '">';
+    return /<head(?:\s[^>]*)?>/i.test(html)
+        ? html.replace(/<head(?:\s[^>]*)?>/i, match => match + meta)
+        : meta + html;
+}
 
 export function installInteractiveFigureRule(markdown: MarkdownIt, resolvePath: (source: string, current: string) => string): void {
     markdown.core.ruler.after('inline', 'interactive_figures', state => {
@@ -14,10 +27,13 @@ export function installInteractiveFigureRule(markdown: MarkdownIt, resolvePath: 
                 source = resolvePath('./' + decodeURIComponent(figure.source), state.env.readerCurrentFilePath || '');
                 poster = resolvePath('./' + decodeURIComponent(figure.poster), state.env.readerCurrentFilePath || '');
             } catch { continue; }
+            const posterRoute = readerRoute('/api/asset?path=' + encodeURIComponent(poster));
+            const posterSource = isReaderApp() ? emptyReaderImage : posterRoute;
+            const posterAttribute = isReaderApp() ? ' data-reader-asset="' + escape(posterRoute) + '"' : '';
             const child = new state.Token('html_inline', '', 0);
             child.content = `<span class="reader-interactive-figure" data-figure-source="${escape(source)}" data-figure-title="${escape(figure.title)}">`
                 + `<span class="reader-figure-toolbar"><button type="button" data-figure-toggle></button><span data-figure-status role="status"></span></span>`
-                + `<span class="reader-figure-poster"><img src="/api/asset?path=${encodeURIComponent(poster)}" alt="${escape(figure.title)}"></span>`
+                + `<span class="reader-figure-poster"><img src="${posterSource}"${posterAttribute} alt="${escape(figure.title)}"></span>`
                 + `<span class="reader-figure-stage"></span></span>`;
             token.children = [child];
         }
@@ -46,6 +62,11 @@ export function mountInteractiveFigures(article: HTMLElement, language: 'zh' | '
         let displayedFrame: HTMLIFrameElement | undefined;
         let timer: ReturnType<typeof setTimeout> | undefined;
         let active = false;
+        const frameUrls = new Map<HTMLIFrameElement, string>();
+        const removeFrame = (value?: HTMLIFrameElement) => {
+            if (!value) return; value.remove();
+            const url = frameUrls.get(value); if (url) URL.revokeObjectURL(url); frameUrls.delete(value);
+        };
         const sendTypography = () => {
             if (!frame) return;
             const style = getComputedStyle(article);
@@ -55,7 +76,7 @@ export function mountInteractiveFigures(article: HTMLElement, language: 'zh' | '
         typographyListeners.add(sendTypography);
         const clearTimer = () => { if (timer) clearTimeout(timer); timer = undefined; };
         const showPoster = () => {
-            active = false; clearTimer(); frame?.remove(); displayedFrame?.remove();
+            active = false; clearTimer(); removeFrame(frame); removeFrame(displayedFrame);
             frame = undefined; displayedFrame = undefined;
             poster.hidden = false; stage.hidden = true;
             toggle.textContent = text.interactive; toggle.setAttribute('aria-pressed', 'false');
@@ -65,11 +86,21 @@ export function mountInteractiveFigures(article: HTMLElement, language: 'zh' | '
             active = interactive; clearTimer(); status.textContent = text.loading;
             toggle.textContent = interactive ? text.static : text.interactive;
             toggle.setAttribute('aria-pressed', String(interactive));
-            if (frame !== displayedFrame) frame?.remove();
+            if (frame !== displayedFrame) removeFrame(frame);
             frame = document.createElement('iframe');
             frame.title = root.dataset.figureTitle || text.interactive;
             frame.setAttribute('sandbox', 'allow-scripts'); frame.referrerPolicy = 'no-referrer';
-            frame.src = '/api/figure?path=' + encodeURIComponent(root.dataset.figureSource!) + '&mode=' + (interactive ? 'interactive' : 'static');
+            const route = readerRoute('/api/figure?path=' + encodeURIComponent(root.dataset.figureSource!) + '&mode=' + (interactive ? 'interactive' : 'static'));
+            const loadingFrame = frame;
+            if (isReaderApp()) void readerFetch(route).then(async response => {
+                if (!response.ok) throw new Error(await response.text());
+                let html = await response.text();
+                if (frame !== loadingFrame || !loadingFrame.isConnected) return;
+                html = readerFigureDocument(html, response.headers.get('content-security-policy'));
+                const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+                frameUrls.set(loadingFrame, url); loadingFrame.src = url;
+            }).catch(() => { if (frame === loadingFrame) failed(); });
+            else frame.src = route;
             // Keep the current SVG visible until its replacement is ready; no PNG flash on toggle.
             frame.className = 'reader-figure-loading';
             stage.append(frame); stage.hidden = false;
@@ -79,7 +110,7 @@ export function mountInteractiveFigures(article: HTMLElement, language: 'zh' | '
             if (!frame || event.source !== frame.contentWindow || event.data?.type !== 'math-workspace-figure') return;
             if (event.data.event === 'ready') {
                 clearTimer(); status.textContent = '';
-                if (displayedFrame !== frame) displayedFrame?.remove();
+                if (displayedFrame !== frame) removeFrame(displayedFrame);
                 displayedFrame = frame; frame.classList.remove('reader-figure-loading');
                 poster.hidden = true; stage.hidden = false; sendTypography();
             } else if (event.data.event === 'resize' && typeof event.data.height === 'number' && Number.isFinite(event.data.height)) {

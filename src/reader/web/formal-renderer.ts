@@ -1,3 +1,6 @@
+import { readerRoute } from './reader-route';
+import { isReaderApp } from './reader-host';
+import { emptyReaderImage } from './reader-assets';
 import { FORMAL_TYPE_PATTERN, stripSolutionAssociation } from '../../../packages/core/src/formal-kinds';
 import { installExerciseRules } from './reader-exercises';
 import MarkdownIt from 'markdown-it';
@@ -494,7 +497,9 @@ function installWorkspaceAssetRule(markdown: MarkdownIt): void {
         const token = tokens[index];
         const source = token.attrGet('src') || '';
         if (source && !/^(?:[a-z][a-z0-9+.-]*:|#|\/\/)/i.test(source)) {
-            token.attrSet('src', '/api/asset?path=' + encodeURIComponent(resolveReaderPath(source, env.readerCurrentFilePath || '')));
+            const route = readerRoute('/api/asset?path=' + encodeURIComponent(resolveReaderPath(source, env.readerCurrentFilePath || '')));
+            token.attrSet('src', isReaderApp() ? emptyReaderImage : route);
+            if (isReaderApp()) token.attrSet('data-reader-asset', route);
         }
         return defaultImage(tokens, index, options, env, self);
     };

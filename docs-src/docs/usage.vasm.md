@@ -293,7 +293,7 @@ npm run workspace -- serve
 
 ## Codex MCP 入口
 
-Math Workspace 可作为独立本地客户端运行，也可通过 Codex MCP 打开。MCP 可启动或复用本机工作区，也提供讨论标记、命题、严格依赖、Lean 对齐与只读校验查询；它不嵌入或复制工作区渲染，更不维护第二套 Codex 对话实现。
+Math Workspace 可作为独立本地客户端运行，也可通过 Codex MCP 打开。MCP 可启动或复用本机工作区，也提供讨论标记、命题、严格依赖、Lean 对齐与只读校验查询。支持 MCP 插件扩展的桌面端还可从全局侧边栏打开 Math Workspace，或在当前会话旁打开 Reader 面板；两个入口复用同一 Reader，不维护第二套渲染器或 Codex 对话实现。
 
 CLI 入口是：
 
@@ -322,6 +322,10 @@ codex plugin add math-workspace@personal
 ```
 
 发布版本同样可以从安装包根目录添加 marketplace。插件调用 `open` 打开当前项目或某个项目相对 Markdown 页面；`read_marks` 返回当前标记的轻量源码定位，`lookup_formal_object`、`inspect_dependencies`、`lookup_knowledge`、`inspect_lean_alignment`、`read_symbol_audit` 与 `verify` 提供按需的窄范围上下文。符号审计接口只读取用户已经运行的缓存结果，不会静默调用模型；没有可用项目时会打开 Math Workspace 的本机项目启动台。
+
+全局侧边栏入口先显示项目选择与最近项目；会话面板在 MCP 已绑定项目时打开该项目，否则显示项目选择。各个面板独立保存所选项目、页面和滚动位置，可展开阅读长公式。当前项目和页面作为轻量定位同步给会话，供查询工具明确选择项目；正文仍从当前源码读取。讨论标记继续按项目共享，不随面板复制或改成会话私有。
+
+插件页面直接加载 Reader，数据通过 MCP 访问各视图的本机 Reader API；保留现有的项目与操作校验，不要求宿主允许嵌入本机 HTTP 页面。关闭面板会释放对应 Reader，MCP 退出会关闭其全部视图。缺少 UI 扩展支持的客户端仍可调用 `open` 获取普通浏览器 URL。安装或更新插件后，新建会话以刷新入口。
 
 MCP 与 Math Workspace 一样只绑定 `127.0.0.1`，不写入书稿或 `.math-workspace/` 产物。
 
