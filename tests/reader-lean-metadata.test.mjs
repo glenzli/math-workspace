@@ -43,7 +43,7 @@ export async function testReaderLeanMetadata() {
         for (const file of [path.basename(root), '.math-workspace', 'book', '.math-workspace/config.json', 'book/chapter.md']) {
             second.watcher.emit('change', 'rename', file);
         }
-        for (const category of ['lean-audits', 'lean-reviews', 'lean-review-evidence']) {
+        for (const category of ['lean-audits', 'lean-reviews', 'lean-review-evidence', 'lean-assistance']) {
             const relative = `.math-workspace/${category}/${id}.json`;
             await fs.mkdir(path.join(root, '.math-workspace', category), { recursive: true });
             const previous = second.current().revision;

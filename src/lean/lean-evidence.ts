@@ -67,7 +67,7 @@ function bounded(value: string): { content: string; truncated?: boolean } {
     return value.length > MAX_TEXT ? { content: value.slice(0, MAX_TEXT), truncated: true } : { content: value };
 }
 
-function snippet(filePath: string, lines: string[], start: number, end: number, role: SourceSnippet['role'], context = false): SourceSnippet {
+function snippet(filePath: string, lines: readonly string[], start: number, end: number, role: SourceSnippet['role'], context = false): SourceSnippet {
     const startLine = Math.max(1, Math.min(lines.length, start));
     const endLine = Math.max(startLine, Math.min(lines.length, end));
     const source = lines.slice(startLine - 1, endLine).join('\n');
@@ -99,13 +99,22 @@ export interface ReviewContext {
     projectConfigs: LeanProjectConfig[];
 }
 
+/** Scoped to one read batch; never retained across completed requests or used by save checks. */
+export type ReviewSourceInputs = Map<string, Promise<readonly string[]>>;
+
+export async function readReviewSourceLines(root: string, filePath: string, inputs?: ReviewSourceInputs): Promise<readonly string[]> {
+    const read = async () => (await fs.readFile((await reviewSafePath(root, filePath))!, 'utf8')).split(/\r?\n/);
+    if (!inputs) return read();
+    if (!inputs.has(filePath)) inputs.set(filePath, read());
+    return inputs.get(filePath)!;
+}
+
 export function declarationReviewKey(projectKey: string, qualifiedName: string): string {
     return `${projectKey}:${qualifiedName}`;
 }
 
-async function declarationSource(root: string, declaration: LeanDeclarationAnchor): Promise<SourceSnippet | undefined> {
-    const file = await reviewSafePath(root, declaration.filePath);
-    const lines = (await fs.readFile(file!, 'utf8')).split(/\r?\n/);
+async function declarationSource(root: string, declaration: LeanDeclarationAnchor, inputs?: ReviewSourceInputs): Promise<SourceSnippet | undefined> {
+    const lines = await readReviewSourceLines(root, declaration.filePath, inputs);
     const start = Math.max(1, declaration.line);
     let end = lines.length;
     for (let index = start; index < lines.length; index++) {
@@ -202,7 +211,7 @@ export function installedToolchainRoot(toolchain: string): string | undefined {
 }
 
 export async function readReviewContext(rootInput: string, idInput: unknown, reusableSnapshot?: WorkspaceSnapshot,
-    projectInputs = new Map<string, Promise<ProjectInputs>>(), validated = false): Promise<ReviewContext> {
+    projectInputs = new Map<string, Promise<ProjectInputs>>(), validated = false, sourceInputs?: ReviewSourceInputs): Promise<ReviewContext> {
     const root = validated ? rootInput : await validateReviewWorkspace(rootInput);
     const id = formalReviewId(idInput);
     const snapshot = reusableSnapshot || await loadWorkspaceSnapshot(root);
@@ -270,7 +279,7 @@ export async function readReviewContext(rootInput: string, idInput: unknown, reu
     for (const anchor of anchors) declarations.push({
         key: declarationReviewKey(anchor.projectKey, anchor.qualifiedName || anchor.name),
         projectKey: anchor.projectKey, name: anchor.name, qualifiedName: anchor.qualifiedName || anchor.name,
-        kind: anchor.kind, source: await declarationSource(root, anchor),
+        kind: anchor.kind, source: await declarationSource(root, anchor, sourceInputs),
         typeDependencies: [], proofDependencies: [], axioms: [], evidenceState: 'unavailable',
         diagnostic: 'Elaborated evidence has not been refreshed for this declaration.'
     });

@@ -25,7 +25,7 @@ import {
 import { ReaderRecallPopover } from './recall-popover';
 import { ReaderDependencyPopover } from './reader-dependency-popover';
 import { ReaderLeanPopover, type ReaderLeanAnchorPayload } from './reader-lean-popover';
-import { ReaderLeanReview } from './reader-lean-review';
+import { leanAssistanceUpdatePaths, ReaderLeanReview } from './reader-lean-review';
 import { readerIcon, replaceReaderButtonIcon, type ReaderIconName } from './reader-icons';
 import { ReaderToolbarPanel } from './reader-toolbar-panel';
 import { ReaderPropositionReview, type ReaderPropositionReviewItem } from './reader-proposition-review';
@@ -2107,15 +2107,24 @@ class ReaderApplication {
             let changedPaths: string[] = [];
             let revision: number | undefined;
             let initial = false;
+            let assistancePaths: string[] | undefined;
             try {
                 const update = JSON.parse((event as MessageEvent<string>).data);
-                changedPaths = update.changedPaths || [];
+                changedPaths = Array.isArray(update.changedPaths) && update.changedPaths.every((value: unknown) => typeof value === 'string') ? update.changedPaths : [];
                 revision = update.revision;
                 initial = update.initial === true;
+                assistancePaths = leanAssistanceUpdatePaths(update, this.state);
             } catch (_error) {
                 // Missing event metadata falls back to a conservative page refresh.
             }
             if (initial && revision === this.state?.revision) return;
+            if (assistancePaths) {
+                // Candidates have their own store; the event proves this exact revision
+                // contains only candidate metadata. Gaps and mixed changes keep the full path.
+                this.state = { ...this.state!, revision: revision! };
+                this.leanReview.contextChanged(assistancePaths);
+                return;
+            }
             const requestId = this.pageRequestId;
             const current = this.currentPath;
             const previousRevision = this.state?.revision;

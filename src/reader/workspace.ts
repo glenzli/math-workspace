@@ -16,7 +16,7 @@ const SOURCE_EVENT_MAX_ENTRIES = 4096;
 const SOURCE_EVENT_MAX_BYTES = 8 * 1024 * 1024;
 interface SourceEventBudget { entries: number }
 function isLeanReviewMetadataPath(filePath: string): boolean {
-    return /^\.math-workspace\/(?:lean-audits|lean-reviews|lean-review-evidence)\/h-[0-9a-f]{16,32}\.json$/i.test(toPosix(filePath));
+    return /^\.math-workspace\/(?:lean-audits|lean-reviews|lean-review-evidence|lean-assistance)\/h-[0-9a-f]{16,32}\.json$/i.test(toPosix(filePath));
 }
 
 export interface WorkspaceSnapshot {
@@ -245,7 +245,7 @@ export class ReaderWorkspace {
         return snapshot;
     }
 
-    /** Human review metadata lives in its own store. Notify controllers to reload it while
+    /** Review and assistance metadata live in their own stores. Notify controllers to reload them while
      * retaining the scanned source, document maps and Lean index byte-for-byte. */
     notifyMetadataChange(changedPaths: string[]): WorkspaceSnapshot {
         const paths = [...new Set(changedPaths.filter(isLeanReviewMetadataPath))].slice(0, 256).sort();

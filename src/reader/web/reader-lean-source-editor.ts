@@ -120,6 +120,10 @@ export class LeanSourceEditor {
     }
 
     focusPosition(position: LeanPosition): void { this.focusRange({ start: position, end: position }); this.view.focus(); }
+    clearFocusRange(): void {
+        if (this.destroyed) return;
+        this.view.dispatch({ selection: EditorSelection.cursor(this.view.state.selection.main.head), effects: this.focus.reconfigure([]) });
+    }
     find(): void { openSearchPanel(this.view); }
     fold(): void { foldAll(this.view); }
     unfold(): void { unfoldAll(this.view); }

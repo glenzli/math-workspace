@@ -19,12 +19,14 @@ export interface ReaderLeanSourceHost {
     context(): { projectId: string; token: string; language: 'zh' | 'en'; revision: number };
     request(route: string, options?: RequestInit): Promise<Response>;
     report(message: string): void;
+    closed?(): void;
     selectionChanged?(selection?: { projectKey: string; filePath: string; sourceHash: string; sourceUri: string; range: LeanRange }): void;
 }
 const labels = {
     zh: { title: '完整 Lean 源码', readonly: '只读', close: '收起源码', back: '返回上一处源码', loading: '正在读取完整文件…',
         unavailable: '完整文件暂不可用；以下保留已记录片段。', failed: '完整文件未能读取。', reload: '重新读取文件',
         snapshot: '审阅材料中的源码片段', current: '当前完整文件', changed: '此链接的源码已变化；请重新选择范围。',
+        rangeUnverified: '记录片段不完整或仅用于上下文；请在当前源码中选择核对范围。',
         find: '查找', fold: '折叠', unfold: '展开', focus: '定位关联范围', copy: '复制完整文件', copyRange: '复制选中范围',
         copied: 'Lean 源码已复制', copyFailed: '复制未完成，可选中源码手动复制。', select: '在源码中选择位置以查看证明目标；按 F12 或 ⌘/Ctrl 点击跳转定义。',
         semantics: '实时 Lean 语义', start: '启动 Lean 语义', refresh: '更新语义', stop: '停止语义', opening: '正在启动已有 Lean 工具链…',
@@ -37,6 +39,7 @@ const labels = {
     en: { title: 'Complete Lean source', readonly: 'Read only', close: 'Collapse source', back: 'Back to previous source', loading: 'Reading the complete file…',
         unavailable: 'The complete file is unavailable. The recorded excerpt remains below.', failed: 'Could not read the complete file.', reload: 'Read file again',
         snapshot: 'Source excerpt in review material', current: 'Current complete file', changed: 'Source changed since this link. Select the range again.',
+        rangeUnverified: 'The recorded excerpt is incomplete or context only. Select a comparison range in the current source.',
         find: 'Find', fold: 'Fold', unfold: 'Unfold', focus: 'Focus linked range', copy: 'Copy complete file', copyRange: 'Copy selected range',
         copied: 'Lean source copied', copyFailed: 'Copy did not complete. Select source and copy it manually.', select: 'Select a source position to inspect proof goals. Use F12 or ⌘/Ctrl click to follow its definition.',
         semantics: 'Live Lean semantics', start: 'Start Lean semantics', refresh: 'Refresh semantics', stop: 'Stop semantics', opening: 'Starting the existing Lean toolchain…',
@@ -77,6 +80,7 @@ export class ReaderLeanSource {
     private loading = false;
     private message = '';
     private lastRevision = -1;
+    private sourceRevision = -1;
     private sourceAbort?: AbortController;
     private navigationRequest = 0;
     private semanticEnabled = false;
@@ -93,10 +97,17 @@ export class ReaderLeanSource {
         this.projectId = this.host.context().projectId;
         if (!this.root.hidden) { this.renderChrome(); this.editor?.refreshLayout(); }
     }
-    contextChanged(): void {
+    contextChanged(assistanceOnly = false): void {
         if (this.root.hidden) return;
         if (this.projectId !== this.host.context().projectId || (this.source && this.source.projectToken !== this.host.context().projectId)) { this.close(); return; }
         const revision = this.host.context().revision;
+        if (assistanceOnly) {
+            // A contiguous candidate-only event changes no source. Do not promote an already
+            // stale/in-flight source read to current, or interrupt its Lean session.
+            if (this.source && !this.loading && this.sourceRevision === this.lastRevision) this.sourceRevision = revision;
+            this.lastRevision = revision;
+            return;
+        }
         if (revision !== this.lastRevision && this.target) { this.lastRevision = revision; void this.open(this.target, false, true); }
         else { this.editor?.setLanguage(this.host.context().language, this.words().title + ' · ' + this.words().readonly); this.renderChrome(); this.renderSemantic(this.semantic.state); }
     }
@@ -105,14 +116,24 @@ export class ReaderLeanSource {
             projectKey: source.projectKey, filePath: source.filePath, sourceHash: source.sourceHash, sourceUri: source.sourceUri, range: this.range } : undefined;
     }
 
-    async open(target: LeanSourceTarget, pushHistory = true, passive = false): Promise<void> {
+    async open(target: LeanSourceTarget, pushHistory = true, passive = false, options: { force?: boolean; reveal?: boolean } = {}): Promise<void> {
         const context = this.host.context(), generation = this.generation, request = ++this.request;
         this.sourceAbort?.abort(); const abort = new AbortController(); this.sourceAbort = abort;
         const same = this.source?.projectToken === context.projectId && this.source.projectKey === target.projectKey && this.source.filePath === target.filePath;
         const previousHash = same ? this.source?.sourceHash : undefined;
         if (pushHistory && this.target && (!same || JSON.stringify(this.target.range) !== JSON.stringify(target.range))) this.history.push({ ...this.target, range: this.range });
+        const reusable = same && this.editor && !this.loading && !this.message && this.sourceRevision === context.revision && !passive && !options.force
+            && (!target.sourceHash || target.sourceHash === this.source?.sourceHash);
         this.target = target; this.loading = true; this.message = ''; this.root.hidden = false; this.lastRevision = context.revision;
         if (!passive) this.linkedRange = target.range;
+        if (reusable) {
+            this.loading = false;
+            this.validateLinkedRange(this.source!, target);
+            if (this.linkedRange && !this.message) this.editor!.focusRange(this.linkedRange);
+            this.editor!.refreshLayout(); this.renderChrome(); this.renderSemantic(this.semantic.state);
+            if (options.reveal !== false) this.root.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+            return;
+        }
         if (!same) { this.semantic.setSource(undefined); this.editor?.destroy(); this.editor = undefined; this.source = undefined; this.range = undefined; this.position = undefined; this.showFallback(target.fallback); }
         this.renderChrome();
         const current = () => generation === this.generation && request === this.request && this.target === target && this.host.context().projectId === context.projectId;
@@ -125,15 +146,17 @@ export class ReaderLeanSource {
             if (source.projectToken !== context.projectId || source.projectKey !== target.projectKey || source.filePath !== target.filePath || source.readonly !== true
                 || typeof source.content !== 'string' || !source.sourceHash || !source.sourceUri) throw new Error('Source response does not match the requested file.');
             const changed = this.source?.sourceHash !== source.sourceHash;
-            this.source = source; this.semantic.setSource(source); this.loading = false;
+            this.source = source; this.sourceRevision = context.revision; this.semantic.setSource(source); this.loading = false;
             if ((previousHash && previousHash !== source.sourceHash) || (target.sourceHash && target.sourceHash !== source.sourceHash)) {
                 this.message = this.words().changed; this.range = undefined; this.linkedRange = undefined; this.position = undefined;
                 this.host.selectionChanged?.(undefined);
             }
+            if (!passive && !this.message) this.validateLinkedRange(source, target);
             if (changed || !this.editor) await this.installEditor(source, current);
             if (!current()) return;
             if (!passive && !this.message && this.linkedRange) this.editor?.focusRange(this.linkedRange);
-            this.renderChrome(); this.renderSemantic(this.semantic.state); this.root.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+            this.renderChrome(); this.renderSemantic(this.semantic.state);
+            if (!passive && options.reveal !== false) this.root.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
             if (this.semanticEnabled && this.semantic.state.state === 'idle') {
                 if (this.position) this.semantic.select(this.position);
                 void this.semantic.open();
@@ -144,6 +167,15 @@ export class ReaderLeanSource {
             if (!this.source) this.showFallback(target.fallback);
             this.renderChrome();
         }
+    }
+
+    private validateLinkedRange(source: LeanSourceFile, target: LeanSourceTarget): void {
+        const excerpt = target.fallback;
+        if (!excerpt || !target.range) return;
+        const current = normalizeLeanSource(source.content).split('\n').slice(excerpt.startLine - 1, excerpt.endLine).join('\n').replace(/\n+$/, '');
+        if (excerpt.truncated || excerpt.rangeKind === 'context') this.message = this.words().rangeUnverified;
+        else if (current !== normalizeLeanSource(excerpt.content).replace(/\n+$/, '')) this.message = this.words().changed;
+        if (this.message) { this.editor?.clearFocusRange(); this.range = undefined; this.linkedRange = undefined; this.position = undefined; this.host.selectionChanged?.(undefined); }
     }
 
     private async installEditor(source: LeanSourceFile, current: () => boolean): Promise<void> {
@@ -175,7 +207,7 @@ export class ReaderLeanSource {
         const w = this.words(), title = node('div'); title.append(node('h3', w.title), node('p', `${this.target?.title || this.target?.filePath || ''} · ${w.readonly}`, 'reader-lean-review-location'));
         const controls = node('div', '', 'reader-lean-review-actions');
         if (this.history.length) controls.append(control(w.back, () => { const previous = this.history.pop(); if (previous) void this.open(previous, false); }, 'back'));
-        controls.append(control(w.close, () => this.close(), 'close')); this.header.replaceChildren(title, controls);
+        controls.append(control(w.close, () => { this.close(); this.host.closed?.(); }, 'close')); this.header.replaceChildren(title, controls);
         this.status.textContent = this.loading ? w.loading : this.message || (this.source ? `${w.current} · ${w.origin[this.source.origin]} · ${this.source.lineCount} ${w.lines}` : w.unavailable);
         this.status.classList.toggle('is-warning', Boolean(this.message || (!this.loading && !this.source)));
         this.toolbar.replaceChildren();
@@ -189,7 +221,7 @@ export class ReaderLeanSource {
             ] as const) this.toolbar.append(control(label, action, key));
             const metadata = node('details', '', 'reader-lean-source-metadata'); metadata.append(node('summary', w.fingerprint), node('code', source.sourceHash)); this.toolbar.append(metadata);
         }
-        const reload = control(w.reload, () => { if (this.target) void this.open(this.target, false); }, 'reload'); reload.disabled = this.loading; this.toolbar.append(reload);
+        const reload = control(w.reload, () => { if (this.target) void this.open(this.target, false, false, { force: true }); }, 'reload'); reload.disabled = this.loading; this.toolbar.append(reload);
     }
     private async copy(value: string): Promise<void> { this.host.report(await copyReaderText(value) ? this.words().copied : this.words().copyFailed); }
 

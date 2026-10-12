@@ -25,6 +25,8 @@ import { LeanReviewError } from '../lean/lean-evidence';
 import { LeanLanguageService } from '../lean/lean-language-service';
 import { LeanAuditService } from '../lean/lean-audit-service';
 import { handleLeanAuditRoute } from '../lean/lean-audit-routes';
+import { LeanAssistanceService } from '../lean/lean-assistance-service';
+import { handleLeanAssistanceRoute } from '../lean/lean-assistance-routes';
 import { SymbolAuditService } from './symbol-audit-service';
 import type { SymbolAuditScope, SymbolAuditSettings } from './symbol-audit';
 import { registerReaderInstance, unregisterReaderInstance } from './location-bridge';
@@ -416,6 +418,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
 
     const broadcast = (snapshot: WorkspaceSnapshot | undefined, changedPaths: string[], projectChanged = false): void => {
         broadcastEvent('workspace-update', {
+            projectId: rootPath ? createHash('sha256').update(rootPath).digest('hex') : undefined,
             revision: snapshot?.revision || 0,
             refreshedAt: snapshot?.refreshedAt || '',
             changedPaths,
@@ -429,6 +432,9 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
     const leanLanguage = new LeanLanguageService();
     const leanAudit = new LeanAuditService(leanReview, (projectRoot, formalId) => {
         if (rootPath === projectRoot) workspace?.notifyMetadataChange([`.math-workspace/lean-audits/${formalId}.json`]);
+    });
+    const leanAssistance = new LeanAssistanceService(leanReview, (projectRoot, formalId) => {
+        if (rootPath === projectRoot) workspace?.notifyMetadataChange([`.math-workspace/lean-assistance/${formalId}.json`]);
     });
 
     const syncReaderInstance = async (previousRoot?: string): Promise<void> => {
@@ -580,7 +586,8 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
             const snapshot = workspace.current();
 
             if (url.pathname === '/api/lean-language/source' || url.pathname === '/api/lean-language/action'
-                || url.pathname === '/api/lean-audit' || url.pathname.startsWith('/api/lean-audit/')) {
+                || url.pathname === '/api/lean-audit' || url.pathname.startsWith('/api/lean-audit/')
+                || url.pathname === '/api/lean-assistance' || url.pathname.startsWith('/api/lean-assistance/')) {
                 if (!requireRequestToken(request, response, requestToken)) return;
                 const boundRoot = rootPath;
                 const boundProject = createHash('sha256').update(boundRoot).digest('hex');
@@ -605,6 +612,10 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                 } else if (url.pathname === '/api/lean-audit' || url.pathname.startsWith('/api/lean-audit/')) {
                     const result = await handleLeanAuditRoute(leanAudit, boundRoot, request.method, url.pathname, url.searchParams, body);
                     if (rootPath !== boundRoot) { sendText(response, 409, 'The Lean project changed while reading audit data.'); return; }
+                    sendJson(response, result.status, result.value);
+                } else if (url.pathname === '/api/lean-assistance' || url.pathname.startsWith('/api/lean-assistance/')) {
+                    const result = await handleLeanAssistanceRoute(leanAssistance, boundRoot, request.method, url.pathname, url.searchParams, body);
+                    if (rootPath !== boundRoot) { sendText(response, 409, 'The Lean project changed while reading assistance data.'); return; }
                     sendJson(response, result.status, result.value);
                 } else sendText(response, 405, 'Lean complete source reads use GET; language actions use POST.');
                 return;

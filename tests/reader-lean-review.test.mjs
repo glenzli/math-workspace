@@ -99,9 +99,21 @@ async function harness() {
     let override, navigate, currentJob;
     const modules = {}, globals = { document, window: { innerWidth: 1280, innerHeight: 900,
         addEventListener: windowEvents.addEventListener.bind(windowEvents), removeEventListener: windowEvents.removeEventListener.bind(windowEvents) },
-        Node: { ELEMENT_NODE: 1 }, crypto: { randomUUID: () => 'test-' + (timerId++) },
+        Node: { ELEMENT_NODE: 1 }, AbortController, crypto: { randomUUID: () => 'test-' + (timerId++) },
         setTimeout: callback => { const id = ++timerId; timers.set(id, callback); return id; }, clearTimeout: id => timers.delete(id),
         require: name => { if (name === './reader-clipboard') return { copyReaderText: async text => { copied.push(text); return true; } }; return modules[name]; } };
+    const assistanceInstances = [];
+    modules['./reader-lean-assistance'] = { ReaderLeanAssistance: class {
+        constructor(host) { this.host = host; this.root = document.createElement('section'); assistanceInstances.push(this); }
+        mount() { return this.root; } update(payload) { this.payload = payload; } metadataChanged() { this.metadataReads = (this.metadataReads || 0) + 1; }
+        acknowledgeAssistanceRevision() {} hide() {} destroy() { this.root.remove(); }
+    } };
+    modules['./reader-lean-source-highlighter'] = { tokenizeLeanSource: () => [], tokenizeLeanSourceAsync: async () => [] };
+    modules['./reader-lean-source-editor'] = { LeanSourceEditor: class {
+        constructor(parent, content, host) { this.host = host; this.node = document.createElement('pre'); this.node.textContent = content; this.node.dataset.testSourceEditor = 'true'; parent.append(this.node); }
+        focusRange(range) { this.range = range; this.host.positionChanged(range.start, range); }
+        clearFocusRange() { this.range = undefined; } setSyntax() {} setSemantics() {} setLanguage() {} refreshLayout() {} destroy() { this.node.remove(); }
+    } };
     async function load(relative, name) {
         const text = await fs.readFile(path.join(repoRoot, relative), 'utf8'), exports = {};
         const compiled = ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
@@ -120,6 +132,9 @@ async function harness() {
         requests.push({ route, options: structuredClone(options), project: context.projectId });
         if (override) { const result = override(route, options); if (result) return result; }
         const url = new URL(route, 'http://localhost');
+        if (url.pathname === '/api/lean-language/source') return response({ projectToken: context.projectId, projectKey: url.searchParams.get('projectKey'),
+            filePath: url.searchParams.get('filePath'), sourceHash: 'file-hash', sourceUri: 'lean-source:fixture', origin: 'project', readonly: true,
+            content: 'import Mathlib\n\n' + declaration().source.content + '\n\n' + declaration('Book.choice').source.content, lineCount: 5 });
         if (url.pathname === '/api/lean-audit') {
             const value = snapshots.get(context.projectId + ':' + url.searchParams.get('id'));
             return response({ id: value.id, projectToken: value.projectToken, evidenceFingerprint: value.evidence.fingerprint,
@@ -155,7 +170,7 @@ async function harness() {
         navigatePage: async filePath => { if (navigate) return navigate(filePath); panel.navigationStarted(filePath); context.filePath = filePath; panel.contextChanged(); },
         canAssist: () => true, assist: async content => { assists.push(content); }, report: message => reports.push(message) };
     const panel = new exports.ReaderLeanReview(main, host), region = main.querySelector('.reader-lean-review');
-    return { ...exports, ReaderLeanPopover, document, context, main, article, panel, region, requests, reports, assists, copied, snapshots, host, store,
+    return { ...exports, ReaderLeanPopover, document, context, main, article, panel, region, requests, reports, assists, copied, snapshots, host, store, assistanceInstances,
         setOverride: fn => { override = fn; }, setNavigate: fn => { navigate = fn; }, setJob: value => { currentJob = value; },
         async runTimers() { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach(callback => callback()); await settle(); },
         get timerCount() { return timers.size; },
@@ -400,6 +415,169 @@ async function testSavedSourceDiffLocations() {
     } finally { await h.dispose(); }
 }
 
+async function testStableComparisonWorkbench() {
+    const h = await harness(); h.store(payload());
+    let renders = 0, mounts = 0, disposals = 0;
+    h.host.renderProse = source => { renders++; return `<p>${source.content}</p>`; };
+    h.host.mountProse = () => { mounts++; return () => { disposals++; }; };
+    try {
+        const queue = deferred(); h.setOverride(route => route.startsWith('/api/lean-review/queue') ? queue.promise : undefined);
+        await h.panel.open(idA); await settle();
+        const prose = h.find('.reader-lean-review-prose-scroll'), editor = h.find('[data-test-source-editor]');
+        assert.equal(renders, 3); assert.equal(mounts, 3, 'All statement, proof and context math is rendered without placeholders.');
+        assert.equal(h.find('[data-lean-slot="lean"]').contains(editor), true, 'Complete Lean source is beside the prose.');
+        assert.equal(h.find('[data-lean-prose-part="statement"]').hidden, false);
+        assert.equal(h.find('[data-lean-prose-part="proof:0"]').hidden, true);
+        h.input('prose-part', 'proof:0', 'change'); prose.scrollTop = 127;
+        assert.equal(h.find('[data-lean-prose-part="proof:0"]').hidden, false);
+        queue.resolve(response({ projectToken: rootA, items: [], counts: {} })); await settle();
+        assert.equal(h.find('.reader-lean-review-prose-scroll'), prose); assert.equal(prose.scrollTop, 127);
+        assert.equal(h.find('[data-test-source-editor]'), editor); assert.equal(renders, 3); assert.equal(disposals, 0);
+        h.setOverride(undefined); h.click('refresh'); await settle(); await h.runTimers();
+        assert.equal(h.find('[data-test-source-editor]'), editor); assert.equal(h.find('.reader-lean-review-prose-scroll'), prose);
+        assert.equal(renders, 3, 'Job progress cannot remount mathematical prose.');
+        h.click('view-prose'); assert.equal(h.find('[data-lean-slot="lean"]').hidden, true);
+        h.click('view-lean'); assert.equal(h.find('[data-lean-slot="prose"]').hidden, true);
+        h.click('view-both'); assert.equal(h.find('[data-lean-slot="prose"]').hidden, false); assert.equal(h.find('[data-lean-slot="lean"]').hidden, false);
+        assert.equal(h.find('[data-test-source-editor]'), editor, 'Compact viewport switching preserves the source surface.');
+        const reload = deferred(); h.setOverride(route => route === '/api/lean-review?id=' + idA ? reload.promise : undefined);
+        h.panel.metadataChanged([`.math-workspace/lean-reviews/${idA}.json`]); await settle();
+        assert.equal(h.find('[data-test-source-editor]'), editor); assert.match(h.region.textContent, /正在更新对照材料/);
+        assert.equal(h.find('.reader-lean-review-prose-scroll'), prose);
+        reload.resolve(response(payload())); await settle(); assert.equal(renders, 3);
+        h.context.language = 'en'; h.panel.contextChanged(); assert.equal(renders, 6); assert.equal(disposals, 3);
+        assert.equal(h.find('[data-test-source-editor]'), editor, 'Locale changes retranslate prose controls without rebuilding Lean source.');
+        const css = await fs.readFile(path.join(repoRoot, 'src/reader/web/styles.css'), 'utf8');
+        assert.match(css, /reader-lean-review-prose-scroll[^}]*overflow: auto;[^}]*overscroll-behavior: contain;/);
+        assert.match(css, /reader-lean-review-columns \[hidden\] \{ display: none !important;/);
+    } finally { await h.dispose(); }
+}
+
+async function testAssistanceDraftBoundary() {
+    const h = await harness(); h.store(payload()); h.store(payload(idB));
+    try {
+        await h.panel.open(idA); const assistance = h.assistanceInstances[0];
+        h.input('scope', 'Only the statement.'); h.input('verdict', 'partial', 'change');
+        const binding = { projectToken: rootA, id: idA, evidenceFingerprint: payload().evidence.fingerprint, reviewRevision: 0, auditRevision: 0, candidateRevision: 1 };
+        const candidate = { id: 'candidate-1', category: 'assumption', task: 'assumptions', title: 'Check the inhabited hypothesis', note: 'The prose may omit this premise.',
+            declarationKeys: ['formal:Book.exists'], binding, status: 'pending', createdAt: '2026-10-13T00:00:00Z' };
+        assert.equal(assistance.host.adoptCandidate(candidate, { ...binding, projectToken: rootB }), false);
+        assert.equal(assistance.host.adoptCandidate(candidate, { ...binding, reviewRevision: 1 }), false);
+        assert.equal(assistance.host.adoptCandidate(candidate, binding), true);
+        assert.equal(assistance.host.candidateInDraft(candidate.id), true);
+        assert.equal(h.find('[data-lean-focus="verdict"]').value, 'partial', 'Candidate adoption does not change an existing human verdict.');
+        assert.equal(h.find('[data-lean-focus="claim-verdict"]').value, 'undecided'); assert.match(h.find('[data-lean-focus="claim-note"]').value, /AI 候选，待人工核对/);
+        assert.equal(h.find('[data-lean-focus="scope"]').value, 'Only the statement.');
+        assert.equal(h.find('[data-lean-slot="review"]').querySelector('details').open, true);
+        assert.equal(assistance.host.adoptCandidate(candidate, binding), false, 'Repeated adoption does not duplicate the same candidate.');
+        h.click('remove-claim'); assert.equal(assistance.host.candidateInDraft(candidate.id), false);
+        assert.equal(assistance.host.adoptCandidate(candidate, binding), true, 'A removed candidate can be added again after an explicit action.');
+        assert.equal(h.requests.some(request => request.options.method === 'POST'), false, 'Adoption creates only a local draft.');
+        h.panel.metadataChanged([`.math-workspace/lean-assistance/${idA}.json`]); assert.ok(assistance.metadataReads > 0);
+        await h.panel.open(idB); assert.equal(assistance.host.adoptCandidate({ ...candidate, id: 'late' }, binding), false);
+        await h.panel.open(idA); assert.equal(h.find('[data-lean-focus="claim-text"]').value, candidate.title, 'Switching objects retains the candidate draft.');
+        const changed = payload(); changed.review.expectedRevision = 1; h.store(changed);
+        h.panel.metadataChanged([`.math-workspace/lean-reviews/${idA}.json`]); await settle();
+        assert.equal(assistance.host.adoptCandidate({ ...candidate, id: 'next' }, { ...binding, reviewRevision: 1 }), false, 'Outdated drafts cannot adopt against a newer saved record.');
+    } finally { await h.dispose(); }
+}
+
+async function testQueueReuseDuringNavigation() {
+    const h = await harness(); h.store(payload()); h.store(payload(idB));
+    try {
+        await h.panel.open(idA); await settle();
+        const reads = () => h.requests.filter(request => request.route.startsWith('/api/lean-review/queue')).length;
+        const initial = reads(); h.find(`[data-lean-object="${idB}"]`).click(); await settle();
+        assert.equal(reads(), initial, 'Moving within a verified page queue does not reload that queue.');
+        assert.match(h.region.querySelector('header').textContent, new RegExp(idB));
+        h.context.revision++; h.panel.contextChanged(); await settle();
+        assert.equal(reads(), initial + 1, 'Source revisions invalidate the queue.');
+        h.panel.metadataChanged([`.math-workspace/lean-reviews/${idA}.json`]); await settle();
+        assert.equal(reads(), initial + 2, 'Peer review writes refresh queue badges even without a source revision.');
+    } finally { await h.dispose(); }
+}
+
+async function testDeclarationSourceRebinding() {
+    const h = await harness(); h.store(payload());
+    try {
+        await h.panel.open(idA); await settle(); h.input('note', 'Keep this draft while anchors change.');
+        const changed = payload(), replacement = declaration('Book.replacement');
+        replacement.source.filePath = 'lean/Replacement.lean'; changed.evidence.declarations = [replacement]; changed.evidence.fingerprint = 'new-anchor'; h.store(changed);
+        h.context.revision++; h.panel.contextChanged(); await settle();
+        assert.equal(h.find('[data-lean-focus="declaration"]').value, replacement.key);
+        assert.match(h.find('.reader-lean-source-header').textContent, /Book.replacement/);
+        assert.ok(h.requests.some(request => request.route.includes('filePath=lean%2FReplacement.lean')));
+        assert.equal(h.find('[data-lean-focus="note"]').value, 'Keep this draft while anchors change.');
+        const moved = structuredClone(changed); moved.evidence.fingerprint = 'moved-anchor'; moved.evidence.declarations[0].source.filePath = 'lean/Moved.lean'; h.store(moved);
+        h.panel.metadataChanged([`.math-workspace/lean-review-evidence/${idA}.json`]); await settle();
+        assert.ok(h.requests.some(request => request.route.includes('filePath=lean%2FMoved.lean')), 'Same declaration keys still rebind changed source targets.');
+        const removed = structuredClone(moved); removed.evidence.fingerprint = 'removed-anchor'; removed.evidence.declarations = []; h.store(removed);
+        h.panel.metadataChanged([`.math-workspace/lean-review-evidence/${idA}.json`]); await settle();
+        assert.equal(h.find('.reader-lean-source').hidden, true, 'Removing all declarations cannot leave an unrelated complete file beside the prose.');
+        assert.equal(h.region.querySelector('[data-test-source-editor]'), null);
+    } finally { await h.dispose(); }
+}
+
+async function testCandidateOnlyRealtimeRefresh() {
+    const h = await harness(); h.store(payload()); h.store(payload(idB));
+    try {
+        await h.panel.open(idA); await settle(); h.input('note', 'Keep the local review draft.');
+        const candidatePath = `.math-workspace/lean-assistance/${idA}.json`;
+        const update = { projectId: rootA, revision: 2, changedPaths: [candidatePath] };
+        assert.deepEqual(h.leanAssistanceUpdatePaths(update, { projectId: rootA, revision: 1 }), [candidatePath]);
+        for (const invalid of [
+            { ...update, projectId: rootB }, { ...update, revision: 3 }, { ...update, revision: 1 },
+            { ...update, initial: true }, { ...update, projectChanged: true },
+            { ...update, changedPaths: [] }, { ...update, changedPaths: [candidatePath, 'book1/ch01-a.md'] },
+            { ...update, changedPaths: [candidatePath + '.tmp'] }, { ...update, changedPaths: [null] },
+            { ...update, changedPaths: [`.math-workspace/lean-reviews/${idA}.json`] }
+        ]) assert.equal(h.leanAssistanceUpdatePaths(invalid, { projectId: rootA, revision: 1 }), undefined);
+
+        // Run the actual Reader realtime handler without bootstrapping unrelated UI surfaces.
+        const mainText = await fs.readFile(path.join(repoRoot, 'src/reader/web/main.ts'), 'utf8');
+        const parsed = ts.createSourceFile('main.ts', mainText, ts.ScriptTarget.Latest, true);
+        const reader = parsed.statements.find(node => ts.isClassDeclaration(node) && node.members.some(member => member.name?.getText(parsed) === 'installRealtimeUpdates'));
+        const method = reader.members.find(member => member.name?.getText(parsed) === 'installRealtimeUpdates');
+        const compiled = ts.transpileModule(`class RealtimeHarness { ${method.getText(parsed)} }\nexports.install = RealtimeHarness.prototype.installRealtimeUpdates;`,
+            { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+        const handlers = new Map(), exports = {};
+        vm.runInNewContext(compiled, { exports, leanAssistanceUpdatePaths: h.leanAssistanceUpdatePaths,
+            readerEvents: () => ({ addEventListener: (name, handler) => handlers.set(name, handler) }),
+            window: { setTimeout() {} }, console });
+        let fullRefreshes = 0, nextRevision = 1;
+        const app = { state: { projectId: rootA, revision: 1, pages: [{ filePath: h.context.filePath }] },
+            leanReview: h.panel, pageRequestId: 1, currentPath: h.context.filePath, liveStatus: {}, dictionary: () => ({ live: 'Updated' }),
+            async refreshState() { fullRefreshes++; this.state = { ...this.state, revision: nextRevision }; h.panel.contextChanged(); } };
+        h.host.context = () => ({ ...h.context, revision: app.state.revision });
+        exports.install.call(app);
+        const emit = value => { nextRevision = value.revision; handlers.get('workspace-update')({ data: JSON.stringify(value) }); };
+        const editor = h.find('[data-test-source-editor]'), prose = h.find('.reader-lean-review-prose-scroll'); prose.scrollTop = 145;
+        const requestsBefore = h.requests.length, assistance = h.assistanceInstances[0], candidatesBefore = assistance.metadataReads || 0;
+        emit(update); await settle();
+        assert.equal(app.state.revision, 2); assert.equal(fullRefreshes, 0);
+        assert.equal(h.requests.length, requestsBefore, 'Candidate-only notification does not reread state, source, object, audit or queue.');
+        assert.equal(assistance.metadataReads, candidatesBefore + 1, 'Only the active candidate panel is invalidated.');
+        assert.equal(h.find('[data-test-source-editor]'), editor); assert.equal(h.find('.reader-lean-review-prose-scroll'), prose);
+        assert.equal(prose.scrollTop, 145); assert.equal(h.find('[data-lean-focus="note"]').value, 'Keep the local review draft.');
+        h.panel.contextChanged(); await settle();
+        assert.equal(h.requests.length, requestsBefore, 'Acknowledged metadata revisions do not cause a deferred source reload.');
+        h.click('view-prose'); h.click('view-both'); await settle();
+        assert.equal(h.requests.length, requestsBefore, 'An ordinary render after the candidate event cannot cause a deferred audit or source reload.');
+        emit({ ...update, revision: 3, changedPaths: [`.math-workspace/lean-assistance/${idB}.json`] }); await settle();
+        assert.equal(assistance.metadataReads, candidatesBefore + 1, 'Another object candidate update does not reload the active candidate panel.');
+        assert.equal(h.requests.length, requestsBefore);
+        h.click('view-prose'); h.click('view-both'); await settle();
+        assert.equal(h.requests.length, requestsBefore, 'Another object candidate update also preserves the current audit/source on later renders.');
+        emit({ ...update, revision: 5 }); await settle();
+        assert.equal(fullRefreshes, 1, 'A revision gap keeps the conservative full state refresh.');
+        assert.ok(h.requests.slice(requestsBefore).some(request => request.route.startsWith('/api/lean-review/queue')));
+        const afterGap = h.requests.length;
+        emit({ ...update, revision: 6, changedPaths: [candidatePath, 'book1/other.md'] }); await settle();
+        assert.equal(fullRefreshes, 2, 'A mixed source notification keeps the full refresh.');
+        assert.ok(h.requests.slice(afterGap).some(request => request.route.startsWith('/api/lean-language/source')));
+    } finally { await h.dispose(); }
+}
+
 export async function testReaderLeanReview() {
     await testEntryAndManualReview();
     await testConflictAndDefinitionDrift();
@@ -409,6 +587,11 @@ export async function testReaderLeanReview() {
     await testBoundedContextAndLayoutContract();
     await testMetadataEventsWithoutWorkspaceRevision();
     await testSavedSourceDiffLocations();
+    await testStableComparisonWorkbench();
+    await testAssistanceDraftBoundary();
+    await testQueueReuseDuringNavigation();
+    await testDeclarationSourceRebinding();
+    await testCandidateOnlyRealtimeRefresh();
     console.log('Reader Lean review tests passed.');
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await testReaderLeanReview();

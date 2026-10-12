@@ -2,9 +2,10 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { DEFAULT_LEAN_COVERAGE_TYPES, HASH_ID_RE } from '@math-workspace/core';
-import { loadWorkspaceSnapshot } from '../reader/workspace';
+import { loadWorkspaceSnapshot, type WorkspaceSnapshot } from '../reader/workspace';
 import { declarationReviewKey, evidenceFingerprint, formalReviewId, LeanReviewError, readReviewContext,
-    refreshReviewEvidence, reviewSafePath, reviewHash, validateReviewWorkspace, type ReviewContext } from './lean-evidence';
+    readReviewSourceLines, refreshReviewEvidence, reviewSafePath, reviewHash, validateReviewWorkspace,
+    type ProjectInputs, type ReviewContext, type ReviewSourceInputs } from './lean-evidence';
 import { readReviewEvidenceCache, readReviewRecord, reviewSaveInput, saveReviewRecord, writeReviewEvidenceCache } from './lean-review-store';
 import type { DeclarationEvidence, LeanDefinitionResponse, LeanReviewEvidence, LeanReviewQueueItem,
     LeanReviewResponse, ReviewChange, ReviewJob, ReviewRecord, SourceSnippet } from './lean-review';
@@ -93,25 +94,68 @@ export function reviewProjection(record: ReviewRecord | undefined, evidence: Lea
 }
 
 interface ActiveJob { root: string; job: ReviewJob; child?: any; cancelled: boolean; promise?: Promise<void> }
+interface ReviewReadBatch {
+    root: string;
+    snapshot: WorkspaceSnapshot;
+    projectInputs: Map<string, Promise<ProjectInputs>>;
+    compiledInputs: Map<string, Promise<string | undefined>>;
+    sourceInputs: ReviewSourceInputs;
+    objects: Map<string, Promise<LeanReviewResponse>>;
+}
 
 export class LeanReviewService {
     private readonly jobs = new Map<string, ActiveJob>();
+    private readonly preparingReads = new Map<string, Promise<ReviewReadBatch>>();
     private closed = false;
     constructor(private readonly onChange?: (root: string, formalId: string) => void) {}
 
-    async get(root: string, id: unknown): Promise<LeanReviewResponse> {
-        const context = await readReviewContext(root, id);
-        return this.response(context);
+    private async readBatch(rootInput: string): Promise<ReviewReadBatch> {
+        const root = await fs.realpath(rootInput);
+        let pending = this.preparingReads.get(root);
+        if (!pending) {
+            pending = (async () => {
+                await validateReviewWorkspace(root);
+                return { root, snapshot: await loadWorkspaceSnapshot(root), projectInputs: new Map(),
+                    compiledInputs: new Map(), sourceInputs: new Map(), objects: new Map() };
+            })();
+            this.preparingReads.set(root, pending);
+        }
+        try { return await pending; }
+        finally {
+            // Only consumers arriving during preparation share a batch. A later request must
+            // read disk again, even if a large queue from this batch is still being projected.
+            if (this.preparingReads.get(root) === pending) this.preparingReads.delete(root);
+        }
     }
 
-    private async response(context: ReviewContext, compiledInputs?: Map<string, Promise<string | undefined>>): Promise<LeanReviewResponse> {
-        const [evidence, record] = await Promise.all([this.currentEvidence(context, compiledInputs), readReviewRecord(context.root, context.id)]);
+    private async readObject(batch: ReviewReadBatch, idInput: unknown): Promise<LeanReviewResponse> {
+        const id = formalReviewId(idInput);
+        if (!batch.objects.has(id)) batch.objects.set(id, (async () => {
+            const context = await readReviewContext(batch.root, id, batch.snapshot, batch.projectInputs, true, batch.sourceInputs);
+            return this.response(context, batch.compiledInputs, batch.sourceInputs);
+        })());
+        const pending = batch.objects.get(id)!;
+        try { return await pending; }
+        finally {
+            // Do not retain every expanded evidence snapshot while a large queue drains.
+            if (batch.objects.get(id) === pending) batch.objects.delete(id);
+        }
+    }
+
+    async get(root: string, id: unknown, fresh = false): Promise<LeanReviewResponse> {
+        // Admission/CAS checks use a dedicated scan and never join passive reader work.
+        if (fresh) return this.response(await readReviewContext(root, id));
+        return this.readObject(await this.readBatch(root), id);
+    }
+
+    private async response(context: ReviewContext, compiledInputs?: Map<string, Promise<string | undefined>>, sourceInputs?: ReviewSourceInputs): Promise<LeanReviewResponse> {
+        const [evidence, record] = await Promise.all([this.currentEvidence(context, compiledInputs, sourceInputs), readReviewRecord(context.root, context.id)]);
         const active = [...this.jobs.values()].reverse().find(item => item.root === context.root && item.job.formalId === context.id);
         return { id: context.id, projectToken: reviewHash(context.root), formal: context.formal, evidence,
             review: reviewProjection(record, evidence), ...(active ? { job: { ...active.job } } : {}) };
     }
 
-    private async currentEvidence(context: ReviewContext, compiledInputs = new Map<string, Promise<string | undefined>>()): Promise<LeanReviewEvidence> {
+    private async currentEvidence(context: ReviewContext, compiledInputs = new Map<string, Promise<string | undefined>>(), sourceInputs?: ReviewSourceInputs): Promise<LeanReviewEvidence> {
         const evidence = projectReviewEvidence(context, await readReviewEvidenceCache(context.root, context.id));
         for (const declaration of [...evidence.declarations, ...evidence.definitions]) {
             if (!declaration.compiledSource) continue;
@@ -139,7 +183,7 @@ export class LeanReviewService {
                 definition.diagnostic = 'The previously located definition source is no longer available.';
                 continue;
             }
-            const lines = (await fs.readFile(sourceFile, 'utf8')).split(/\r?\n/);
+            const lines = await readReviewSourceLines(context.root, definition.source.filePath, sourceInputs);
             const previous = definition.source;
             const content = lines.slice(previous.startLine - 1, previous.endLine).join('\n');
             const fingerprint = reviewHash(content);
@@ -153,8 +197,8 @@ export class LeanReviewService {
     }
 
     async queue(rootInput: string, filePath: string, wholeProject = false): Promise<{ projectToken: string; items: LeanReviewQueueItem[]; counts: Record<string, number> }> {
-        const root = await validateReviewWorkspace(rootInput);
-        const snapshot = await loadWorkspaceSnapshot(root);
+        const batch = await this.readBatch(rootInput);
+        const { root, snapshot } = batch;
         if (!wholeProject && !snapshot.state.pages.some((page: any) => page.filePath === filePath)) throw new LeanReviewError(404, 'Review queue requires a current Markdown page.');
         const page = snapshot.state.pages.find((item: any) => item.filePath === filePath);
         // A page already represents its chapter's reading unit; include split pages of that chapter.
@@ -166,15 +210,12 @@ export class LeanReviewService {
             .sort(([, a], [, b]) => a.filePath.localeCompare(b.filePath) || (a.startLine || 0) - (b.startLine || 0)).map(([id]) => id);
         if (ids.length > (wholeProject ? 3000 : 1000)) throw new LeanReviewError(413, wholeProject
             ? 'Project review overview is limited to 3000 objects; no partial completeness is claimed.' : 'Review queue is limited to 1000 objects in a chapter.');
-        const projectInputs = new Map();
-        const compiledInputs = new Map();
         const items: LeanReviewQueueItem[] = [];
         for (const id of ids) {
-            const context = await readReviewContext(root, id, snapshot, projectInputs, true);
-            const object = await this.response(context, compiledInputs);
+            const object = await this.readObject(batch, id);
             const record = object.review.record;
-            items.push({ ...context.formal, anchored: context.evidence.declarations.length > 0,
-                declarationCount: context.evidence.declarations.length, reviewFreshness: object.review.freshness, evidenceFingerprint: object.evidence.fingerprint,
+            items.push({ ...object.formal, anchored: object.evidence.declarations.length > 0,
+                declarationCount: object.evidence.declarations.length, reviewFreshness: object.review.freshness, evidenceFingerprint: object.evidence.fingerprint,
                 ...(record ? { verdict: record.verdict, reviewer: record.reviewer, reviewedAt: record.reviewedAt } : {}) });
         }
         const counts = { total: items.length, unreviewed: 0, current: 0, stale: 0, unanchored: 0 };

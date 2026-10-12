@@ -129,6 +129,10 @@ export class ReaderLeanAudit {
         if (!this.active || this.section.hidden) return;
         void this.load(this.active); if (this.showOverview) void this.loadOverview(this.active);
     }
+    acknowledgeAssistanceRevision(): void {
+        const revision = this.host.context().revision;
+        if (revision !== undefined && this.savedWorkspaceRevision === revision - 1) this.savedWorkspaceRevision = revision;
+    }
     hide(): void {
         if (this.active) { this.drafts.set(this.key(this.active), this.draft); if (this.issueDraft) this.issueDrafts.set(this.key(this.active), this.issueDraft); }
         this.section.hidden = true; this.active = undefined; this.payload = undefined; this.busy = false;

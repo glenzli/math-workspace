@@ -5,12 +5,26 @@ import type {
 } from '../../lean/lean-review';
 import type { ReaderReferenceContent } from './reader-references';
 import { copyReaderText } from './reader-clipboard';
-import { ReaderLeanSource, leanSourceSnapshot } from './reader-lean-source';
+import { ReaderLeanSource, leanSourceSnapshot, type LeanSourceTarget } from './reader-lean-source';
 import { leanReviewDiffEntries, renderLeanSourceDiff } from './reader-lean-source-diff';
 import { ReaderLeanAudit, type LeanAuditSelection } from './reader-lean-audit';
+import { ReaderLeanAssistance } from './reader-lean-assistance';
+import type { LeanAssistanceCandidate, LeanAssistanceBinding } from '../../lean/lean-assistance';
 
 type Language = 'zh' | 'en';
 interface ReviewContext { projectId: string; filePath: string; language: Language; token: string; revision: number }
+
+function isAssistanceMetadataPath(value: unknown): value is string {
+    return typeof value === 'string' && /^\.math-workspace\/lean-assistance\/h-[0-9a-f]{16,32}\.json$/i.test(value);
+}
+
+/** Only a contiguous notification from the still-bound project can preserve displayed source. */
+export function leanAssistanceUpdatePaths(update: any, current?: { projectId?: string; revision: number }): string[] | undefined {
+    if (!current?.projectId || update?.projectId !== current.projectId || update.initial === true || update.projectChanged === true
+        || !Number.isSafeInteger(update.revision) || update.revision !== current.revision + 1
+        || !Array.isArray(update.changedPaths) || !update.changedPaths.length || !update.changedPaths.every(isAssistanceMetadataPath)) return;
+    return update.changedPaths;
+}
 export interface ReaderLeanReviewHost {
     context(): ReviewContext;
     request(route: string, options?: RequestInit): Promise<Response>;
@@ -37,6 +51,10 @@ const copy = {
         title: 'Lean 对照', close: '关闭对照', loading: '正在读取对照材料…', retry: '重新读取',
         failed: '对照材料未能读取。', invalidResponse: '返回的对照材料与当前对象不一致。',
         prose: '正文与关联证明', statement: '陈述', proofs: '关联证明', contexts: '必要上下文',
+        allProse: '全部正文材料', compare: '并排对照', proseOnly: '正文', leanOnly: 'Lean',
+        compareHint: '两侧独立滚动；选择正文片段与 Lean 声明，逐项核对。位置接近不代表语义一致。',
+        currentSource: '当前源码', recordedEvidence: '已记录证据', reviewRecords: '人工审阅记录', auditRecords: '位置关联与问题',
+        refreshing: '正在更新对照材料；当前内容与草稿仍可阅读。',
         noProof: '未找到可定位的关联证明。', locate: '定位正文', raw: '查看 Markdown 原文',
         truncated: '此片段已截断；核对完整内容时请打开来源。', noContext: '没有额外的上下文片段。',
         declarations: 'Lean 声明', noDeclarations: '此对象尚无 Lean 锚点，可记录待形式化的范围与问题。',
@@ -99,6 +117,10 @@ const copy = {
         title: 'Lean comparison', close: 'Close comparison', loading: 'Reading comparison material…', retry: 'Read again',
         failed: 'Could not read the comparison material.', invalidResponse: 'The returned material does not match this object.',
         prose: 'Prose and associated proofs', statement: 'Statement', proofs: 'Associated proofs', contexts: 'Relevant context',
+        allProse: 'All prose material', compare: 'Side by side', proseOnly: 'Prose', leanOnly: 'Lean',
+        compareHint: 'Scroll each side independently. Select prose and a Lean declaration to compare; nearby positions do not establish equivalence.',
+        currentSource: 'Current source', recordedEvidence: 'Recorded evidence', reviewRecords: 'Human review record', auditRecords: 'Source links and issues',
+        refreshing: 'Updating comparison material; the displayed material and draft remain readable.',
         noProof: 'No associated proof with a source location was found.', locate: 'Locate prose', raw: 'View Markdown source',
         truncated: 'This excerpt is truncated. Open the source to review the complete content.', noContext: 'No additional context excerpts.',
         declarations: 'Lean declarations', noDeclarations: 'This object has no Lean anchor. Record the intended scope and open questions.',
@@ -277,6 +299,7 @@ export class ReaderLeanReview {
     private queue: LeanReviewQueueItem[] = [];
     private queueError = false;
     private queueLoading = false;
+    private queueReady = false;
     private queueFilter = 'pending';
     private queueOpen = false;
     private pageQueueMode = false;
@@ -303,6 +326,15 @@ export class ReaderLeanReview {
     private lastContext: ReviewContext;
     private readonly sourceViewer: ReaderLeanSource;
     private readonly audit: ReaderLeanAudit;
+    private readonly assistance: ReaderLeanAssistance;
+    private readonly slots = new Map<string, HTMLElement>();
+    private readonly slotVersions = new Map<string, unknown[]>();
+    private selectedProse = 'statement';
+    private leanView: 'source' | 'evidence' = 'source';
+    private comparisonView: 'both' | 'prose' | 'lean' = 'both';
+    private loading = false;
+    private loadAbort?: AbortController;
+    private queueAbort?: AbortController;
     private readonly onBeforeUnload = (event: BeforeUnloadEvent) => {
         if (![...this.drafts.values()].some(draft => draft.dirty)) return;
         event.preventDefault(); event.returnValue = '';
@@ -319,14 +351,22 @@ export class ReaderLeanReview {
         this.lastContext = { ...host.context() };
         this.sourceViewer = new ReaderLeanSource({
             context: () => host.context(), request: (route, options) => host.request(route, options), report: message => host.report(message),
-            selectionChanged: selection => this.audit?.selectionChanged({ ...this.auditSelection(), ...selection })
+            selectionChanged: selection => this.audit?.selectionChanged({ ...this.auditSelection(), ...selection }),
+            closed: () => { this.leanView = 'evidence'; this.render(); }
         });
         this.audit = new ReaderLeanAudit({
             context: () => ({ projectId: host.context().projectId, requestToken: host.context().token, language: host.context().language, revision: host.context().revision }),
             request: (route, options) => host.request(route, options), report: message => host.report(message),
-            openReview: id => { void this.open(id); }, openSource: target => { void this.sourceViewer.open(target); },
+            openReview: id => { void this.open(id); }, openSource: target => { void this.openSource(target); },
             locateProse: location => host.locate({ ...location, content: location.quote || '', fingerprint: '' }),
             canAssist: () => host.canAssist(), assist: content => host.assist(content)
+        });
+        this.assistance = new ReaderLeanAssistance({
+            context: () => ({ ...host.context(), pagePath: host.context().filePath }),
+            request: (route, options) => host.request(route, options), report: (message, error) => this.report(message, error),
+            canAssist: () => host.canAssist(), assist: content => host.assist(content),
+            adoptCandidate: (candidate, binding) => this.adoptCandidate(candidate, binding),
+            candidateInDraft: id => Boolean(this.currentDraft()?.subclaims.some(claim => claim.id === 'ai-candidate-' + id))
         });
         this.section = element('section', '', 'reader-lean-review');
         this.section.hidden = true;
@@ -336,9 +376,18 @@ export class ReaderLeanReview {
         document.addEventListener('keydown', this.onKeyDown);
     }
 
-    contextChanged(): void {
+    contextChanged(assistancePaths?: string[]): void {
         const context = this.host.context(), previous = this.lastContext;
         this.lastContext = { ...context };
+        if (assistancePaths?.length && assistancePaths.every(isAssistanceMetadataPath)
+            && context.projectId === previous.projectId && context.filePath === previous.filePath
+            && context.language === previous.language && context.token === previous.token && context.revision === previous.revision + 1) {
+            this.sourceViewer.contextChanged(true);
+            this.audit.acknowledgeAssistanceRevision();
+            this.assistance.acknowledgeAssistanceRevision();
+            this.metadataChanged(assistancePaths);
+            return;
+        }
         this.sourceViewer.contextChanged();
         if (!this.active) return;
         if (context.projectId !== this.active.projectId || (context.filePath && context.filePath !== this.active.filePath)) {
@@ -360,11 +409,13 @@ export class ReaderLeanReview {
         const paths = changedPaths.map(filePath => filePath.replace(/\\/g, '/'));
         const review = paths.some(filePath => filePath === `.math-workspace/lean-reviews/${identity.id}.json`
             || filePath === `.math-workspace/lean-review-evidence/${identity.id}.json`);
-        const metadata = paths.some(filePath => /^\.math-workspace\/lean-(?:audits|reviews|review-evidence)\//.test(filePath));
+        const metadata = paths.some(filePath => /^\.math-workspace\/lean-(?:audits|reviews|review-evidence|assistance)\//.test(filePath));
         if (!metadata) return;
         if (review) void this.load(identity);
         if (paths.some(filePath => /^\.math-workspace\/lean-(?:reviews|review-evidence)\//.test(filePath))) void this.loadQueue(identity);
-        this.audit.metadataChanged();
+        if (paths.some(filePath => /^\.math-workspace\/lean-(?:audits|reviews|review-evidence)\//.test(filePath))) this.audit.metadataChanged();
+        if (paths.some(filePath => filePath === `.math-workspace/lean-assistance/${identity.id}.json`
+            || /^\.math-workspace\/lean-(?:audits|reviews|review-evidence)\//.test(filePath))) this.assistance.metadataChanged();
     }
 
     navigationStarted(filePath: string): void {
@@ -378,7 +429,7 @@ export class ReaderLeanReview {
         this.pageQueueMode = false;
         const identity = this.activate(id, returnFocus); if (!identity) return;
         this.render(); this.section.querySelector<HTMLElement>('h2')?.focus();
-        void this.loadQueue(identity);
+        if (!this.queueReady) void this.loadQueue(identity);
         await this.load(identity);
     }
 
@@ -392,6 +443,7 @@ export class ReaderLeanReview {
             if (!this.matches(identity) || request !== this.queueRequest) return;
             if (response.projectToken !== identity.projectId) throw new Error(this.words().invalidResponse);
             this.queue = response.items;
+            this.queueReady = true;
             const first = response.items.find(item => item.reviewFreshness !== 'current') || response.items[0];
             if (first) await this.openQueueItem(first);
             else { this.emptyQueue = true; this.render(); }
@@ -404,13 +456,20 @@ export class ReaderLeanReview {
     private activate(id: string, returnFocus?: HTMLElement): RequestIdentity | undefined {
         const context = this.host.context();
         if (!context.projectId || !context.filePath) return;
+        const preserveQueue = this.queueReady && !this.queueError && !this.queueLoading
+            && this.queue.some(item => item.id === id)
+            && this.active?.projectId === context.projectId && this.active.filePath === context.filePath && this.lastContext.revision === context.revision;
         this.pendingNavigation = undefined;
         this.clearTimers(); this.disposeProse();
+        this.loadAbort?.abort(); this.queueAbort?.abort();
+        this.slots.clear(); this.slotVersions.clear(); this.section.replaceChildren();
         const identity = { generation: ++this.generation, projectId: context.projectId, filePath: context.filePath, id };
         this.active = identity; this.lastContext = { ...context }; this.returnFocus = returnFocus;
-        this.sourceViewer.bindObject(id); this.audit.hide();
-        this.queue = []; this.queueError = false; this.queueLoading = false; this.emptyQueue = false;
+        this.sourceViewer.bindObject(id); this.audit.hide(); this.assistance.hide();
+        if (!preserveQueue) { this.queue = []; this.queueReady = false; }
+        this.queueError = false; this.queueLoading = false; this.emptyQueue = false;
         this.payload = undefined; this.selectedDeclaration = ''; this.selectedClaim = '';
+        this.selectedProse = 'statement'; this.leanView = 'source'; this.comparisonView = 'both'; this.loading = true;
         this.selectedDefinition = undefined; this.definition = undefined; this.definitionLoading = false;
         this.definitionTrail = [];
         this.definitionRequest++; this.actionRequest++; this.busy = false; this.saving = false; this.job = undefined;
@@ -427,7 +486,9 @@ export class ReaderLeanReview {
         const draft = this.currentDraft();
         this.generation++; this.loadRequest++; this.definitionRequest++; this.actionRequest++;
         this.clearTimers(); this.disposeProse();
-        this.sourceViewer.close(); this.audit.hide();
+        this.loadAbort?.abort(); this.queueAbort?.abort();
+        this.slots.clear(); this.slotVersions.clear();
+        this.sourceViewer.close(); this.audit.hide(); this.assistance.hide();
         this.active = undefined; this.payload = undefined; this.busy = false; this.saving = false;
         this.section.hidden = true; this.section.replaceChildren(); this.container.classList.remove('is-lean-review');
         if (draft?.dirty) this.host.report(this.words().retained);
@@ -438,7 +499,7 @@ export class ReaderLeanReview {
 
     dispose(): void {
         this.close(false); this.section.remove();
-        this.sourceViewer.dispose(); this.audit.destroy();
+        this.sourceViewer.dispose(); this.audit.destroy(); this.assistance.destroy();
         window.removeEventListener('beforeunload', this.onBeforeUnload);
         document.removeEventListener('keydown', this.onKeyDown);
     }
@@ -459,8 +520,8 @@ export class ReaderLeanReview {
         if (projectToken) headers['x-math-workspace-project'] = projectToken;
         return headers;
     }
-    private async get<T>(route: string, projectToken = ''): Promise<T> {
-        const response = await this.host.request(route, { cache: 'no-store', headers: this.headers(projectToken) });
+    private async get<T>(route: string, projectToken = '', signal?: AbortSignal): Promise<T> {
+        const response = await this.host.request(route, { cache: 'no-store', headers: this.headers(projectToken), ...(signal ? { signal } : {}) });
         if (!response.ok) throw new Error(await response.text());
         return response.json() as Promise<T>;
     }
@@ -479,10 +540,14 @@ export class ReaderLeanReview {
             reviewer: record?.reviewer || '', subclaims: cloneClaims(record?.subclaims || []), snapshot: payload.evidence,
             dirty: false, editVersion: 0, acknowledgementRequired: payload.review.freshness === 'stale', needsReload: false };
     }
-    private accept(payload: LeanReviewResponse, identity: RequestIdentity): void {
+    private selectedSourceIdentity(): string {
+        const declaration = this.payload?.evidence.declarations.find(item => item.key === this.selectedDeclaration);
+        return JSON.stringify(declaration ? [declaration.key, declaration.projectKey, declaration.source, declaration.compiledSource?.filePath] : null);
+    }
+    private accept(payload: LeanReviewResponse, identity: RequestIdentity): boolean {
         if (payload.id !== identity.id || payload.formal.filePath !== identity.filePath || payload.projectToken !== identity.projectId
             || (this.payload && this.payload.projectToken !== payload.projectToken)) throw new Error(this.words().invalidResponse);
-        const key = draftKey(identity.projectId, identity.id), current = this.drafts.get(key);
+        const previousSource = this.selectedSourceIdentity(), key = draftKey(identity.projectId, identity.id), current = this.drafts.get(key);
         if (!current?.dirty || equalRecord(current, payload.review.record)) this.drafts.set(key, this.newDraft(payload));
         else current.needsReload = false;
         if (this.payload && this.payload.evidence.fingerprint !== payload.evidence.fingerprint) this.resetDefinition();
@@ -490,30 +555,36 @@ export class ReaderLeanReview {
         if (!payload.evidence.declarations.some(item => item.key === this.selectedDeclaration)) this.selectedDeclaration = payload.evidence.declarations[0]?.key || '';
         const draft = this.currentDraft();
         if (!draft?.subclaims.some(claim => claim.id === this.selectedClaim)) this.selectedClaim = draft?.subclaims[0]?.id || '';
+        return previousSource !== this.selectedSourceIdentity();
     }
     private async load(identity: RequestIdentity): Promise<void> {
         const request = ++this.loadRequest, projectToken = this.payload?.projectToken || identity.projectId;
+        this.loadAbort?.abort(); const abort = new AbortController(); this.loadAbort = abort;
+        this.loading = true; this.render();
         try {
-            const payload = await this.get<LeanReviewResponse>('/api/lean-review?id=' + encodeURIComponent(identity.id), projectToken);
+            const payload = await this.get<LeanReviewResponse>('/api/lean-review?id=' + encodeURIComponent(identity.id), projectToken, abort.signal);
             if (!this.matches(identity) || request !== this.loadRequest) return;
-            this.accept(payload, identity); this.render();
+            const sourceChanged = this.accept(payload, identity); this.loading = false; this.render();
+            if (sourceChanged) this.rebindSelectedSource();
             if (payload.job && ['queued', 'running'].includes(payload.job.status)) {
                 this.job = payload.job; this.render(); this.pollJob(identity, payload.job.id);
             }
         } catch (error) {
-            if (!this.matches(identity) || request !== this.loadRequest) return;
+            if (!this.matches(identity) || request !== this.loadRequest || abort.signal.aborted) return;
+            this.loading = false;
             this.message = this.words().failed + ' ' + (error instanceof Error ? error.message : String(error)); this.messageError = true;
             this.render();
         }
     }
     private async loadQueue(identity: RequestIdentity): Promise<void> {
         const request = ++this.queueRequest;
+        this.queueAbort?.abort(); const abort = new AbortController(); this.queueAbort = abort;
         this.queueLoading = true; this.render();
         try {
-            const response = await this.get<LeanReviewQueueResponse>('/api/lean-review/queue?filePath=' + encodeURIComponent(identity.filePath), identity.projectId);
+            const response = await this.get<LeanReviewQueueResponse>('/api/lean-review/queue?filePath=' + encodeURIComponent(identity.filePath), identity.projectId, abort.signal);
             if (!this.matches(identity) || request !== this.queueRequest) return;
             if (response.projectToken !== identity.projectId) throw new Error(this.words().invalidResponse);
-            this.queue = response.items; this.queueError = false; this.queueLoading = false; this.render();
+            this.queue = response.items; this.queueReady = true; this.queueError = false; this.queueLoading = false; this.render();
         } catch (_error) { if (this.matches(identity) && request === this.queueRequest) { this.queueError = true; this.queueLoading = false; this.render(); } }
     }
     private draftOutdated(draft = this.currentDraft()): boolean {
@@ -538,49 +609,155 @@ export class ReaderLeanReview {
             this.draftStatus.classList.toggle('is-warning', this.draftOutdated(draft) || draft.dirty);
         }
         if (this.saveButton) { this.saveButton.disabled = this.busy || this.draftOutdated(draft); this.saveButton.textContent = this.saving ? w.saving : w.save; }
+        const summary = this.slots.get('review')?.querySelector('summary');
+        if (summary) summary.textContent = w.reviewRecords + ' · ' + (this.draftOutdated(draft) ? w.outdatedDraft : draft.dirty ? w.unsaved : this.payload?.review.record ? w.saved : w.unreviewed);
     }
 
+    /** Stable slots keep the math DOM and editor mounted across queue, job and audit updates. */
+    private slot(name: string, parent = this.section): HTMLElement {
+        let slot = this.slots.get(name);
+        if (!slot) { slot = element('div', '', 'reader-lean-review-slot'); slot.dataset.leanSlot = name; this.slots.set(name, slot); parent.append(slot); }
+        return slot;
+    }
+    private updateSlot(name: string, versions: unknown[], create: () => HTMLElement[], parent = this.section): void {
+        const slot = this.slot(name, parent), previous = this.slotVersions.get(name);
+        if (previous && versions.length === previous.length && versions.every((value, index) => value === previous[index])) return;
+        const scrollTop = slot.scrollTop;
+        slot.replaceChildren(...create()); slot.scrollTop = scrollTop; this.slotVersions.set(name, versions);
+    }
     private render(): void {
         if (!this.active) return;
         const focused = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
         const focusKey = this.section.contains(focused) ? focused?.dataset.leanFocus : undefined;
         const selection = focusKey && focused && ['INPUT', 'TEXTAREA'].includes(focused.tagName) ? [focused.selectionStart, focused.selectionEnd] : undefined;
-        this.disposeProse();
-        const w = this.words(), header = element('header', '', 'reader-lean-review-header');
-        const title = element('div'), heading = element('h2', w.title); heading.tabIndex = -1;
-        title.append(heading, element('p', this.payload ? `${this.payload.formal.display || this.payload.formal.title} · ${this.active.id}` : this.active.id || this.active.filePath));
-        header.append(title, button(w.close, () => this.close(), 'close'));
+        const w = this.words(), language = this.host.context().language, payload = this.payload;
         this.section.setAttribute('aria-label', w.title);
-        this.status = element('p', this.message, 'reader-lean-review-live' + (this.messageError ? ' is-error' : ''));
-        this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
-        const children: HTMLElement[] = [header, this.status];
-        if (!this.payload) {
-            children.push(element('p', this.messageError ? w.failed : this.emptyQueue ? w.queueNoObjects : w.loading, 'reader-lean-review-empty'));
-            if (this.messageError || this.emptyQueue) children.push(button(w.retry, () => {
+        this.updateSlot('header', [language, payload?.formal.display, payload?.formal.title], () => {
+            const header = element('header', '', 'reader-lean-review-header'), title = element('div'), heading = element('h2', w.title); heading.tabIndex = -1;
+            title.append(heading, element('p', payload ? `${payload.formal.display || payload.formal.title} · ${this.active!.id}` : this.active!.id || this.active!.filePath));
+            header.append(title, button(w.close, () => this.close(), 'close')); return [header];
+        });
+        const statusSlot = this.slot('status');
+        if (!this.status || !statusSlot.contains(this.status)) {
+            this.status = element('p', '', 'reader-lean-review-live'); this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite'); statusSlot.replaceChildren(this.status);
+        }
+        this.status.textContent = this.message; this.status.classList.toggle('is-error', this.messageError);
+        this.updateSlot('loading', [language, Boolean(payload), this.loading, this.messageError, this.emptyQueue], () => {
+            if (payload) return this.loading ? [element('p', w.refreshing, 'reader-lean-review-hint')] : [];
+            const state = element('p', this.messageError ? w.failed : this.emptyQueue ? w.queueNoObjects : w.loading, 'reader-lean-review-empty'); state.setAttribute('role', 'status');
+            return [state, ...(this.messageError || this.emptyQueue ? [button(w.retry, () => {
                 this.message = ''; this.messageError = false;
                 if (this.pageQueueMode) void this.openPageQueue(this.returnFocus); else void this.load(this.active!);
-            }, 'retry'));
-        } else {
-            children.push(this.renderEvidenceStatus(), this.renderQueue());
-            const columns = element('div', '', 'reader-lean-review-columns');
-            columns.append(this.renderProse(), this.renderLean()); children.push(columns);
-            this.sourceViewer.bindObject(this.active.id); children.push(this.sourceViewer.mount());
-            const changes = this.payload.review.changes;
-            if (changes.length) children.push(this.renderChanges(w.changes, changes, this.payload.review.record?.snapshot));
+            }, 'retry')] : [])];
+        });
+        if (payload) {
             const draft = this.currentDraft()!;
-            if (draft.snapshot.fingerprint !== this.payload.evidence.fingerprint) children.push(this.renderChanges(w.draftChanges, leanReviewDraftChanges(draft.snapshot, this.payload.evidence), draft.snapshot));
-            children.push(this.renderReview());
-            this.audit.update(this.payload, this.auditSelection()); children.push(this.audit.mount(), this.renderAssistance());
+            this.updateSlot('evidence', [language, payload.evidence.fingerprint, payload.review, this.job, this.busy], () => [this.renderEvidenceStatus()]);
+            this.updateSlot('queue', [language, this.queue, this.queueLoading, this.queueError, this.queueFilter], () => [this.renderQueue()]);
+            this.updateSlot('comparison-nav', [language, this.comparisonView], () => {
+                const navigation = element('div', '', 'reader-lean-review-comparison-nav');
+                for (const [value, label] of [['both', w.compare], ['prose', w.proseOnly], ['lean', w.leanOnly]] as const) {
+                    const control = button(label, () => { this.comparisonView = value; this.render(); }, 'view-' + value);
+                    control.setAttribute('aria-pressed', String(this.comparisonView === value)); navigation.append(control);
+                }
+                navigation.append(element('p', w.compareHint, 'reader-lean-review-hint')); return [navigation];
+            });
+            const columns = this.slot('columns'); columns.className = 'reader-lean-review-columns'; columns.dataset.comparisonView = this.comparisonView;
+            const prose = this.slot('prose', columns); prose.className = 'reader-lean-review-prose-column'; prose.hidden = this.comparisonView === 'lean';
+            const lean = this.slot('lean', columns); lean.className = 'reader-lean-review-lean-column'; lean.hidden = this.comparisonView === 'prose';
+            this.updateSlot('prose-content', [language, payload.evidence.fingerprint], () => { this.disposeProse(); return [this.renderProse()]; }, prose);
+            this.updateSlot('lean-header', [language, payload.evidence.fingerprint, this.selectedDeclaration, this.leanView], () => [this.renderLeanHeader()], lean);
+            const source = this.slot('source', lean); source.hidden = this.leanView !== 'source';
+            this.sourceViewer.bindObject(this.active.id);
+            if (!source.contains(this.sourceViewer.mount())) source.append(this.sourceViewer.mount());
+            const evidence = this.slot('lean-evidence', lean); evidence.hidden = this.leanView !== 'evidence'; evidence.className = 'reader-lean-review-evidence-scroll';
+            this.updateSlot('lean-evidence-content', [language, payload.evidence.fingerprint, this.selectedDeclaration, this.definition, this.definitionLoading, this.selectedDefinition, this.busy, this.job], () => [this.renderLean()], evidence);
+            this.updateSlot('changes', [language, payload.evidence.fingerprint, payload.review.changes, draft.snapshot], () => {
+                const changes: HTMLElement[] = [];
+                if (payload.review.changes.length) changes.push(this.renderChanges(w.changes, payload.review.changes, payload.review.record?.snapshot));
+                if (draft.snapshot.fingerprint !== payload.evidence.fingerprint) changes.push(this.renderChanges(w.draftChanges, leanReviewDraftChanges(draft.snapshot, payload.evidence), draft.snapshot));
+                return changes;
+            });
+            const assistance = this.slot('assistance'); this.assistance.update(payload);
+            if (!assistance.contains(this.assistance.mount())) assistance.append(this.assistance.mount());
+            this.updateSlot('legacy-assistance', [language, payload.evidence.fingerprint, draft, draft.editVersion, this.host.canAssist()], () => {
+                const context = details(w.assistContext); context.append(this.renderAssistance()); return [context];
+            });
+            const review = this.secondarySlot('review', w.reviewRecords);
+            this.updateSlot('review-content', [language, payload.evidence.fingerprint, payload.review.expectedRevision, draft, draft.editVersion, draft.acknowledgementRequired, draft.needsReload, this.selectedClaim], () => [this.renderReview()], review);
+            const audit = this.secondarySlot('audit', w.auditRecords);
+            this.audit.update(payload, this.auditSelection()); if (!audit.contains(this.audit.mount())) audit.append(this.audit.mount());
         }
-        this.section.replaceChildren(...children);
         this.updateDraftStatus();
-        if (focusKey) {
+        if (focusKey && !focused?.isConnected) {
             const target = [...this.section.querySelectorAll<HTMLElement>('[data-lean-focus]')].find(item => item.dataset.leanFocus === focusKey);
             target?.focus({ preventScroll: true });
             if (selection && target && 'setSelectionRange' in target) {
                 try { (target as HTMLInputElement).setSelectionRange(selection[0], selection[1]); } catch (_error) { /* Non-text input. */ }
             }
         }
+    }
+    private secondarySlot(name: string, label: string): HTMLElement {
+        const slot = this.slot(name); let disclosure = slot.querySelector('details');
+        if (!disclosure) { disclosure = details(label); disclosure.className = 'reader-lean-review-secondary'; slot.append(disclosure); }
+        else disclosure.querySelector('summary')!.textContent = label;
+        return disclosure;
+    }
+    private renderLeanHeader(): HTMLElement {
+        const w = this.words(), section = element('header', '', 'reader-lean-review-pane-header'), declarations = this.payload!.evidence.declarations;
+        section.append(element('h3', w.declarations));
+        if (!declarations.length) { section.append(element('p', w.noDeclarations, 'reader-lean-review-empty')); return section; }
+        const select = element('select'); select.setAttribute('aria-label', w.declarations); select.dataset.leanFocus = 'declaration';
+        for (const declaration of declarations) { const option = element('option', `${declaration.projectKey} · ${declaration.qualifiedName}`); option.value = declaration.key; select.append(option); }
+        select.value = this.selectedDeclaration;
+        select.addEventListener('change', () => { this.selectedDeclaration = select.value; this.resetDefinition(); this.render(); this.openSelectedSource(false); });
+        section.append(select);
+        const views = element('div', '', 'reader-lean-review-actions');
+        for (const [value, label] of [['source', w.currentSource], ['evidence', w.recordedEvidence]] as const) {
+            const control = button(label, () => { this.leanView = value; this.render(); if (value === 'source') this.openSelectedSource(false); }, 'lean-' + value);
+            control.setAttribute('aria-pressed', String(this.leanView === value)); views.append(control);
+        }
+        section.append(views); return section;
+    }
+    private openSelectedSource(reveal = true): void {
+        const target = this.selectedSourceTarget();
+        if (!target) { this.sourceViewer.close(); this.leanView = 'evidence'; this.render(); return; }
+        void this.openSource(target, reveal);
+    }
+    private selectedSourceTarget(): LeanSourceTarget | undefined {
+        const declaration = this.payload?.evidence.declarations.find(item => item.key === this.selectedDeclaration);
+        if (!declaration) return;
+        const filePath = declaration.source?.filePath || declaration.compiledSource?.filePath;
+        if (!filePath) return;
+        return { projectKey: declaration.projectKey, filePath, title: declaration.qualifiedName,
+            range: declaration.source ? { start: { line: declaration.source.startLine - 1, character: 0 }, end: { line: declaration.source.endLine, character: 0 } } : undefined,
+            fallback: declaration.source };
+    }
+    private rebindSelectedSource(): void {
+        const target = this.selectedSourceTarget();
+        if (target) void this.sourceViewer.open(target, false, false, { reveal: false });
+        else { this.sourceViewer.close(); this.leanView = 'evidence'; this.render(); }
+    }
+    private async openSource(target: LeanSourceTarget, reveal = true): Promise<void> {
+        this.leanView = 'source'; if (this.comparisonView === 'prose') this.comparisonView = 'both'; this.render();
+        await this.sourceViewer.open(target, true, false, { reveal });
+    }
+    private adoptCandidate(candidate: LeanAssistanceCandidate, binding: LeanAssistanceBinding): boolean {
+        const payload = this.payload, draft = this.currentDraft(), identity = this.active;
+        if (!payload || !draft || !identity || !this.matches(identity) || this.busy || this.loading || this.draftOutdated(draft)
+            || binding.projectToken !== payload.projectToken || binding.id !== payload.id
+            || binding.evidenceFingerprint !== payload.evidence.fingerprint || binding.reviewRevision !== payload.review.expectedRevision
+            || draft.expectedRevision !== binding.reviewRevision || draft.evidenceFingerprint !== binding.evidenceFingerprint
+            || candidate.status !== 'pending' || draft.subclaims.length >= 80
+            || candidate.declarationKeys.some(key => !payload.evidence.declarations.some(item => item.key === key))) return false;
+        const id = 'ai-candidate-' + candidate.id;
+        if (draft.subclaims.some(claim => claim.id === id)) return false;
+        const prefix = this.host.context().language === 'zh' ? 'AI 候选，待人工核对' : 'AI candidate, pending human review';
+        draft.subclaims.push({ id, text: candidate.title.slice(0, 8000), note: `${prefix}\n${candidate.note}`.slice(0, 8000),
+            verdict: 'undecided', declarationKeys: [...candidate.declarationKeys] });
+        this.selectedClaim = id; this.changed(); this.render();
+        const review = this.slots.get('review')?.querySelector('details'); if (review) review.open = true;
+        return true;
     }
 
     private renderEvidenceStatus(): HTMLElement {
@@ -649,15 +826,27 @@ export class ReaderLeanReview {
         }
     }
     private renderProse(): HTMLElement {
-        const w = this.words(), evidence = this.payload!.evidence, section = element('section', '', 'reader-lean-review-prose-column');
-        section.append(element('h3', w.prose), this.proseSnippet(evidence.statement, w.statement));
-        section.append(element('h4', w.proofs));
-        if (!evidence.proofs.length) section.append(element('p', w.noProof, 'reader-lean-review-empty'));
-        evidence.proofs.forEach((source, index) => section.append(this.proseSnippet(source, `${w.proofs} ${index + 1}`)));
-        const context = details(w.contexts);
-        if (!evidence.contexts.length) context.append(element('p', w.noContext));
-        evidence.contexts.forEach(source => context.append(this.proseSnippet(source, w.contexts)));
-        section.append(context); return section;
+        const w = this.words(), evidence = this.payload!.evidence, section = element('section');
+        const header = element('header', '', 'reader-lean-review-pane-header'); header.append(element('h3', w.prose));
+        const snippets = [{ key: 'statement', title: w.statement, source: evidence.statement },
+            ...evidence.proofs.map((source, index) => ({ key: 'proof:' + index, title: `${w.proofs} ${index + 1}`, source })),
+            ...evidence.contexts.map((source, index) => ({ key: 'context:' + index, title: `${w.contexts} ${index + 1}`, source }))];
+        if (this.selectedProse !== 'all' && !snippets.some(item => item.key === this.selectedProse)) this.selectedProse = 'statement';
+        const select = element('select'); select.setAttribute('aria-label', w.prose); select.dataset.leanFocus = 'prose-part';
+        for (const item of [...snippets, { key: 'all', title: w.allProse }]) { const option = element('option', item.title); option.value = item.key; select.append(option); }
+        select.value = this.selectedProse; header.append(select);
+        const scroll = element('div', '', 'reader-lean-review-prose-scroll'); scroll.tabIndex = 0; scroll.setAttribute('aria-label', w.prose);
+        // Render every mathematical snippet faithfully once; selection is navigation, not a rendering shortcut.
+        for (const item of snippets) {
+            const card = this.proseSnippet(item.source, item.title); card.dataset.leanProsePart = item.key;
+            card.hidden = this.selectedProse !== 'all' && this.selectedProse !== item.key; scroll.append(card);
+        }
+        select.addEventListener('change', () => {
+            this.selectedProse = select.value;
+            scroll.querySelectorAll<HTMLElement>('[data-lean-prose-part]').forEach(card => { card.hidden = this.selectedProse !== 'all' && this.selectedProse !== card.dataset.leanProsePart; });
+            scroll.scrollTop = 0;
+        });
+        section.append(header, scroll); return section;
     }
     private proseSnippet(source: SourceSnippet, title: string): HTMLElement {
         const w = this.words(), section = element('section', '', 'reader-lean-review-source-card');
@@ -674,15 +863,8 @@ export class ReaderLeanReview {
         return section;
     }
     private renderLean(): HTMLElement {
-        const w = this.words(), section = element('section', '', 'reader-lean-review-lean-column'), declarations = this.payload!.evidence.declarations;
-        section.append(element('h3', w.declarations));
-        if (!declarations.length) section.append(element('p', w.noDeclarations, 'reader-lean-review-empty'));
-        else {
-            const select = element('select'); select.setAttribute('aria-label', w.declarations); select.dataset.leanFocus = 'declaration';
-            for (const declaration of declarations) { const option = element('option', `${declaration.projectKey} · ${declaration.qualifiedName}`); option.value = declaration.key; select.append(option); }
-            select.value = this.selectedDeclaration;
-            select.addEventListener('change', () => { this.selectedDeclaration = select.value; this.resetDefinition(); this.render(); });
-            section.append(select);
+        const w = this.words(), section = element('section'), declarations = this.payload!.evidence.declarations;
+        if (declarations.length) {
             const declaration = declarations.find(item => item.key === this.selectedDeclaration)!;
             section.append(this.declarationCard(declaration), this.renderDefinitions(declaration));
         }
@@ -705,7 +887,7 @@ export class ReaderLeanReview {
         const source = details(w.source); source.open = true;
         source.append(declaration.source ? element('p', sourceLabel(declaration.source), 'reader-lean-review-location') : element('p', w.sourceUnavailable));
         if (declaration.source) source.append(leanSourceSnapshot(declaration.source.content, declaration.source.startLine));
-        const fullSource = button(w.fullSource, () => { void this.sourceViewer.open({ projectKey: declaration.projectKey,
+        const fullSource = button(w.fullSource, () => { void this.openSource({ projectKey: declaration.projectKey,
             filePath: declaration.source?.filePath || declaration.compiledSource?.filePath || '', title: declaration.qualifiedName,
             range: declaration.source ? { start: { line: declaration.source.startLine - 1, character: 0 }, end: { line: declaration.source.endLine, character: 0 } } : undefined,
             fallback: declaration.source }); }, 'full-source');
@@ -845,7 +1027,7 @@ export class ReaderLeanReview {
             const open = button(`${index + 1}. ${claim.text || w.claimText} · ${w.verdicts[claim.verdict]}${claim.declarationKeys.length ? '' : ' · ' + w.noMapping}`, () => {
                 this.selectedClaim = claim.id;
                 const mapped = claim.declarationKeys.find(key => this.payload!.evidence.declarations.some(declaration => declaration.key === key));
-                if (mapped && mapped !== this.selectedDeclaration) { this.selectedDeclaration = mapped; this.resetDefinition(); }
+                if (mapped && mapped !== this.selectedDeclaration) { this.selectedDeclaration = mapped; this.resetDefinition(); this.openSelectedSource(false); }
                 this.render();
             });
             open.dataset.leanClaim = claim.id; open.setAttribute('aria-pressed', String(claim.id === this.selectedClaim)); navigation.append(open);
@@ -932,7 +1114,9 @@ export class ReaderLeanReview {
             }
             if (editVersion === draft.editVersion) this.drafts.set(draftKey(identity.projectId, identity.id), this.newDraft(response));
             else { draft.expectedRevision = response.review.expectedRevision; draft.dirty = true; }
-            this.accept(response, identity); this.busy = false; this.saving = false; this.report(this.words().saved); this.render(); void this.loadQueue(identity);
+            const sourceChanged = this.accept(response, identity); this.busy = false; this.saving = false; this.report(this.words().saved); this.render();
+            if (sourceChanged) this.rebindSelectedSource();
+            void this.loadQueue(identity);
         } catch (error) {
             if (!this.matches(identity) || request !== this.actionRequest) return;
             this.busy = false; this.saving = false;

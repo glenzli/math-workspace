@@ -133,14 +133,17 @@ codex plugin marketplace add /absolute/path/to/math-workspace
 codex plugin add math-workspace@personal
 ```
 
-插件提供的接口保持只读：
+插件的查询接口保持只读：
 
 - `open`、`open_reader`、`open_workspace`
 - `lookup_formal_object`、`lookup_knowledge`
 - `inspect_dependencies`、`inspect_lean_alignment`
+- `read_lean_review_context`
 - `read_symbol_audit`、`verify`
 
 接口位于 `math-workspace` MCP 命名空间内，因此工具名不再重复品牌前缀。`read_symbol_audit` 只读取用户已经运行的缓存报告，不会静默调用模型。
+
+`submit_lean_review_candidates` 只把明确发起的 Lean 辅助审核结果保存为项目内的 AI 候选，供 Reader 逐条核对。候选必须匹配读取时的对象、源码证据与审阅版本；接口不能修改正文、Lean 源码或人工结论。Reader 中的“加入草稿”仍须人工核对并主动保存。
 
 ## 6. 可选 Codex 文件定位
 

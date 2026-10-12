@@ -127,6 +127,7 @@ async function sourceControllerModule(directory) {
                 constructor(parent,content,host){this.parent=parent;this.content=content;this.host=host;this.focusCount=0;this.scrollTop=0;parent.editor=this;}
                 focusRange(range){this.range=range;this.focusCount++;this.host.positionChanged(range.start,range);}
                 focusPosition(position){this.focusRange({start:position,end:position});}
+                clearFocusRange(){this.range=undefined;}
                 setSyntax(value){this.syntax=value;} setSemantics(tokens,diagnostics){this.tokens=tokens;this.diagnostics=diagnostics;}
                 refreshLayout(){} setLanguage(language){this.language=language;} find(){} fold(){} unfold(){} destroy(){this.destroyed=true;}
             }` }));
@@ -148,9 +149,22 @@ async function testFullSourceLifecycle(directory) {
         const target = { projectKey: 'formal', filePath: source.filePath, range: { start: { line: 5, character: 0 }, end: { line: 8, character: 19 } } };
         await viewer.open(target); const editor = viewer.editor; assert.ok(editor); assert.equal(editor.content, source.content);
         assert.equal(requests.filter(request => request.options.method === 'POST').length, 0, 'Full file reading never starts Lean automatically.');
+        const sourceReads = () => requests.filter(request => request.route.startsWith('/api/lean-language/source')).length;
+        const firstReads = sourceReads(), alternate = { ...target, range: { start: { line: 6, character: 0 }, end: { line: 7, character: 9 } } };
+        await viewer.open(alternate); assert.equal(sourceReads(), firstReads, 'Range navigation in the current file reuses the verified source.');
+        assert.equal(viewer.editor, editor); assert.deepEqual(viewer.currentSelection().range, alternate.range);
+        await viewer.open(alternate, false, false, { force: true }); assert.equal(sourceReads(), firstReads + 1, 'Explicit reload always re-reads the source.');
+        const staleExcerpt = { filePath: source.filePath, startLine: 6, endLine: 9, content: 'theorem sample : False := by sorry', fingerprint: 'old-excerpt' };
+        await viewer.open({ ...target, fallback: staleExcerpt });
+        assert.equal(viewer.currentSelection(), undefined, 'Recorded line numbers cannot select different current source text.');
+        assert.match(viewer.mount().textContent, /Source changed/); assert.equal(viewer.editor, editor, 'Stale anchor evidence leaves current source readable.');
+        await viewer.open(target);
         const proofRange = { start: { line: 7, character: 4 }, end: { line: 7, character: 20 } }; editor.focusRange(proofRange); editor.scrollTop = 123;
         const focusCount = editor.focusCount; context.revision++; viewer.contextChanged(); await settle();
         assert.equal(viewer.editor, editor); assert.equal(editor.focusCount, focusCount); assert.equal(editor.scrollTop, 123); assert.deepEqual(viewer.currentSelection().range, proofRange);
+        delayed = deferred(); context.revision++; viewer.contextChanged(); const refreshingReads = sourceReads();
+        const selecting = viewer.open(alternate); assert.equal(sourceReads(), refreshingReads + 1, 'An unfinished revision refresh cannot make old source reusable.');
+        delayed.resolve(json(source)); await selecting; delayed = undefined;
         await viewer.semantic.open(); assert.equal(viewer.semantic.state.state, 'unavailable'); assert.equal(viewer.editor.content, source.content); assert.match(viewer.mount().textContent, /Complete source remains readable/);
         source = { ...source, sourceHash: 'new-hash', content: '\n' + source.content, lineCount: 12 }; context.revision++; viewer.contextChanged(); await settle();
         assert.equal(viewer.currentSelection(), undefined, 'Changed source cannot retain old selected coordinates.'); assert.equal(viewer.linkedRange, undefined); assert.match(viewer.mount().textContent, /Source changed/);

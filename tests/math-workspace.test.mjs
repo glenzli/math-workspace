@@ -7,6 +7,8 @@ import { testLeanAuditBackend } from './lean-audit.test.mjs';
 import { testReaderLeanAudit } from './reader-lean-audit.test.mjs';
 import { testReaderLeanSource } from './reader-lean-source.test.mjs';
 import { testReaderLeanMetadata } from './reader-lean-metadata.test.mjs';
+import { testLeanFlowPerformance } from './lean-flow-performance.test.mjs';
+import { testLeanAssistance, testReaderLeanAssistance } from './lean-assistance.test.mjs';
 import { testInteractiveFigures } from './interactive-figures.test.mjs';
 import assert from 'node:assert/strict';
 import { testExercises } from './exercises.test.mjs';
@@ -1711,10 +1713,12 @@ async function testReaderMcpServer() {
             'open_reader',
             'open_workspace',
             'read_archives',
+            'read_lean_review_context',
             'read_symbol_audit',
             'reader_request',
             'reader_updates',
             'reader_view',
+            'submit_lean_review_candidates',
             'verify'
         ]);
         tools.tools.filter(tool => !['open_reader', 'open_workspace', 'reader_view', 'close_reader_view', 'reader_request', 'reader_updates'].includes(tool.name))
@@ -2656,6 +2660,9 @@ const tests = [
     ['Lean live source language service', testLeanLanguageBackend],
     ['Lean complete read-only source Reader', testReaderLeanSource],
     ['Lean review live metadata and Reader style nonce', testReaderLeanMetadata],
+    ['Lean review bounded read-batch performance and freshness', testLeanFlowPerformance],
+    ['Lean Codex assistance context, candidates and MCP boundaries', testLeanAssistance],
+    ['Lean Codex assistance Reader handoff and draft lifecycle', testReaderLeanAssistance],
     ['Lean review issue and link audit backend', testLeanAuditBackend],
     ['Lean review issue and link audit Reader', testReaderLeanAudit],
     ['Reader definition titles and navigation targets', testReaderDefinitions],

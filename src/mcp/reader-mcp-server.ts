@@ -6,6 +6,7 @@ import { findMathWorkspaceRoot } from '../project-root';
 import { startReaderServer, type FormalReaderServer } from '../reader/server';
 import { WorkspaceQueries } from './workspace-queries';
 import { registerReaderApp } from './reader-app';
+import { registerLeanAssistanceTools } from './lean-assistance-tools';
 import workspaceIcon from '../../media/plugin/math-workspace-file-handler-icon.png';
 
 export interface ReaderMcpServerOptions {
@@ -80,7 +81,7 @@ export async function runReaderMcpServer(options: ReaderMcpServerOptions = {}): 
         version: '0.1.0',
         icons: [{ src: workspaceIcon, mimeType: 'image/png', sizes: ['128x128'] }]
     }, {
-        instructions: 'Use Math Workspace for local, read-only formal Markdown and Lean context. Reader selections are quoted as source attachments in the current conversation. Use the attached Markdown and source locations as context; discussion and editing stay in the native conversation. Use narrow lookup, project-knowledge, cached-audit, dependency, Lean, and validation tools only when the task needs their evidence instead of asking the user to paste broad project context. Dependency and audit results do not decide edits automatically.'
+        instructions: 'Use Math Workspace for local formal Markdown and Lean context. Queries are read-only; submit_lean_review_candidates is an explicit exception that writes only AI candidate metadata, never source or human decisions. Reader selections are quoted as source attachments in the current conversation. Use the attached Markdown and source locations as context; discussion and editing stay in the native conversation. Use narrow lookup, project-knowledge, cached-audit, dependency, Lean, and validation tools only when the task needs their evidence instead of asking the user to paste broad project context. Dependency and audit results do not decide edits automatically.'
     });
 
     const projectRoot = z.string().optional().describe('Absolute or relative root of a project containing .math-workspace/config.json. Defaults to the MCP working directory.');
@@ -213,6 +214,7 @@ export async function runReaderMcpServer(options: ReaderMcpServerOptions = {}): 
         }
     });
 
+    registerLeanAssistanceTools(server);
     const readerApp = registerReaderApp(server, options.rootPath || process.cwd());
     const transport = new StdioServerTransport();
     let closing = false;

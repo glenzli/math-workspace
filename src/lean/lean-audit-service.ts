@@ -151,7 +151,7 @@ export class LeanAuditService {
             throw new LeanReviewError(400, 'Choose a deliberate link or issue audit action.');
         }
         await updateAuditRecord(root, id, body.expectedRevision, async record => {
-            const response = await this.review.get(root, id);
+            const response = await this.review.get(root, id, true);
             if (response.evidence.fingerprint !== fingerprint) throw new LeanReviewError(409, 'The displayed audit evidence changed. Reload before saving.');
             if (response.job && ['queued', 'running'].includes(response.job.status)) throw new LeanReviewError(409, 'Wait for the evidence job before recording an audit decision.');
             const cache: SourceCache = new Map(), reviewer = auditText(body.reviewer ?? '', 'Reviewer', 300);
@@ -197,7 +197,7 @@ export class LeanAuditService {
                 auditEvent(record, body.action, issue, previous);
             }
             // Re-read all admission sources just before persisting, rejecting edits made mid-operation.
-            const latest = await this.review.get(root, id);
+            const latest = await this.review.get(root, id, true);
             if (latest.evidence.fingerprint !== fingerprint) throw new LeanReviewError(409, 'Object evidence changed during the audit save; reload before retrying.');
             const target = record.history[record.history.length - 1].after;
             const checkedLink = 'prose' in target ? target : record.links.find(item => item.id === target.linkId)!;

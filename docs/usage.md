@@ -307,7 +307,7 @@ codex plugin marketplace add /path/to/math-workspace
 codex plugin add math-workspace@personal
 ```
 
-The plugin calls `open` for the current project or a project-relative Markdown page. Reader selections can be added directly to the current conversation input; `lookup_formal_object`, `inspect_dependencies`, `lookup_knowledge`, `inspect_lean_alignment`, `read_symbol_audit`, and `verify` provide focused context on demand. The audit tool only reads results the user has already generated; it never starts model work. If no prepared project is available, `open` shows the local project launcher. MCP binds only to `127.0.0.1` and does not write manuscript or `.math-workspace/` artifacts.
+The plugin calls `open` for the current project or a project-relative Markdown page. Reader selections can be added directly to the current conversation input; `lookup_formal_object`, `inspect_dependencies`, `lookup_knowledge`, `inspect_lean_alignment`, `read_symbol_audit`, and `verify` provide focused context on demand. The audit tool only reads results the user has already generated; it never starts model work. If no prepared project is available, `open` shows the local project launcher. MCP uses local standard input/output; its Reader binds only to `127.0.0.1`. Queries do not modify manuscript or Lean source. `read_lean_review_context` reads one object's current comparison material, while `submit_lean_review_candidates` saves only explicitly requested assistance candidates, never human verdicts. Reader saves independently check the current revisions.
 
 When the host supplies exactly one current project containing `.math-workspace/config.json`, the sidebar and conversation entrypoints open it directly; otherwise they show the project chooser and recent projects. Each panel keeps its own project, page, and scroll position. Closing one panel stops only its Reader instance; another panel is unaffected. Both load the Reader directly in the plugin resource and access each view’s local API through MCP, retaining its source access and mutation checks. Local HTTP frames are not required.
 
@@ -527,6 +527,8 @@ The Reader marks anchored statements and graph nodes with a light `L`. Clicking 
 
 #### Human review of Lean and prose
 
+The comparison workbench keeps prose and Lean side by side. Switch between the statement, associated proofs and necessary context, and open the anchored declaration's complete source range. Each side scrolls independently; chapter queues and background status updates preserve the comparison position. Basic source reading does not wait for live Lean semantics to start.
+
 The Reader's Lean review panel uses the stable formal-object ID to show the current statement, associated proof/hints/solutions, nearby context, explicitly referenced prose objects, and anchored declaration locations. **Refresh evidence** uses the project's already installed Lean toolchain to run a bounded, cancellable, offline local build and elaborator query. It displays complete types, including implicit parameters, section assumptions and certificate inputs, and recursive axioms returned by Lean `collectAxioms`, including `sorryAx`. It runs only with an existing Lake manifest and locally materialized dependencies. It does not install toolchains, dependencies or caches, or call a model. Opening the panel reads existing evidence; missing, failed and stale evidence are labelled explicitly.
 
 Expand key definitions to inspect source and elaborated types/values, including wrapper predicates and input assumptions. Machine facts (anchor links, build result and evidence freshness) remain separate from human verdicts. Choose **Aligned within scope**, **Partial**, **Difference** or **Undecided**, and enter the scope, note and reviewer. Define subclaims manually and map each to one or more declarations, or leave a subclaim unmapped. A successful build or evidence refresh never creates or refreshes a human conclusion.
@@ -546,6 +548,12 @@ The whole-project overview includes manual freshness across chapters, unanchored
 Statement, associated proof, declaration, expanded definition or build-environment changes make the old human conclusion stale, with previous/current text available for comparison. Lean evidence uses conservative **project inputs** invalidation: changes to the configured project's or its local dependencies' Lean sources, lakefile, manifest, toolchain or target invalidate elaborated evidence. This is not a localization of the semantic difference. Prose context follows explicit references only; if it exceeds the bounded snapshot, freshness conservatively tracks all workspace Markdown fingerprints without creating a source knowledge base. The current page/chapter queue retains unanchored objects, reviewer and review time. Quoting evidence into a native conversation prepares discussion material; it does not send a message or save a verdict automatically.
 
 An interrupted process may leave `.math-workspace/lean-review-refresh.lock` or an object's `.lock` file. After confirming that process has stopped, remove the stale lock manually before retrying. If the declaration's actual defining module cannot be bound to the anchored source, its elaborated evidence remains unavailable.
+
+#### Codex-assisted review
+
+Choose an assumptions, statement, proof or changed-material review task in the comparison panel, then add its current object location and task to the Codex conversation input. Nothing is sent automatically. Ordinary browsers can copy the same task; native panels can quote it directly into the current input. Codex reads bounded project/object material through `read_lean_review_context` and returns candidate concerns through `submit_lean_review_candidates`, without manually copying each answer into the Reader.
+
+Candidates live in `.math-workspace/lean-assistance/<h-id>.json`, separately from build evidence, source associations and human decisions. They carry source-evidence and review revisions; old candidates cannot be applied after the source or corresponding records change. A reviewer can add individual candidates to an **Undecided** local draft or dismiss them, then check the actual scope and explicitly save a human verdict. Candidate submission does not build Lean, change source, approve a result or replace human sign-off.
 
 ### Project Structure
 
@@ -1031,7 +1039,7 @@ codex plugin add math-workspace@personal
 
 插件页面直接加载 Reader，数据通过 MCP 访问各视图的本机 Reader API；保留现有的项目与操作校验，不要求宿主允许嵌入本机 HTTP 页面。关闭面板会释放对应 Reader，MCP 退出会关闭其全部视图。缺少 UI 扩展支持的客户端仍可调用 `open` 获取普通浏览器 URL。安装或更新插件后，新建会话以刷新入口。
 
-MCP 与 Math Workspace 一样只绑定 `127.0.0.1`，不写入书稿或 `.math-workspace/` 产物。
+MCP 使用本地标准输入输出通信；它启动的 Reader 只绑定 `127.0.0.1`。查询不修改书稿或 Lean 源码。`read_lean_review_context` 读取一个对象的当前对照材料，`submit_lean_review_candidates` 仅保存明确发起的辅助审核候选，不写入人工结论；Reader 的人工保存仍独立校验当前版本。
 
 ## 学术留档
 
@@ -1249,6 +1257,8 @@ Reader 在命题正文与关系图节点上用轻量 `L` 表示存在一个或�
 
 ### Lean 与正文人工审阅
 
+对照工作台并排显示正文和 Lean，可在陈述、关联证明与必要上下文之间切换，并打开对应声明的完整源码范围。两侧独立滚动；章节队列和后台状态更新不应打断当前对照位置。普通源码阅读不等待实时 Lean 语义启动。
+
 Reader 的 Lean 审阅面板以稳定对象 ID 展示当前题面、关联证明/提示/解答、附近正文、显式引用的正文对象与锚定声明的源码位置。点击“刷新证据”后，Reader 使用项目已安装的 Lean toolchain，离线执行有时限、可取消的本地构建与 elaborator 查询，展示包括隐式参数、section 假设和 certificate 输入的完整类型，以及 Lean `collectAxioms` 返回的递归公理依赖；`sorryAx` 会保留显示。只有已有 Lake manifest 且依赖已在本地就绪时才执行；不会安装 toolchain、依赖或缓存，也不会自动调用模型。读取面板仅使用现有证据；缺失、失败和过期证据均明确标记。
 
 可展开关键定义的源码与 elaborated 类型/值，核对包装谓词与输入假设。机器事实（存在锚点、构建结果、证据是否新鲜）和人工结论分别显示。人工选择“范围内一致”“部分对应”“存在差异”或“未决定”，填写审阅范围、备注和审阅者；可手工拆分正文分项，将每项映射到一个或多个声明，也可保留未映射分项。构建通过或刷新证据不会生成或更新人工结论。
@@ -1268,6 +1278,12 @@ Reader 的 Lean 审阅面板以稳定对象 ID 展示当前题面、关联证明
 正文陈述、关联证明、声明、展开定义或构建环境变化后，旧人工结论显示为待复核，并可对照上次与当前文本。Lean 证据采用保守的“项目输入”失效范围：配置项目及其本地依赖的 Lean 源码、lakefile、manifest、toolchain 或 target 改变都会使已有 elaborated 证据过期，不能理解成工具已定位了具体语义差异。正文上下文只沿显式引用收集；超过有限快照范围时，审阅新鲜度保守地跟踪工作区全部 Markdown 的指纹，不建立源码知识库。当前页/章节的队列保留未锚定对象、审阅者与审阅时间，便于逐对象继续审阅。向原生会话引用证据只准备讨论材料，不自动发送，也不自动保存审阅结论。
 
 工具异常退出可能留下 `.math-workspace/lean-review-refresh.lock` 或对象旁的 `.lock` 文件；确认相应进程已停止后，人工移除该锁再重试。无法核对声明实际所属模块与锚定源码时，elaborated 证据保持不可用。
+
+### Codex 辅助审核
+
+在对照面板中选择检查假设、陈述、证明或复核变化，将任务和当前对象定位加入 Codex 会话输入框。材料不会自动发送。普通浏览器可复制同一任务；支持原生引用的面板可直接加入当前输入框。Codex 通过 `read_lean_review_context` 读取绑定到当前项目和对象的有限材料，再通过 `submit_lean_review_candidates` 回填候选疑点，无需把回复逐条复制回 Reader。
+
+候选保存在 `.math-workspace/lean-assistance/<h-id>.json`，与构建证据、位置关联和人工决定分开。它们携带源码证据及审阅版本；源码或相应记录变化后，旧候选不能直接应用。审阅者可逐条加入“未决定”的本地草稿或忽略，核对实际范围后再保存人工结论。模型提交候选不会运行 Lean 构建、修改书稿、判定通过或替代人工签认。
 
 ## 项目结构
 
