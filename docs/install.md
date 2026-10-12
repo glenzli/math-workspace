@@ -134,7 +134,7 @@ codex plugin add math-workspace@personal
 
 Its interfaces are read-only:
 
-- `open`, `read_marks`
+- `open`, `open_reader`, `open_workspace`
 - `lookup_formal_object`, `lookup_knowledge`
 - `inspect_dependencies`, `inspect_lean_alignment`
 - `read_symbol_audit`, `verify`
@@ -183,7 +183,7 @@ A useful adaptation should satisfy at least these conditions:
 - The Reader shows only the intended manuscript; drafts and private material are outside the scan.
 - Formal objects use stable hashes, and new objects use `tmp-*` until finalized. No permanent hash is invented by hand.
 - The project-specific skill preserves project semantics instead of turning generic rules into performative process.
-- A new Codex task can see the Math Workspace plugin and read marks or run a narrow query.
+- A new Codex task can see the Math Workspace plugin, discuss quoted Reader selections, or run a narrow query.
 
 ### 9. Update
 
@@ -340,7 +340,7 @@ codex plugin add math-workspace@personal
 
 插件提供的接口保持只读：
 
-- `open`、`read_marks`
+- `open`、`open_reader`、`open_workspace`
 - `lookup_formal_object`、`lookup_knowledge`
 - `inspect_dependencies`、`inspect_lean_alignment`
 - `read_symbol_audit`、`verify`

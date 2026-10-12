@@ -142,7 +142,7 @@ codex plugin marketplace add /path/to/math-workspace-release
 codex plugin add math-workspace@personal
 ```
 
-plugin 通过自身的相对路径启动器运行 bundle 内的 `math-workspace mcp`，不依赖全局命令。它可返回在 Codex 内置浏览器直接访问的 localhost URL，也可查询当前讨论标记的源码定位、命题、严格依赖、Lean 对齐与只读校验。
+plugin 通过自身的相对路径启动器运行 bundle 内的 `math-workspace mcp`，不依赖全局命令。它可返回在 Codex 内置浏览器直接访问的 localhost URL，也可将 Reader 选取作为源码附件加入当前会话输入框，并查询命题、严格依赖、Lean 对齐与只读校验。
 
 ## Vendoring CLI
 

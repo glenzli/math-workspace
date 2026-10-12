@@ -2,7 +2,8 @@ import type { ReaderFormula } from './formal-renderer';
 import { copyReaderText } from './reader-clipboard';
 import { readerIcon, type ReaderIconName } from './reader-icons';
 import { closestReaderElement, positionReaderPopover } from './reader-popover';
-import type { ReaderDiscussionMarkLocation } from './reader-discussion-marks';
+import type { ReaderReferenceLocation } from './reader-references';
+import { selectedReaderMarkdown } from './reader-references';
 
 export interface ReaderDefinitionMatch {
     index: number;
@@ -21,9 +22,9 @@ export interface ReaderSourceActionLabels {
     copied: string;
     noDefinitions: string;
     refineDefinitionQuery: string;
-    markSelection: string;
-    markFormula: string;
-    marked: string;
+    reference: string;
+    failed: string;
+    referenceUnavailable: string;
 }
 
 export interface ReaderSourceActionsHost {
@@ -31,7 +32,8 @@ export interface ReaderSourceActionsHost {
     fetchDefinition(index: number): Promise<any>;
     renderDefinition(definition: any): string;
     locateDefinition(definition: ReaderDefinitionMatch): void;
-    markDiscussionLocation(location: ReaderDiscussionMarkLocation): Promise<void>;
+    canReference(): boolean;
+    reference(location: ReaderReferenceLocation, markdown?: string): Promise<void>;
     labels(): ReaderSourceActionLabels;
 }
 
@@ -39,72 +41,6 @@ interface SourceDocument {
     filePath: string;
     source: string;
     formulas: ReaderFormula[];
-}
-
-function selectedMarkdownFragment(source: string, selection: string): string | undefined {
-    if (!selection || selection.includes('\n')) return source.includes(selection) ? selection : undefined;
-
-    const wrapped = [
-        `**${selection}**`,
-        `__${selection}__`,
-        `*${selection}*`,
-        `_${selection}_`,
-        `\`${selection}\``
-    ].find(candidate => source.includes(candidate));
-    if (wrapped) return wrapped;
-
-    const linkStart = source.indexOf(`[${selection}](`);
-    if (linkStart >= 0) {
-        const linkEnd = source.indexOf(')', linkStart + selection.length + 3);
-        if (linkEnd >= 0) return source.slice(linkStart, linkEnd + 1);
-    }
-
-    const offset = source.indexOf(selection);
-    return offset >= 0 ? source.slice(offset, offset + selection.length) : undefined;
-}
-
-function selectedRangeMarkdown(range: Range, formulas: ReaderFormula[]): string {
-    const formulaSource = new Map(formulas.map(formula => [formula.id, formula.source]));
-
-    const readNode = (node: Node): string => {
-        if (node.nodeType === 3) {
-            return node.textContent ?? '';
-        }
-        if (node.nodeType !== 1 && node.nodeType !== 11) {
-            return '';
-        }
-
-        const element = node.nodeType === 1 ? node as HTMLElement : undefined;
-        const formulaId = element?.dataset.readerFormula;
-        if (formulaId) {
-            return formulaSource.get(formulaId) ?? element.textContent ?? '';
-        }
-        if (element?.dataset.formalRef) {
-            return `@${element.dataset.formalRef}`;
-        }
-
-        const content = Array.from(node.childNodes).map(readNode).join('');
-        switch (element?.tagName.toLowerCase()) {
-            case 'strong':
-            case 'b':
-                return `**${content}**`;
-            case 'em':
-            case 'i':
-                return `*${content}*`;
-            case 'del':
-            case 's':
-            case 'strike':
-                return `~~${content}~~`;
-            case 'code':
-                return `\`${content}\``;
-            case 'br':
-                return '\n';
-            default:
-                return content;
-        }
-    };
-
-    return readNode(range.cloneContents()).trim();
 }
 
 function isMeaningfulDefinitionQuery(value: string): boolean {
@@ -227,14 +163,10 @@ export class ReaderSourceActions {
         const rect = selectionRect(selection);
         const text = selection.toString().trim();
         if (!sourceLines || !rect) return undefined;
-        const sourceSelection = selectedRangeMarkdown(
-            selection.getRangeAt(0),
-            this.sourceDocument.formulas
-        );
+        const sourceSelection = selectedReaderMarkdown(selection.getRangeAt(0), this.sourceDocument.formulas, sourceLines);
         return {
             text,
-            markdown: selectedMarkdownFragment(sourceLines, sourceSelection)
-                ?? selectedMarkdownFragment(sourceLines, text),
+            markdown: sourceSelection ?? (sourceLines.includes(text) ? text : undefined),
             sourceLines,
             rect,
             startLine,
@@ -248,7 +180,7 @@ export class ReaderSourceActions {
         if (formula?.dataset.readerFormula) {
             const item = this.sourceDocument?.formulas.find(candidate => candidate.id === formula.dataset.readerFormula);
             const rect = selection ? selectionRect(selection) : undefined;
-                if (item) {
+            if (item) {
                 this.showFormulaActions(item, rect || formula.getBoundingClientRect(), this.sourceRangeFor(formula, item));
                 return;
             }
@@ -273,15 +205,13 @@ export class ReaderSourceActions {
             actions.append(this.iconButton('copy-line', labels.copySourceLines, async button => {
                 await this.copyAndMark(button, selected.sourceLines);
             }));
-            const discussionLocation: ReaderDiscussionMarkLocation = {
+            const referenceLocation: ReaderReferenceLocation = {
                 filePath: this.sourceDocument?.filePath || '',
                 startLine: selected.startLine,
-                endLine: selected.endLine,
-                kind: 'selection'
+                endLine: selected.endLine
             };
-            actions.append(this.iconButton('marker', labels.markSelection, async button => {
-                await this.host.markDiscussionLocation(discussionLocation);
-                this.markCompleted(button);
+            actions.append(this.referenceButton(async () => {
+                await this.host.reference(referenceLocation, selected.markdown);
                 this.dismiss();
             }));
             if (definitions.length > 0) {
@@ -320,16 +250,14 @@ export class ReaderSourceActions {
                 ? { startLine: formula.sourceStartLine, endLine: formula.sourceEndLine, sourceLines: formula.source }
                 : undefined);
             if (range) {
-                const discussionLocation: ReaderDiscussionMarkLocation = {
+                const referenceLocation: ReaderReferenceLocation = {
                     filePath: this.sourceDocument?.filePath || '',
                     startLine: range.startLine,
                     endLine: range.endLine,
-                    kind: 'formula',
                     formulaId: formula.id
                 };
-                actions.append(this.iconButton('marker', labels.markFormula, async button => {
-                    await this.host.markDiscussionLocation(discussionLocation);
-                    this.markCompleted(button);
+                actions.append(this.referenceButton(async () => {
+                    await this.host.reference(referenceLocation, formula.source);
                     this.dismiss();
                 }));
             }
@@ -420,6 +348,18 @@ export class ReaderSourceActions {
         positionReaderPopover(popover, rect, { maxWidth: 460 });
     }
 
+    private referenceButton(action: () => Promise<void>): HTMLButtonElement {
+        const labels = this.host.labels();
+        const button = this.iconButton('quote', labels.reference, action);
+        button.classList.add('reader-source-reference');
+        if (!this.host.canReference()) {
+            button.disabled = true;
+            button.dataset.tooltip = labels.referenceUnavailable;
+            button.setAttribute('aria-label', labels.referenceUnavailable);
+        }
+        return button;
+    }
+
     private iconButton(icon: ReaderIconName, label: string, action: (button: HTMLButtonElement) => void | Promise<void>): HTMLButtonElement {
         const button = document.createElement('button');
         button.type = 'button';
@@ -427,7 +367,21 @@ export class ReaderSourceActions {
         button.append(readerIcon(icon));
         button.dataset.tooltip = label;
         button.setAttribute('aria-label', label);
-        button.addEventListener('click', () => void action(button));
+        button.addEventListener('click', async () => {
+            if (button.disabled) return;
+            button.disabled = true;
+            try { await action(button); }
+            catch (error) {
+                console.warn('[math-workspace] Source action failed', error);
+                if (this.popover?.contains(button)) {
+                    const message = this.popover.querySelector<HTMLElement>('[role="alert"]') || document.createElement('p');
+                    message.className = 'reader-source-message';
+                    message.setAttribute('role', 'alert');
+                    message.textContent = this.host.labels().failed;
+                    this.popover.append(message);
+                }
+            } finally { button.disabled = false; }
+        });
         return button;
     }
 
@@ -442,18 +396,6 @@ export class ReaderSourceActions {
         button.classList.add('is-copied');
         button.dataset.tooltip = this.host.labels().copied;
         button.setAttribute('aria-label', this.host.labels().copied);
-        window.setTimeout(() => {
-            button.classList.remove('is-copied');
-            button.dataset.tooltip = label;
-            button.setAttribute('aria-label', label);
-        }, 1200);
-    }
-
-    private markCompleted(button: HTMLButtonElement): void {
-        const label = button.dataset.tooltip || button.getAttribute('aria-label') || '';
-        button.classList.add('is-copied');
-        button.dataset.tooltip = this.host.labels().marked;
-        button.setAttribute('aria-label', this.host.labels().marked);
         window.setTimeout(() => {
             button.classList.remove('is-copied');
             button.dataset.tooltip = label;

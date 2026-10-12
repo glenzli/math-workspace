@@ -5,6 +5,8 @@ import { findMathWorkspaceRoot } from '../project-root';
 import { ReaderAppGateway } from './reader-app-gateway';
 import { readerAppHtml } from './reader-app-html';
 
+const { fileURLToPath } = require('node:url');
+
 const RESOURCE_URI = 'ui://math-workspace/reader-v2.html';
 
 /** Register the two host entrypoints and app-only view lifecycle on one Reader resource. */
@@ -24,12 +26,22 @@ export function registerReaderApp(server: McpServer, defaultRoot?: string): Read
         }] };
     });
     const projectRoot = z.string().optional().describe('Prepared Math Workspace project to open. Otherwise use the local project chooser.');
+    const currentProject = async (): Promise<string | undefined> => {
+        if (!server.server.getClientCapabilities()?.roots) return defaultRoot;
+        try {
+            const { roots } = await server.server.listRoots(undefined, { timeout: 3000 });
+            // Multiple roots do not identify which project the user is opening.
+            return roots.length === 1 ? fileURLToPath(roots[0].uri) : undefined;
+        } catch {
+            return undefined;
+        }
+    };
     const pagePath = z.string().optional().describe('Project-relative Markdown page.');
     for (const entrypoint of ['global', 'thread'] as const) {
         server.registerTool(entrypoint === 'global' ? 'open_workspace' : 'open_reader', {
             title: 'Math Workspace',
             description: entrypoint === 'global'
-                ? 'Open Math Workspace from the sidebar, choose a local project, or resume reading.'
+                ? 'Open the current prepared Math Workspace project from the sidebar, or choose a local project.'
                 : 'Open the existing Math Workspace Reader beside this conversation. Each panel keeps its own project and reading position.',
             inputSchema: { projectRoot, pagePath },
             annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -39,10 +51,10 @@ export function registerReaderApp(server: McpServer, defaultRoot?: string): Read
             }
         }, async input => {
             try {
-                const requested = input.projectRoot || (entrypoint === 'thread' ? defaultRoot : undefined);
+                const requested = input.projectRoot || await currentProject();
                 const root = requested ? await findMathWorkspaceRoot(path.resolve(requested)) : undefined;
                 if (input.projectRoot && !root) throw new Error('Choose a prepared Math Workspace project.');
-                const reader = { launcher: entrypoint === 'global',
+                const reader = { launcher: !root,
                     ...(root ? { projectRoot: root } : {}), ...(input.pagePath ? { pagePath: input.pagePath } : {}) };
                 return {
                     content: [{ type: 'text' as const, text: 'Math Workspace Reader is ready.' }],

@@ -1,3 +1,8 @@
+declare module '*.png' {
+    const source: string;
+    export default source;
+}
+
 declare module 'fs' {
     export const existsSync: any;
     export const readFileSync: any;

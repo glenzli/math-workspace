@@ -1,7 +1,7 @@
 {
   "name": "math-workspace",
   "description": "Local workspace for mathematical writing, formal review, and project navigation",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "publisher": "glenzli",
   "license": "MIT",
   "repository": {
@@ -60,7 +60,15 @@
     "release:npm": "node scripts/publish-release.js --only npm"
   },
   "devDependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/search": "6.7.2",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.14",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "@shikijs/engine-javascript": "4.5.0",
+    "@shikijs/langs": "4.5.0",
+    "@shikijs/primitive": "4.5.0",
     "@types/markdown-it": "14.1.2",
     "katex": "0.16.47",
     "lucide": "0.468.0",

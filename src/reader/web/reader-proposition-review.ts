@@ -30,15 +30,12 @@ export interface ReaderPropositionReviewLabels {
     terminalPropositions: string;
     terminalPropositionSummary: (count: number) => string;
     terminalPropositionHint: string;
-    markTerminal: string;
-    markTerminalHint: string;
     nodeLabel: (display: string, upstream: number, downstream: number, ambientReferences: number, leanDeclarations: number, status: string) => string;
 }
 
 export interface ReaderPropositionReviewHost {
     labels(): ReaderPropositionReviewLabels;
     openProposition(id: string): void;
-    markTerminalPropositions(items: ReaderPropositionReviewItem[]): void;
 }
 
 interface PositionedItem {
@@ -543,16 +540,6 @@ export class ReaderPropositionReview {
         summary.append(label, hint);
         section.append(summary);
 
-        if (terminal.length > 0) {
-            const audit = document.createElement('button');
-            audit.type = 'button';
-            audit.className = 'reader-proposition-review-batch-mark';
-            audit.dataset.tooltip = labels.markTerminalHint;
-            audit.setAttribute('aria-label', labels.markTerminal + ' · ' + labels.terminalPropositionSummary(terminal.length));
-            audit.append(readerIcon('marker'), document.createTextNode(labels.markTerminal));
-            audit.addEventListener('click', () => this.host.markTerminalPropositions(terminal));
-            section.append(audit);
-        }
         return section;
     }
 }

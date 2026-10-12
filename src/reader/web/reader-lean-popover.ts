@@ -30,6 +30,7 @@ export interface ReaderLeanAnchorPayload {
 
 export interface ReaderLeanPopoverLabels {
     title: string;
+    openReview: string;
     loading: string;
     unavailable: string;
     contract: string;
@@ -44,6 +45,7 @@ export interface ReaderLeanPopoverLabels {
 
 export interface ReaderLeanPopoverHost {
     fetchAnchor(id: string): Promise<ReaderLeanAnchorPayload>;
+    openReview(id: string, marker: HTMLButtonElement): void;
     labels(): ReaderLeanPopoverLabels;
 }
 
@@ -119,7 +121,7 @@ export class ReaderLeanPopover {
         this.activeMarker = marker;
         const requestId = ++this.requestId;
         const labels = this.host.labels();
-        const popover = this.createPopover(labels.title);
+        const popover = this.createPopover(labels.title, labels.openReview, id, marker);
         const loading = document.createElement('p');
         loading.className = 'reader-lean-popover-status';
         loading.textContent = labels.loading;
@@ -140,7 +142,7 @@ export class ReaderLeanPopover {
         });
     }
 
-    private createPopover(titleText: string): HTMLElement {
+    private createPopover(titleText: string, reviewText: string, id: string, marker: HTMLButtonElement): HTMLElement {
         const popover = document.createElement('section');
         popover.className = 'reader-lean-popover';
         popover.setAttribute('role', 'dialog');
@@ -148,7 +150,16 @@ export class ReaderLeanPopover {
         const header = document.createElement('header');
         const title = document.createElement('h2');
         title.textContent = titleText;
-        header.append(title);
+        const review = document.createElement('button');
+        review.type = 'button';
+        review.className = 'reader-lean-open-review';
+        review.dataset.readerLeanReview = id;
+        review.textContent = reviewText;
+        review.addEventListener('click', () => {
+            this.dismiss();
+            this.host.openReview(id, marker);
+        });
+        header.append(title, review);
         popover.append(header);
         document.body.append(popover);
         return popover;

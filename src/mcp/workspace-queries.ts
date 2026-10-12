@@ -1,11 +1,10 @@
-import * as crypto from 'node:crypto';
 import * as path from 'node:path';
 import { buildRuntimeDefinitions, formatDisplayNumber, type LabelData, type PageData } from '@math-workspace/core';
 import { findMathWorkspaceRoot } from '../project-root';
 import { AcademicArchive } from '../archive/store';
 import { readLeanBuild } from '../lean/lean-state';
 import { readLeanDependencyArtifact } from '../lean/lean-dependencies';
-import { ReaderDiscussionMarkStore } from '../reader/discussion-marks';
+import { LeanReviewService } from '../lean/lean-review-service';
 import { loadWorkspaceSnapshot, type WorkspaceSnapshot } from '../reader/workspace';
 import { readSymbolAuditStatus } from '../reader/symbol-audit-service';
 import { SymbolAuditStore, type SymbolAuditBinding } from '../reader/symbol-audit';
@@ -22,7 +21,6 @@ const MAX_GRAPH_NODES = 72;
 
 export interface WorkspaceQueryOptions {
     rootPath?: string;
-    discussionMarksPath?: string;
     symbolAuditStatePath?: string;
 }
 
@@ -35,10 +33,6 @@ function excerpt(value: string | undefined): { value: string; truncated: boolean
     return source.length <= MAX_SOURCE_CHARS
         ? { value: source, truncated: false }
         : { value: `${source.slice(0, MAX_SOURCE_CHARS)}\n\n… [truncated by Math Workspace]`, truncated: true };
-}
-
-function sourceHash(value: string): string {
-    return crypto.createHash('sha256').update(value).digest('hex');
 }
 
 function display(label: LabelData): string {
@@ -106,43 +100,10 @@ function auditBinding(binding: SymbolAuditBinding): Record<string, unknown> {
 }
 
 export class WorkspaceQueries {
-    private readonly discussionMarks: ReaderDiscussionMarkStore;
     private readonly symbolAudit: SymbolAuditStore;
 
     constructor(private readonly options: WorkspaceQueryOptions = {}) {
-        this.discussionMarks = new ReaderDiscussionMarkStore({ stateFilePath: options.discussionMarksPath });
         this.symbolAudit = new SymbolAuditStore({ stateFilePath: options.symbolAuditStatePath });
-    }
-
-    async discussionMarksGet(projectRoot?: string): Promise<Record<string, unknown>> {
-        const rootPath = await this.resolveRoot(projectRoot);
-        const snapshot = await loadWorkspaceSnapshot(rootPath);
-        const marks = await this.discussionMarks.list(rootPath);
-        return {
-            project: { rootPath, rootName: path.basename(rootPath), revision: snapshot.revision },
-            marks: marks.map(mark => {
-                const source = snapshot.documents.get(mark.filePath);
-                const currentLines = source?.split(/\r?\n/).slice(mark.startLine - 1, mark.endLine).join('\n');
-                return {
-                    id: mark.id,
-                    order: mark.order,
-                    createdAt: mark.createdAt,
-                    kind: mark.kind,
-                    filePath: mark.filePath,
-                    title: mark.title,
-                    startLine: mark.startLine,
-                    endLine: mark.endLine,
-                    ...(mark.formalId ? { formalId: mark.formalId } : {}),
-                    ...(mark.formulaId ? { formulaId: mark.formulaId } : {}),
-                    ...(Number.isInteger(mark.startTextOffset) ? { startTextOffset: mark.startTextOffset } : {}),
-                    ...(Number.isInteger(mark.endTextOffset) ? { endTextOffset: mark.endTextOffset } : {}),
-                    status: currentLines && sourceHash(currentLines) === mark.sourceHash ? 'current' : 'changed'
-                };
-            }),
-            guidance: marks.length
-                ? 'Read the listed Markdown ranges from the local project before answering. Do not treat this locator response as source content.'
-                : 'No discussion marks are active for this project.'
-        };
     }
 
     async archiveRead(input: { action?: string; record?: string; filePath?: string; formalId?: string; offset?: number; limit?: number }, projectRoot?: string): Promise<Record<string, unknown>> {
@@ -257,8 +218,9 @@ export class WorkspaceQueries {
         const rootPath = await this.resolveRoot(projectRoot);
         const snapshot = await loadWorkspaceSnapshot(rootPath);
         const id = normalizeFormalId(idInput);
+        const human = snapshot.state.labels?.[id] ? await new LeanReviewService().get(rootPath, id) : undefined;
         const anchor = snapshot.state.leanIndex?.anchors?.[id];
-        if (!anchor) return { id, anchored: false, formal: nodeSummary(snapshot, id) };
+        if (!anchor) return { id, anchored: false, formal: nodeSummary(snapshot, id), ...(human ? { evidence: human.evidence, humanReview: human.review } : {}) };
         const projectKeys = [...new Set<string>((anchor.declarations || []).map((item: any) => item.projectKey).filter(Boolean))];
         const [build, dependencies] = await Promise.all([readLeanBuild(rootPath), readLeanDependencyArtifact(rootPath)]);
         const builds = Object.fromEntries(projectKeys.map(key => [key, build?.projects?.[key]]).filter(([, value]) => !!value));
@@ -268,6 +230,7 @@ export class WorkspaceQueries {
             formal: anchor.formal,
             declarations: anchor.declarations,
             status: anchor.status,
+            ...(human ? { evidence: human.evidence, humanReview: human.review } : {}),
             ...(Object.keys(builds).length ? { builds } : {}),
             ...(dependencies?.comparisons?.[id] ? { dependencyComparison: dependencies.comparisons[id] } : {})
         };

@@ -1,6 +1,6 @@
 {
   "name": "math-workspace",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "Query local Math Workspace context from Codex.",
   "author": {
     "name": "Glen Li",
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "Math Workspace",
     "shortDescription": "Open and query the local mathematical workspace.",
-    "longDescription": "Open the existing Math Workspace Reader from the sidebar or beside a Codex conversation, or query a prepared project. The plugin resolves deliberate source marks, maintained project knowledge, cached audits, and formal/Lean evidence without duplicating a Codex discussion UI.",
+    "longDescription": "Open Math Workspace from the sidebar or beside a conversation, select source material, and add Markdown references to the current conversation input. Query maintained project knowledge, cached audits, and formal/Lean evidence while keeping discussion in the native conversation.",
     "developerName": "Glen Li",
     "category": "Productivity",
     "capabilities": [

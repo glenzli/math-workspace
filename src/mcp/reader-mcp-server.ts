@@ -6,6 +6,7 @@ import { findMathWorkspaceRoot } from '../project-root';
 import { startReaderServer, type FormalReaderServer } from '../reader/server';
 import { WorkspaceQueries } from './workspace-queries';
 import { registerReaderApp } from './reader-app';
+import workspaceIcon from '../../media/plugin/math-workspace-file-handler-icon.png';
 
 export interface ReaderMcpServerOptions {
     rootPath?: string;
@@ -76,9 +77,10 @@ export async function runReaderMcpServer(options: ReaderMcpServerOptions = {}): 
     const queries = new WorkspaceQueries({ rootPath: options.rootPath });
     const server = new McpServer({
         name: 'math-workspace',
-        version: '0.1.0'
+        version: '0.1.0',
+        icons: [{ src: workspaceIcon, mimeType: 'image/png', sizes: ['128x128'] }]
     }, {
-        instructions: 'Use Math Workspace for local, read-only formal Markdown and Lean context. When a user asks about marked material, a selected passage, or “this/these” in the current Math Workspace, call read_marks first, then read the returned Markdown locations from the local project. Discussion marks are locators, not copied source. After you have read active marked locations, begin the user-facing answer with the short receipt `已读取 N 个标记。`, replacing N with the number of active marks; do not list mark IDs or repeat a separate receipt. Use narrow lookup, project-knowledge, cached-audit, dependency, Lean, and validation tools only when the task needs their evidence instead of asking the user to paste broad project context. Dependency and audit results do not decide edits automatically.'
+        instructions: 'Use Math Workspace for local, read-only formal Markdown and Lean context. Reader selections are quoted as source attachments in the current conversation. Use the attached Markdown and source locations as context; discussion and editing stay in the native conversation. Use narrow lookup, project-knowledge, cached-audit, dependency, Lean, and validation tools only when the task needs their evidence instead of asking the user to paste broad project context. Dependency and audit results do not decide edits automatically.'
     });
 
     const projectRoot = z.string().optional().describe('Absolute or relative root of a project containing .math-workspace/config.json. Defaults to the MCP working directory.');
@@ -96,32 +98,6 @@ export async function runReaderMcpServer(options: ReaderMcpServerOptions = {}): 
             return { content: [{ type: 'text' as const, text: error instanceof Error ? error.message : String(error) }], isError: true };
         }
     };
-
-    server.registerTool('read_marks', {
-        title: 'Read Math Workspace discussion marks',
-        description: 'Return the ordered, validated source locations deliberately marked in Math Workspace. Read the referenced Markdown ranges locally for their actual source; this tool never copies their content into context.',
-        inputSchema: { projectRoot },
-        outputSchema: { result: z.object({}).passthrough() },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-    }, async ({ projectRoot: root }) => {
-        try {
-            const result = await queries.discussionMarksGet(root);
-            const marks = Array.isArray(result.marks) ? result.marks : [];
-            const count = marks.length;
-            const followUp = count
-                ? `Found ${count} active discussion mark${count === 1 ? '' : 's'}. Read every referenced Markdown range before answering, then begin the user-facing answer with: 已读取 ${count} 个标记。`
-                : 'No active discussion marks are available for this project.';
-            return {
-                content: [{
-                    type: 'text' as const,
-                    text: `${followUp}\n\n${JSON.stringify(result, null, 2)}`
-                }],
-                structuredContent: { result }
-            };
-        } catch (error) {
-            return { content: [{ type: 'text' as const, text: error instanceof Error ? error.message : String(error) }], isError: true };
-        }
-    });
 
     server.registerTool('read_archives', {
         title: 'Read academic archives',

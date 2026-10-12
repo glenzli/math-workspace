@@ -135,7 +135,7 @@ codex plugin add math-workspace@personal
 
 插件提供的接口保持只读：
 
-- `open`、`read_marks`
+- `open`、`open_reader`、`open_workspace`
 - `lookup_formal_object`、`lookup_knowledge`
 - `inspect_dependencies`、`inspect_lean_alignment`
 - `read_symbol_audit`、`verify`

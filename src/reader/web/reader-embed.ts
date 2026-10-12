@@ -12,7 +12,9 @@ export function mountReaderEmbeddedView(main: HTMLElement): void {
     let projectRoot: string | undefined;
     let pending = 0;
     let generation = 0;
-    let restore = Number(new URLSearchParams(readerSearch()).get('readerScroll')) || 0;
+    const initialQuery = new URLSearchParams(readerSearch());
+    const restorePath = initialQuery.get('path') || '';
+    let restore = Number(initialQuery.get('readerScroll')) || 0;
     const publish = () => {
         persistReaderState({
             projectRoot, pagePath: new URLSearchParams(readerSearch()).get('path') || '',
@@ -27,7 +29,9 @@ export function mountReaderEmbeddedView(main: HTMLElement): void {
         }).then(context => {
             if (current !== generation) return;
             projectRoot = context.projectRoot;
-            if (restore > 0 && readerSearch().includes('path=') && document.querySelector('#reader-article')?.childElementCount) {
+            const pagePath = new URLSearchParams(readerSearch()).get('path') || '';
+            if (pagePath && pagePath !== restorePath) restore = 0;
+            if (restore > 0 && pagePath === restorePath && document.querySelector('#reader-article')?.childElementCount) {
                 const scroll = restore; restore = 0;
                 requestAnimationFrame(() => { main.scrollTop = scroll; publish(); });
             } else publish();

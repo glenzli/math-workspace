@@ -18,8 +18,13 @@ export function readerFigureDocument(html: string, csp: string | null): string {
 
 export function installInteractiveFigureRule(markdown: MarkdownIt, resolvePath: (source: string, current: string) => string): void {
     markdown.core.ruler.after('inline', 'interactive_figures', state => {
-        for (const token of state.tokens) {
+        for (const [index, token] of state.tokens.entries()) {
             if (token.type !== 'inline') continue;
+            // Only independent image blocks use figure sizing; inline images stay inline.
+            if (token.children?.length === 1 && token.children[0].type === 'image'
+                && state.tokens[index - 1]?.type === 'paragraph_open') {
+                state.tokens[index - 1].attrJoin('class', 'reader-static-figure');
+            }
             const figure = interactiveFigureReference(token.children);
             if (!figure) continue;
             let source: string, poster: string;
@@ -40,8 +45,69 @@ export function installInteractiveFigureRule(markdown: MarkdownIt, resolvePath: 
     });
 }
 
-export function mountInteractiveFigures(article: HTMLElement, language: 'zh' | 'en'): () => void {
+export function mountReaderFigures(article: HTMLElement, language: 'zh' | 'en'): () => void {
     const disposers: Array<() => void> = [];
+    let closeViewer = () => {};
+    const expandText = language === 'en' ? 'Enlarge figure' : '放大图示';
+    for (const root of article.querySelectorAll<HTMLElement>('.reader-static-figure, .reader-interactive-figure')) {
+        const poster = root.querySelector<HTMLImageElement>('img');
+        const sizeFromPoster = () => {
+            if (!poster?.naturalWidth || !poster.naturalHeight || poster.src === emptyReaderImage) return;
+            // Limit tall artwork as well as wide diagrams, without clipping either dimension.
+            root.style.setProperty('--reader-figure-aspect-width', (32 * poster.naturalWidth / poster.naturalHeight) + 'em');
+            root.style.setProperty('--reader-figure-natural-width', poster.naturalWidth + 'px');
+        };
+        poster?.addEventListener('load', sizeFromPoster); sizeFromPoster();
+        let toolbar = root.querySelector<HTMLElement>('.reader-figure-toolbar');
+        if (!toolbar) { toolbar = document.createElement('span'); toolbar.className = 'reader-figure-toolbar'; root.prepend(toolbar); }
+        const expand = document.createElement('button');
+        expand.type = 'button'; expand.dataset.figureExpand = ''; expand.textContent = expandText;
+        const openViewer = () => {
+            closeViewer();
+            const style = getComputedStyle(article);
+            const dialog = document.createElement('dialog'); dialog.className = 'reader-figure-viewer';
+            dialog.setAttribute('aria-label', root.dataset.figureTitle || poster?.alt || expandText);
+            dialog.style.fontSize = style.fontSize; dialog.style.fontFamily = style.fontFamily;
+            const close = document.createElement('button'); close.type = 'button';
+            close.textContent = language === 'en' ? 'Close' : '关闭'; close.className = 'reader-figure-viewer-close';
+            const viewport = document.createElement('div'); viewport.className = 'reader-figure-viewer-viewport';
+            dialog.append(close, viewport); document.body.append(dialog);
+            // Atomic moves preserve opaque iframe state. Older engines enlarge the poster instead.
+            const live = !root.matches('.reader-interactive-figure') || typeof viewport.moveBefore === 'function';
+            const placeholder = document.createElement('div');
+            placeholder.style.height = root.getBoundingClientRect().height + 'px';
+            const rootStyle = getComputedStyle(root);
+            placeholder.style.marginTop = rootStyle.marginTop; placeholder.style.marginBottom = rootStyle.marginBottom;
+            dialog.style.setProperty('--reader-figure-max-width', rootStyle.getPropertyValue('--reader-figure-max-width') || '50em');
+            if (live) {
+                root.before(placeholder);
+                if (viewport.moveBefore) viewport.moveBefore(root, null); else viewport.append(root);
+            } else if (poster) {
+                const still = document.createElement('div'); still.className = 'reader-static-figure';
+                still.style.cssText = root.style.cssText; still.append(poster.cloneNode()); viewport.append(still);
+            }
+            let restored = false;
+            const restore = () => {
+                if (restored) return; restored = true;
+                if (live) {
+                    const parent = placeholder.parentElement;
+                    if (parent?.moveBefore && parent.isConnected) { parent.moveBefore(root, placeholder); placeholder.remove(); }
+                    else placeholder.replaceWith(root);
+                }
+                dialog.remove(); closeViewer = () => {};
+                if (expand.isConnected) expand.focus({ preventScroll: true });
+            };
+            closeViewer = () => { dialog.close(); restore(); };
+            close.addEventListener('click', () => closeViewer());
+            dialog.addEventListener('cancel', event => { event.preventDefault(); closeViewer(); });
+            dialog.addEventListener('close', restore);
+            dialog.showModal();
+        };
+        expand.addEventListener('click', openViewer); toolbar.prepend(expand);
+        disposers.push(() => { poster?.removeEventListener('load', sizeFromPoster); expand.removeEventListener('click', openViewer); expand.remove(); });
+    }
+    const beforePrint = () => closeViewer();
+    window.addEventListener('beforeprint', beforePrint);
     const typographyListeners = new Set<() => void>();
     const syncTypography = () => typographyListeners.forEach(sync => sync());
     // Reader text settings live on an ancestor; the opaque frames cannot inherit them.
@@ -123,6 +189,7 @@ export function mountInteractiveFigures(article: HTMLElement, language: 'zh' | '
         disposers.push(() => { showPoster(); toggle.removeEventListener('click', click); window.removeEventListener('message', receive); });
     }
     return () => {
+        closeViewer(); window.removeEventListener('beforeprint', beforePrint);
         typographyObserver.disconnect(); window.removeEventListener('resize', syncTypography);
         typographyListeners.clear(); disposers.forEach(dispose => dispose());
     };

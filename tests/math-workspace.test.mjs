@@ -1,5 +1,12 @@
 import { testReaderApps } from './reader-app.test.mjs';
 import { testReaderDefinitions } from './reader-definitions.test.mjs';
+import { testLeanReviewBackend } from './lean-review.test.mjs';
+import { testReaderLeanReview } from './reader-lean-review.test.mjs';
+import { testLeanLanguageBackend } from './lean-language.test.mjs';
+import { testLeanAuditBackend } from './lean-audit.test.mjs';
+import { testReaderLeanAudit } from './reader-lean-audit.test.mjs';
+import { testReaderLeanSource } from './reader-lean-source.test.mjs';
+import { testReaderLeanMetadata } from './reader-lean-metadata.test.mjs';
 import { testInteractiveFigures } from './interactive-figures.test.mjs';
 import assert from 'node:assert/strict';
 import { testExercises } from './exercises.test.mjs';
@@ -1704,7 +1711,6 @@ async function testReaderMcpServer() {
             'open_reader',
             'open_workspace',
             'read_archives',
-            'read_marks',
             'read_symbol_audit',
             'reader_request',
             'reader_updates',
@@ -1724,9 +1730,8 @@ async function testReaderMcpServer() {
         assert.match(launch.structuredContent.url, /^http:\/\/127\.0\.0\.1:\d+\/\?path=book1%2F01-foundations\.md$/);
         assert.match(launch.content[0].text, /Codex's local browser/);
 
-        const marks = await mcp.request('tools/call', { name: 'read_marks', arguments: {} });
-        assert.equal(marks.structuredContent.result.marks.length, 1);
-        assert.match(marks.content[0].text, /已读取 1 个标记。/);
+        assert.equal(tools.tools.some(tool => tool.name === 'read_marks'), false);
+        assert.ok(await fs.readFile(discussionMarksPath, 'utf8'), 'Existing mark data must remain untouched.');
 
         const knowledge = await mcp.request('tools/call', {
             name: 'lookup_knowledge',
@@ -1794,107 +1799,23 @@ async function testSimplifiedCliFlow() {
     assert.match(doctor.stdout, /Reader bundle: ready/);
 }
 
-async function testReaderDiscussionMarks() {
-    const root = await makeWorkspace('reader-discussion-marks');
-    const chapterPath = path.join(root, 'book1', '01-foundations.md');
-    await fs.writeFile(chapterPath, [
-        '# #h-1111111111111111 Foundations',
-        '',
-        '定理 #h-3333333333333333（Finite cover）：Every open cover has a finite subcover.',
-        '',
-        '推论 #h-4444444444444444（Consequence）：Apply @h-3333333333333333.',
-        ''
-    ].join('\n'));
-    assert.equal(runCli(root, ['prepare']).status, 0);
-    const env = {
-        MATH_WORKSPACE_STATE: path.join(root, 'reader-projects.json'),
-        MATH_WORKSPACE_DISCUSSION_MARKS: path.join(root, 'reader-discussion-marks.json')
-    };
-    const reader = await startReader(root, { env });
+async function testReaderMarkRetirement() {
+    const root = await makeWorkspace('reader-mark-retirement');
+    const marksPath = path.join(root, 'historical-marks.json');
+    const historical = '{"version":1,"marks":[{"id":"historical"}]}';
+    await fs.writeFile(marksPath, historical);
+    const prepared = runCli(root, ['prepare']);
+    assert.equal(prepared.status, 0, combinedOutput(prepared));
+    const reader = await startReader(root, { env: { MATH_WORKSPACE_DISCUSSION_MARKS: marksPath } });
     try {
         const state = await (await fetch(reader.url + '/api/state')).json();
-        const unauthorized = await fetch(reader.url + '/api/discussion-marks');
-        assert.equal(unauthorized.status, 403);
-        const created = await fetch(reader.url + '/api/discussion-marks', {
-            method: 'POST',
-            headers: {
-                'content-type': 'application/json',
-                'x-math-workspace-token': state.requestToken
-            },
-            body: JSON.stringify({ marks: [
-                { filePath: 'book1/01-foundations.md', startLine: 3, endLine: 3, kind: 'formal', formalId: 'h-3333333333333333' },
-                { filePath: 'book1/01-foundations.md', startLine: 5, endLine: 5, kind: 'region' },
-                {
-                    filePath: 'book1/01-foundations.md',
-                    startLine: 3,
-                    endLine: 3,
-                    kind: 'selection',
-                    startTextOffset: 21,
-                    endTextOffset: 25
-                }
-            ] })
-        });
-        assert.equal(created.status, 200);
-        const createdPayload = await created.json();
-        assert.equal(createdPayload.marks.length, 3);
-        assert.equal(createdPayload.marks[0].status, 'current');
-        assert.equal(createdPayload.marks[0].formalId, 'h-3333333333333333');
-        assert.equal(createdPayload.marks[2].startTextOffset, 21);
-        assert.equal(createdPayload.marks[2].endTextOffset, 25);
-        assert.equal('markdown' in createdPayload.marks[0], false);
-
-        const stored = JSON.parse(await fs.readFile(env.MATH_WORKSPACE_DISCUSSION_MARKS, 'utf8'));
-        assert.equal(stored.marks.length, 3, JSON.stringify(stored));
-        assert.equal(stored.marks[0].rootPath, await fs.realpath(root), JSON.stringify(stored));
-        assert.equal(typeof stored.marks[0].sourceHash, 'string');
-
-        const listed = await fetch(reader.url + '/api/discussion-marks', {
-            headers: { 'x-math-workspace-token': state.requestToken }
-        });
-        assert.equal(listed.status, 200);
-        const listedPayload = await listed.json();
-        assert.equal(listedPayload.marks.length, 3);
-
-        const mcp = await startMcp(root, { env });
-        try {
-            const tools = await mcp.request('tools/list');
-            assert.ok(tools.tools.some(tool => tool.name === 'read_marks'));
-            const marked = await mcp.request('tools/call', {
-                name: 'read_marks',
-                arguments: {}
-            });
-            assert.equal(marked.isError, undefined, JSON.stringify(marked));
-            const result = marked.structuredContent.result;
-            assert.equal(result.marks.length, 3);
-            assert.equal(result.marks[0].filePath, 'book1/01-foundations.md');
-            assert.equal(result.marks[0].startLine, 3);
-            assert.equal(result.marks[2].startTextOffset, 21);
-            assert.equal(result.marks[2].endTextOffset, 25);
-            assert.equal(JSON.stringify(result).includes('Every open cover has a finite subcover.'), false);
-
-            await fs.writeFile(chapterPath, (await fs.readFile(chapterPath, 'utf8')).replace('finite subcover.', 'finite extracted subcover.'));
-            const stale = await mcp.request('tools/call', {
-                name: 'read_marks',
-                arguments: {}
-            });
-            assert.equal(stale.structuredContent.result.marks[0].status, 'changed');
-        } finally {
-            await stopReader(mcp.child);
+        for (const method of ['GET', 'POST', 'DELETE']) {
+            const response = await fetch(reader.url + '/api/discussion-marks', { method,
+                headers: { 'x-math-workspace-token': state.requestToken } });
+            assert.equal(response.status, method === 'GET' ? 404 : 405, 'The retired mark API must not accept mutations.');
         }
-
-        const removed = await fetch(reader.url + '/api/discussion-marks?id=' + encodeURIComponent(createdPayload.marks[0].id), {
-            method: 'DELETE',
-            headers: { 'x-math-workspace-token': state.requestToken }
-        });
-        assert.equal(removed.status, 200);
-        const cleared = await fetch(reader.url + '/api/discussion-marks', {
-            method: 'DELETE',
-            headers: { 'x-math-workspace-token': state.requestToken }
-        });
-        assert.equal((await cleared.json()).cleared, 2);
-    } finally {
-        await stopReader(reader.child);
-    }
+        assert.equal(await fs.readFile(marksPath, 'utf8'), historical);
+    } finally { await stopReader(reader.child); }
 }
 
 async function testReaderSymbolAudit() {
@@ -1935,16 +1856,25 @@ async function testReaderSymbolAudit() {
 import fs from 'node:fs';
 let buffer = '';
 let threadCount = 0;
+let modelListCount = 0;
 const write = value => process.stdout.write(JSON.stringify(value) + '\\n');
 const receive = message => {
   if (message.method === 'initialize') {
     if (message.params.capabilities?.experimentalApi !== true) return write({ id: message.id, error: { message: 'experimental API capability was not enabled' } });
     return write({ id: message.id, result: { platformFamily: 'test' } });
   }
-  if (message.method === 'model/list') return write({ id: message.id, result: { data: [{
-    id: 'symbol-model', model: 'gpt-symbol', displayName: 'Symbol test model', description: 'fixture', hidden: false, isDefault: true,
-    defaultReasoningEffort: 'high', supportedReasoningEfforts: [{ reasoningEffort: 'low', description: 'low' }, { reasoningEffort: 'high', description: 'high' }]
-  }], nextCursor: null } });
+  if (message.method === 'model/list') {
+    modelListCount += 1;
+    const data = [{
+      id: 'symbol-model', model: 'gpt-symbol', displayName: 'Symbol test model', description: 'fixture', hidden: false, isDefault: true,
+      defaultReasoningEffort: 'high', supportedReasoningEfforts: [{ reasoningEffort: 'low', description: 'low' }, { reasoningEffort: 'high', description: 'high' }]
+    }];
+    if (modelListCount > 1) data.push({
+      id: 'new-symbol-model', model: 'gpt-symbol-new', displayName: 'New runtime model', hidden: false, isDefault: false,
+      defaultReasoningEffort: 'medium', supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'medium' }]
+    });
+    return write({ id: message.id, result: { data, nextCursor: null } });
+  }
   if (message.method === 'thread/start') {
     if (message.params.ephemeral !== true || message.params.sandbox !== 'read-only' || message.params.approvalPolicy !== 'never' || message.params.model !== 'gpt-symbol') {
       return write({ id: message.id, error: { message: 'Symbol audit must use the configured ephemeral read-only model.' } });
@@ -2022,7 +1952,8 @@ process.stdin.on('data', chunk => {
     const env = {
         MATH_WORKSPACE_STATE: path.join(root, 'reader-projects.json'),
         MATH_WORKSPACE_SYMBOL_AUDIT_STATE: path.join(root, 'reader-symbol-audit.json'),
-        MATH_WORKSPACE_CODEX_COMMAND: fakeCodex
+        MATH_WORKSPACE_CODEX_COMMAND: fakeCodex,
+        CODEX_CLI_PATH: path.join(root, 'missing-client-codex')
     };
     const reader = await startReader(root, { env });
     try {
@@ -2143,6 +2074,24 @@ process.stdin.on('data', chunk => {
         assert.equal(failed.job.error.includes('required JSON'), false);
     } finally {
         await stopReader(reader.child);
+    }
+
+    const hostReader = await startReader(root, { env: {
+        ...env, MATH_WORKSPACE_CODEX_COMMAND: '', CODEX_CLI_PATH: fakeCodex
+    } });
+    try {
+        const state = await (await fetch(hostReader.url + '/api/state')).json();
+        const headers = { 'x-math-workspace-token': state.requestToken };
+        const turnsBefore = await fs.readFile(counterPath, 'utf8');
+        const first = await (await fetch(hostReader.url + '/api/symbol-audit/models', { headers })).json();
+        assert.deepEqual(first.models.map(model => model.model), ['gpt-symbol'], 'Use the client-provided Codex executable when no explicit audit command is set.');
+        const refreshed = await (await fetch(hostReader.url + '/api/symbol-audit/models', { headers })).json();
+        const newModel = refreshed.models.find(model => model.model === 'gpt-symbol-new');
+        assert.equal(newModel?.displayName, 'New runtime model', 'Keep model choices synchronized with the runtime catalog.');
+        assert.deepEqual(newModel.supportedReasoningEfforts.map(item => item.reasoningEffort), ['medium']);
+        assert.equal(await fs.readFile(counterPath, 'utf8'), turnsBefore, 'Model discovery must not start an audit turn.');
+    } finally {
+        await stopReader(hostReader.child);
     }
 }
 
@@ -2702,6 +2651,13 @@ async function testAuditReport() {
 }
 
 const tests = [
+    ['Lean review evidence, persistence and freshness', testLeanReviewBackend],
+    ['Lean human review Reader', testReaderLeanReview],
+    ['Lean live source language service', testLeanLanguageBackend],
+    ['Lean complete read-only source Reader', testReaderLeanSource],
+    ['Lean review live metadata and Reader style nonce', testReaderLeanMetadata],
+    ['Lean review issue and link audit backend', testLeanAuditBackend],
+    ['Lean review issue and link audit Reader', testReaderLeanAudit],
     ['Reader definition titles and navigation targets', testReaderDefinitions],
     ['interactive figures, isolation and static export', () => testInteractiveFigures({ makeWorkspace, runCli, startReader, stopReader })],
     ['academic archive evidence and compatibility', testArchives],
@@ -2741,7 +2697,7 @@ const tests = [
     ['Reader sidebar and conversation apps', testReaderApps],
     ['Reader plugin MCP configuration', testReaderPluginMcpConfig],
     ['simplified CLI flow', testSimplifiedCliFlow],
-    ['local Reader discussion marks', testReaderDiscussionMarks],
+    ['Reader mark retirement', testReaderMarkRetirement],
     ['local Reader launcher', testReaderLauncher],
     ['Codex file handler', testCodexFileHandler],
     ['page heading formatting', testPageHeadingFormatting],
@@ -2752,7 +2708,24 @@ const tests = [
     ['audit report', testAuditReport]
 ];
 
-for (const [name, test] of tests) {
-    await test();
-    console.log(`ok - ${name}`);
+// All CLI/MCP children inherit private state, including tests that do not override it.
+const testStateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'math-workspace-test-state-'));
+const previousTestState = {
+    MATH_WORKSPACE_STATE: process.env.MATH_WORKSPACE_STATE,
+    MATH_WORKSPACE_READER_INSTANCES: process.env.MATH_WORKSPACE_READER_INSTANCES
+};
+process.env.MATH_WORKSPACE_STATE = path.join(testStateRoot, 'workspace-projects.json');
+process.env.MATH_WORKSPACE_READER_INSTANCES = path.join(testStateRoot, 'reader-instances.json');
+
+try {
+    for (const [name, test] of tests) {
+        await test();
+        console.log(`ok - ${name}`);
+    }
+} finally {
+    for (const [name, value] of Object.entries(previousTestState)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+    }
+    await fs.rm(testStateRoot, { recursive: true, force: true });
 }

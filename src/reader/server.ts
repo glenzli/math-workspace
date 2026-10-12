@@ -14,17 +14,17 @@ import {
     type RuntimeDefinitionData
 } from '@math-workspace/core';
 import { projectReaderDependencyMarkers } from './dependency-markers';
-import {
-    ReaderDiscussionMarkStore,
-    type ReaderDiscussionMarkInput,
-    type ReaderDiscussionMarkKind
-} from './discussion-marks';
 import { ReaderProjectRegistry } from './projects';
 import { ReaderWorkspace, type WorkspaceSnapshot } from './workspace';
 import { updateDocumentState, type DocumentLifecycleUpdate } from './document-state';
 import { ArchiveReaderApi } from '../archive/reader-api';
 import { readLeanBuild } from '../lean/lean-state';
 import { readLeanDependencyArtifact } from '../lean/lean-dependencies';
+import { LeanReviewService } from '../lean/lean-review-service';
+import { LeanReviewError } from '../lean/lean-evidence';
+import { LeanLanguageService } from '../lean/lean-language-service';
+import { LeanAuditService } from '../lean/lean-audit-service';
+import { handleLeanAuditRoute } from '../lean/lean-audit-routes';
 import { SymbolAuditService } from './symbol-audit-service';
 import type { SymbolAuditScope, SymbolAuditSettings } from './symbol-audit';
 import { registerReaderInstance, unregisterReaderInstance } from './location-bridge';
@@ -67,7 +67,6 @@ export interface FormalReaderServerOptions {
     port?: number;
     staticRoot?: string;
     recentProjectsPath?: string;
-    discussionMarksPath?: string;
     locationRegistryPath?: string;
     chooseProjectDirectory?: () => Promise<string | undefined>;
 }
@@ -284,10 +283,6 @@ function requireRequestToken(request: any, response: any, requestToken: string):
     return false;
 }
 
-function sourceHash(value: string): string {
-    return createHash('sha256').update(value).digest('hex');
-}
-
 function symbolAuditSettingsInput(value: unknown): SymbolAuditSettings {
     const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
     const read = (key: 'model' | 'effort', maximum: number): string | undefined => {
@@ -340,70 +335,6 @@ function documentStateInput(value: unknown): DocumentLifecycleUpdate {
     };
 }
 
-function discussionMarkInput(snapshot: WorkspaceSnapshot, rootPath: string, value: any): ReaderDiscussionMarkInput {
-    const filePath = toPosix(String(value?.filePath || '')).replace(/^\/+/, '');
-    const source = snapshot.documents.get(filePath);
-    if (!source) throw new Error('The marked file is not part of the bound Math Workspace project.');
-    const startLine = Number(value?.startLine);
-    const endLine = Number(value?.endLine);
-    const lines = source.split(/\r?\n/);
-    if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || startLine < 1 || endLine < startLine || endLine > lines.length) {
-        throw new Error('The marked source range is invalid.');
-    }
-    const kind = value?.kind;
-    if (!['selection', 'formula', 'formal', 'region'].includes(kind)) {
-        throw new Error('The discussion mark kind is invalid.');
-    }
-    const hasTextOffsets = value?.startTextOffset !== undefined || value?.endTextOffset !== undefined;
-    const startTextOffset = Number(value?.startTextOffset);
-    const endTextOffset = Number(value?.endTextOffset);
-    if (hasTextOffsets && (kind !== 'selection'
-        || !Number.isInteger(startTextOffset)
-        || !Number.isInteger(endTextOffset)
-        || startTextOffset < 0
-        || endTextOffset <= startTextOffset)) {
-        throw new Error('A precise text selection requires a valid start and end offset.');
-    }
-    const sourceLines = lines.slice(startLine - 1, endLine).join('\n');
-    const page = (snapshot.state.pages || []).find((item: any) => item.filePath === filePath);
-    return {
-        rootPath,
-        revision: snapshot.revision,
-        filePath,
-        title: page ? formatPageHeading(page, snapshot.state.config) : filePath,
-        startLine,
-        endLine,
-        sourceHash: sourceHash(sourceLines),
-        kind: kind as ReaderDiscussionMarkKind,
-        ...(typeof value?.formalId === 'string' && value.formalId.trim() ? { formalId: value.formalId.trim().replace(/^[@#]/, '') } : {}),
-        ...(typeof value?.formulaId === 'string' && value.formulaId.trim() ? { formulaId: value.formulaId.trim() } : {}),
-        ...(hasTextOffsets ? { startTextOffset, endTextOffset } : {})
-    };
-}
-
-function discussionMarkProjection(snapshot: WorkspaceSnapshot, mark: any): Record<string, unknown> {
-    const source = snapshot.documents.get(mark.filePath);
-    const lines = source?.split(/\r?\n/);
-    const currentLines = lines?.slice(mark.startLine - 1, mark.endLine).join('\n');
-    const current = !!currentLines && sourceHash(currentLines) === mark.sourceHash;
-    return stripUndefinedFields({
-        id: mark.id,
-        order: mark.order,
-        createdAt: mark.createdAt,
-        revision: mark.revision,
-        kind: mark.kind,
-        filePath: mark.filePath,
-        title: mark.title,
-        startLine: mark.startLine,
-        endLine: mark.endLine,
-        formalId: mark.formalId,
-        formulaId: mark.formulaId,
-        startTextOffset: mark.startTextOffset,
-        endTextOffset: mark.endTextOffset,
-        status: current ? 'current' : 'changed'
-    });
-}
-
 function resolveWorkspacePath(rootPath: string, relativePath: string): string | undefined {
     const normalized = toPosix(relativePath || '').replace(/^\/+/, '');
     if (!normalized) return undefined;
@@ -418,12 +349,19 @@ async function sendStaticFile(response: any, staticRoot: string, requestPath: st
         sendText(response, 404, 'Math Workspace asset not found.');
         return;
     }
-    const body = await fs.readFile(absolutePath);
+    let body = await fs.readFile(absolutePath);
+    let policy = READER_CONTENT_SECURITY_POLICY;
+    if (absolutePath === path.resolve(staticRoot, 'index.html')) {
+        const styleNonce = randomBytes(24).toString('base64url');
+        body = Buffer.from(body.toString('utf8').replace(/<head(?:\s[^>]*)?>/i,
+            (head: string) => `${head}\n<meta name="math-workspace-style-nonce" content="${styleNonce}">`), 'utf8');
+        policy = policy.replace("style-src 'self'", `style-src 'self' 'nonce-${styleNonce}'`);
+    }
     response.writeHead(200, {
         'cache-control': STATIC_CACHE_CONTROL,
         'content-type': mimeType(absolutePath),
         'content-length': body.length,
-        'content-security-policy': READER_CONTENT_SECURITY_POLICY
+        'content-security-policy': policy
     });
     response.end(body);
 }
@@ -458,7 +396,6 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
         stateFilePath: options.recentProjectsPath,
         chooseDirectory: options.chooseProjectDirectory
     });
-    const discussionMarks = new ReaderDiscussionMarkStore({ stateFilePath: options.discussionMarksPath });
     const symbolAudit = new SymbolAuditService();
     // This token only authorizes same-origin mutations from the current Math Workspace page.
     const requestToken = randomBytes(24).toString('hex');
@@ -469,6 +406,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
     const eventResponses = new Set<any>();
     const bridgeToken = randomBytes(24).toString('hex');
     let serverUrl = '';
+    let projectChanging = false;
 
     const broadcastEvent = (name: string, value: unknown): number => {
         const event = `event: ${name}\ndata: ${JSON.stringify(value)}\n\n`;
@@ -485,6 +423,14 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
         });
     };
 
+    const leanReview = new LeanReviewService((projectRoot, formalId) => {
+        if (rootPath === projectRoot) workspace?.notifyMetadataChange([`.math-workspace/lean-reviews/${formalId}.json`]);
+    });
+    const leanLanguage = new LeanLanguageService();
+    const leanAudit = new LeanAuditService(leanReview, (projectRoot, formalId) => {
+        if (rootPath === projectRoot) workspace?.notifyMetadataChange([`.math-workspace/lean-audits/${formalId}.json`]);
+    });
+
     const syncReaderInstance = async (previousRoot?: string): Promise<void> => {
         if (!serverUrl) return;
         try {
@@ -500,20 +446,24 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
     };
 
     const activateProject = async (inputPath: string): Promise<void> => {
-        const previousRoot = rootPath;
-        if (rootPath) await symbolAudit.cancel(rootPath);
-        const project = await projects.remember(inputPath);
-        const nextWorkspace = new ReaderWorkspace(project.rootPath);
-        await nextWorkspace.start();
-        const previousWorkspace = workspace;
-        const previousUnsubscribe = unsubscribe;
-        workspace = nextWorkspace;
-        rootPath = project.rootPath;
-        unsubscribe = nextWorkspace.onChange(({ snapshot, changedPaths }) => broadcast(snapshot, changedPaths));
-        previousUnsubscribe();
-        await previousWorkspace?.close();
-        await syncReaderInstance(previousRoot);
-        broadcast(nextWorkspace.current(), [], true);
+        projectChanging = true;
+        try {
+            const previousRoot = rootPath;
+            if (rootPath) await symbolAudit.cancel(rootPath);
+            if (rootPath) await leanLanguage.closeProject(rootPath);
+            const project = await projects.remember(inputPath);
+            const nextWorkspace = new ReaderWorkspace(project.rootPath);
+            await nextWorkspace.start();
+            const previousWorkspace = workspace;
+            const previousUnsubscribe = unsubscribe;
+            workspace = nextWorkspace;
+            rootPath = project.rootPath;
+            unsubscribe = nextWorkspace.onChange(({ snapshot, changedPaths }) => broadcast(snapshot, changedPaths));
+            previousUnsubscribe();
+            await previousWorkspace?.close();
+            await syncReaderInstance(previousRoot);
+            broadcast(nextWorkspace.current(), [], true);
+        } finally { projectChanging = false; }
     };
 
     if (options.rootPath) await activateProject(options.rootPath);
@@ -521,6 +471,15 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
     const server = http.createServer(async (request: any, response: any) => {
         try {
             const url = new URL(request.url || '/', 'http://127.0.0.1');
+
+            if (url.pathname.startsWith('/api/lean-')) {
+                if (projectChanging) { sendText(response, 409, 'The Reader is changing its bound Lean project. Retry after it finishes.'); return; }
+                const origin = request.headers?.origin;
+                if (request.headers?.host !== new URL(serverUrl).host || (origin !== undefined && origin !== serverUrl)
+                    || request.headers?.['sec-fetch-site'] === 'cross-site') {
+                    sendText(response, 403, 'Lean review requires the bound local Reader origin.'); return;
+                }
+            }
 
             if (request.method === 'POST' && url.pathname === '/api/projects/pick') {
                 const selectedPath = await projects.choose();
@@ -620,6 +579,65 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
             }
             const snapshot = workspace.current();
 
+            if (url.pathname === '/api/lean-language/source' || url.pathname === '/api/lean-language/action'
+                || url.pathname === '/api/lean-audit' || url.pathname.startsWith('/api/lean-audit/')) {
+                if (!requireRequestToken(request, response, requestToken)) return;
+                const boundRoot = rootPath;
+                const boundProject = createHash('sha256').update(boundRoot).digest('hex');
+                if (request.headers?.['x-math-workspace-project'] !== boundProject) {
+                    sendText(response, 409, 'The Lean project changed. Refresh the Reader before retrying.'); return;
+                }
+                let body: any;
+                if (request.method === 'POST') body = await readJsonRequest(request, 128 * 1024);
+                if (rootPath !== boundRoot) { sendText(response, 409, 'The Lean project changed while reading the request.'); return; }
+                if (url.pathname === '/api/lean-language/source' && request.method === 'GET') {
+                    const result = await leanLanguage.source(boundRoot, url.searchParams.get('projectKey'), url.searchParams.get('filePath'));
+                    if (rootPath !== boundRoot) { sendText(response, 409, 'The Lean project changed while reading source.'); return; }
+                    sendJson(response, 200, result);
+                } else if (url.pathname === '/api/lean-language/action' && request.method === 'POST') {
+                    const cancel = () => { if (!response.writableEnded && typeof body?.requestId === 'string') leanLanguage.cancel(boundRoot, body.requestId); };
+                    request.once('aborted', cancel); response.once('close', cancel);
+                    try {
+                        const result = await leanLanguage.action(boundRoot, body);
+                        if (rootPath !== boundRoot) { sendText(response, 409, 'The Lean project changed while Lean was processing.'); return; }
+                        sendJson(response, 200, result);
+                    } finally { request.removeListener('aborted', cancel); response.removeListener('close', cancel); }
+                } else if (url.pathname === '/api/lean-audit' || url.pathname.startsWith('/api/lean-audit/')) {
+                    const result = await handleLeanAuditRoute(leanAudit, boundRoot, request.method, url.pathname, url.searchParams, body);
+                    if (rootPath !== boundRoot) { sendText(response, 409, 'The Lean project changed while reading audit data.'); return; }
+                    sendJson(response, result.status, result.value);
+                } else sendText(response, 405, 'Lean complete source reads use GET; language actions use POST.');
+                return;
+            }
+
+            if (url.pathname === '/api/lean-review' || url.pathname.startsWith('/api/lean-review/')) {
+                if (!requireRequestToken(request, response, requestToken)) return;
+                const reviewRoot = rootPath;
+                const reviewProject = createHash('sha256').update(reviewRoot).digest('hex');
+                const suppliedProject = request.headers?.['x-math-workspace-project'];
+                if (suppliedProject !== undefined && suppliedProject !== reviewProject) {
+                    sendText(response, 409, 'The review project changed. Refresh the Reader before retrying.');
+                    return;
+                }
+                if (request.method === 'GET') {
+                    if (url.pathname === '/api/lean-review') sendJson(response, 200, await leanReview.get(reviewRoot, url.searchParams.get('id')));
+                    else if (url.pathname === '/api/lean-review/queue') sendJson(response, 200, await leanReview.queue(reviewRoot, url.searchParams.get('filePath') || ''));
+                    else if (url.pathname === '/api/lean-review/definition') sendJson(response, 200, await leanReview.definition(reviewRoot,
+                        url.searchParams.get('id'), url.searchParams.get('projectKey') || '', url.searchParams.get('name') || ''));
+                    else if (url.pathname === '/api/lean-review/job') sendJson(response, 200, await leanReview.job(reviewRoot, url.searchParams.get('jobId') || ''));
+                    else sendText(response, 404, 'Lean review route not found.');
+                } else if (request.method === 'POST' && url.pathname === '/api/lean-review/action') {
+                    if (suppliedProject !== reviewProject) {
+                        sendText(response, 409, 'The review project changed. Refresh the Reader before retrying.');
+                        return;
+                    }
+                    const body = await readJsonRequest(request, 128 * 1024);
+                    const result = await leanReview.action(reviewRoot, body);
+                    sendJson(response, result.status, result.value);
+                } else sendText(response, 405, 'Lean review reads use GET; explicit review actions use POST.');
+                return;
+            }
+
             if (url.pathname === '/api/archive' || url.pathname.startsWith('/api/archive/')) {
                 if (!requireRequestToken(request, response, requestToken)) return;
                 const archiveRoot = rootPath;
@@ -633,43 +651,6 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                     const body = await readJsonRequest(request, 32 * 1024);
                     sendJson(response, 202, await archiveApi.start(archiveRoot, body));
                 } else sendText(response, 405, 'Archive reads use GET; explicit actions use POST.');
-                return;
-            }
-
-            if (url.pathname === '/api/discussion-marks') {
-                if (!requireRequestToken(request, response, requestToken)) return;
-                if (request.method === 'GET') {
-                    const marks = await discussionMarks.list(rootPath);
-                    sendJson(response, 200, { marks: marks.map(mark => discussionMarkProjection(snapshot, mark)) });
-                    return;
-                }
-                if (request.method === 'POST') {
-                    const body = await readJsonRequest(request, 16 * 1024);
-                    const rawMarks = Array.isArray(body?.marks) ? body.marks : [body?.mark || body];
-                    if (!rawMarks.length || rawMarks.length > 32) {
-                        sendText(response, 400, 'Create between one and 32 discussion marks at a time.');
-                        return;
-                    }
-                    const marks = await discussionMarks.addMany(rawMarks.map(mark => discussionMarkInput(snapshot, rootPath, mark)));
-                    sendJson(response, 200, { marks: marks.map(mark => discussionMarkProjection(snapshot, mark)) });
-                    return;
-                }
-                if (request.method === 'DELETE') {
-                    const id = url.searchParams.get('id');
-                    if (!id) {
-                        const cleared = await discussionMarks.clear(rootPath);
-                        sendJson(response, 200, { cleared });
-                        return;
-                    }
-                    const removed = await discussionMarks.remove(id, rootPath);
-                    if (!removed) {
-                        sendText(response, 404, 'Discussion mark not found.');
-                        return;
-                    }
-                    sendJson(response, 200, { removed: id });
-                    return;
-                }
-                sendText(response, 405, 'Discussion marks support GET, POST, and DELETE.');
                 return;
             }
 
@@ -839,7 +820,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
 
             await sendStaticFile(response, staticRoot, url.pathname);
         } catch (error: any) {
-            sendText(response, 500, error instanceof Error ? error.message : String(error));
+            sendText(response, error instanceof LeanReviewError ? error.status : 500, error instanceof Error ? error.message : String(error));
         }
     });
 
@@ -873,6 +854,8 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
             eventResponses.forEach(response => response.end());
             eventResponses.clear();
             await symbolAudit.close();
+            await leanLanguage.close();
+            await leanReview.close();
             await workspace?.close();
             await new Promise<void>((resolve, reject) => server.close((error: Error | undefined) => error ? reject(error) : resolve()));
         }

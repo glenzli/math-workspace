@@ -1,0 +1,27 @@
+.reader-lean-audit { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--lean-border, #d7dce4); }
+.reader-lean-audit h3, .reader-lean-audit h4 { margin: 0 0 10px; }
+.reader-lean-audit section { margin: 18px 0; }
+.reader-lean-audit-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.reader-lean-audit-actions h3 { margin-right: auto; }
+.reader-lean-audit button { padding: 6px 10px; border: 1px solid var(--lean-border, #d7dce4); border-radius: 6px; background: var(--lean-surface, #fff); color: inherit; cursor: pointer; font: inherit; }
+.reader-lean-audit button:hover:not(:disabled) { border-color: var(--lean-accent, #3967bc); }
+.reader-lean-audit button:disabled { cursor: default; opacity: .48; }
+.reader-lean-audit-hint { font-size: .9em; opacity: .78; }
+.reader-lean-audit-warning { padding: 8px 10px; border-left: 3px solid #b88122; background: color-mix(in srgb, #b88122 8%, transparent); overflow-wrap: anywhere; }
+.reader-lean-audit-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.reader-lean-audit-field { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; }
+.reader-lean-audit input, .reader-lean-audit textarea, .reader-lean-audit select { box-sizing: border-box; width: 100%; border: 1px solid var(--lean-border, #d7dce4); border-radius: 5px; padding: 7px 9px; color: inherit; background: var(--lean-surface, #fff); font: inherit; }
+.reader-lean-audit textarea { min-height: 72px; resize: vertical; }
+.reader-lean-audit .reader-lean-audit-source-text { margin: 8px 0; min-height: 150px; max-height: 360px; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; overflow: auto; }
+.reader-lean-review .reader-lean-audit pre { font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; padding: 9px; background: var(--lean-subtle, #f4f6fa); border-radius: 5px; }
+.reader-lean-audit-link, .reader-lean-audit-issue, .reader-lean-audit-link-editor, .reader-lean-audit-issue-editor { padding: 12px; margin: 12px 0; border: 1px solid var(--lean-border, #d7dce4); border-radius: 8px; }
+.reader-lean-audit-correspondences { border: 1px solid var(--lean-border, #d7dce4); border-radius: 6px; margin: 12px 0; }
+.reader-lean-audit-correspondence { border-bottom: 1px solid var(--lean-border, #d7dce4); padding-bottom: 12px; margin-bottom: 12px; }
+.reader-lean-audit-capture { border-left: 3px solid var(--lean-accent, #3967bc); padding-left: 8px; font-size: .88em; }
+.reader-lean-audit-history { margin-top: 18px; }
+.reader-lean-audit-history details { padding: 7px 0; }
+.reader-lean-audit summary { cursor: pointer; }
+.reader-lean-audit-overview ul { padding-left: 18px; max-height: 340px; overflow: auto; }
+.reader-lean-audit-overview li { margin: 8px 0; }
+.reader-lean-audit-overview button { text-align: left; }
+@media (max-width: 680px) { .reader-lean-audit-pair { grid-template-columns: minmax(0, 1fr); } }

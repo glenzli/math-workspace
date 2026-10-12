@@ -1,10 +1,11 @@
 import { revealExerciseTarget } from './reader-exercises';
 import './styles.css';
 import { readerFetch, readerEvents, isReaderEmbedded } from './reader-route';
-import { initializeReaderHost, expandReader, readerHistory, readerSearch, type ReaderEvents } from './reader-host';
+import { initializeReaderHost, isReaderPageRestored, expandReader, readerHistory, readerSearch, canReferenceReaderInConversation, referenceReaderInConversation, type ReaderEvents } from './reader-host';
+import { readerReference } from './reader-references';
 import { mountReaderAssets } from './reader-assets';
 import { mountReaderEmbeddedView, readerViewStateChanged } from './reader-embed';
-import { mountInteractiveFigures } from './reader-figures';
+import { mountReaderFigures } from './reader-figures';
 import { ReaderArchive } from './reader-archive';
 import {
     createFormalRenderer,
@@ -24,6 +25,7 @@ import {
 import { ReaderRecallPopover } from './recall-popover';
 import { ReaderDependencyPopover } from './reader-dependency-popover';
 import { ReaderLeanPopover, type ReaderLeanAnchorPayload } from './reader-lean-popover';
+import { ReaderLeanReview } from './reader-lean-review';
 import { readerIcon, replaceReaderButtonIcon, type ReaderIconName } from './reader-icons';
 import { ReaderToolbarPanel } from './reader-toolbar-panel';
 import { ReaderPropositionReview, type ReaderPropositionReviewItem } from './reader-proposition-review';
@@ -34,11 +36,6 @@ import {
     type ReaderSymbolAuditStatus
 } from './reader-symbol-audit';
 import { ReaderSymbolAuditReportView } from './reader-symbol-audit-report';
-import {
-    ReaderDiscussionMarks,
-    type ReaderDiscussionMark,
-    type ReaderDiscussionMarkLocation
-} from './reader-discussion-marks';
 
 type Language = 'zh' | 'en';
 
@@ -80,10 +77,6 @@ interface ReaderPagePayload {
         sourceFilePath?: string;
         sourceLine?: number;
     }>;
-}
-
-interface ReaderDiscussionMarksResponse {
-    marks: ReaderDiscussionMark[];
 }
 
 const words = {
@@ -152,23 +145,10 @@ const words = {
         symbolAuditLoading: '正在读取审计状态…',
         symbolAuditModelLoadFailed: '无法读取可用模型',
         symbolAuditActionFailed: '符号审计操作失败',
-        discussionTools: '标记工具',
-        closeDiscussionTools: '清除并退出标记',
-        discussionSelectTool: '选区',
-        discussionLassoTool: '圈选',
-        discussionFormalTool: '命题',
-        discussionEraseTool: '擦除',
-        discussionSelectHint: '拖拽选择正文后自动标记',
-        discussionLassoHint: '在正文圈住一组来源块',
-        discussionFormalHint: '点击命题以标记整条陈述',
-        discussionEraseHint: '点击已标记内容以移除',
-        markSelection: '标记选区',
-        markFormula: '标记公式',
-        markFormal: '标记整条命题',
-        markAdded: (count: number) => count === 1 ? '已添加讨论标记' : `已添加 ${count} 条讨论标记`,
-        noSourcesCircled: '没有圈到可定位的来源块',
-        marksCleared: '已清除讨论标记',
-        removeDiscussionMark: '移除此标记',
+        reference: '引用到会话',
+        referenceAdded: '已加入当前会话输入框',
+        referenceUnavailable: '请在会话中的 Math Workspace 面板使用引用',
+        sourceActionFailed: '当前操作未完成，请重试。',
         back: '返回',
         forward: '前进',
         showNavigation: '展开书籍导航',
@@ -192,8 +172,6 @@ const words = {
         propositionReviewTerminalPropositions: '终端命题',
         propositionReviewTerminalPropositionSummary: (count: number) => `终端命题 ${count} 项`,
         propositionReviewTerminalPropositionHint: '这些命题当前在严格依赖图中没有下游引用；其章节作用与形式化锚点可按需审阅。',
-        propositionReviewMarkTerminal: '标记终端命题',
-        propositionReviewMarkTerminalHint: '把本章终端命题加入讨论标记；随后可在原生 Codex 任务中一次性审阅。',
         propositionReviewNodeLabel: (display: string, upstream: number, downstream: number, ambientReferences: number, leanDeclarations: number, status: string) => `${display}；严格上游 ${upstream} 项，严格下游 ${downstream} 项，正文补充提及 ${ambientReferences} 处${leanDeclarations > 0 ? `，Lean 锚点 ${leanDeclarations} 个声明` : ''}；${status}`,
         source: '来源',
         jump: '定位',
@@ -220,10 +198,13 @@ const words = {
         chooseProject: '选择项目目录',
         recentProjects: '最近打开的项目',
         noRecentProjects: '还没有最近打开的项目。',
+        noMainPages: '项目中暂无正文页面。可展开目录中的草稿区，选择草稿。',
+        noMarkdownPages: '项目中暂无 Markdown 页面。',
         projectLauncherTitle: '打开 Math Workspace',
         projectLauncherDescription: '选择一个已包含 .math-workspace/config.json 的项目目录。',
         projectSelectionCancelled: '尚未选择项目。',
         leanAlignment: 'Lean 对齐',
+        leanReview: 'Lean 对照',
         leanLoading: '正在读取 Lean 对齐信息…',
         leanUnavailable: '暂时无法读取 Lean 对齐信息。',
         leanContract: '契约',
@@ -327,23 +308,10 @@ const words = {
         symbolAuditLoading: 'Reading audit status…',
         symbolAuditModelLoadFailed: 'Could not load available models',
         symbolAuditActionFailed: 'Symbol audit action failed',
-        discussionTools: 'Marking tools',
-        closeDiscussionTools: 'Clear and exit marking',
-        discussionSelectTool: 'Select',
-        discussionLassoTool: 'Lasso',
-        discussionFormalTool: 'Proposition',
-        discussionEraseTool: 'Erase',
-        discussionSelectHint: 'Select text to mark it',
-        discussionLassoHint: 'Circle a group of source blocks',
-        discussionFormalHint: 'Click a proposition to mark its whole statement',
-        discussionEraseHint: 'Click marked content to remove it',
-        markSelection: 'Mark selection',
-        markFormula: 'Mark formula',
-        markFormal: 'Mark formal object',
-        markAdded: (count: number) => count === 1 ? 'Discussion mark added' : `${count} discussion marks added`,
-        noSourcesCircled: 'No source blocks were inside that circle',
-        marksCleared: 'Discussion marks cleared',
-        removeDiscussionMark: 'Remove mark',
+        reference: 'Quote in conversation',
+        referenceAdded: 'Added to the current conversation input',
+        referenceUnavailable: 'Quote from the Math Workspace panel inside a conversation',
+        sourceActionFailed: 'The action did not complete. Please try again.',
         back: 'Back',
         forward: 'Forward',
         showNavigation: 'Show book navigation',
@@ -367,8 +335,6 @@ const words = {
         propositionReviewTerminalPropositions: 'Terminal propositions',
         propositionReviewTerminalPropositionSummary: (count: number) => `${count} terminal proposition${count === 1 ? '' : 's'}`,
         propositionReviewTerminalPropositionHint: 'These propositions currently have no downstream reference in the strict dependency graph; their chapter role and formalization anchors can be reviewed when useful.',
-        propositionReviewMarkTerminal: 'Mark terminal propositions',
-        propositionReviewMarkTerminalHint: 'Add this chapter’s terminal propositions to discussion marks, then review them together in a native Codex task.',
         propositionReviewNodeLabel: (display: string, upstream: number, downstream: number, ambientReferences: number, leanDeclarations: number, status: string) => `${display}; ${upstream} strict upstream, ${downstream} strict downstream, ${ambientReferences} supplemental text mention${ambientReferences === 1 ? '' : 's'}${leanDeclarations > 0 ? `, Lean anchor with ${leanDeclarations} declaration${leanDeclarations === 1 ? '' : 's'}` : ''}; ${status}`,
         source: 'Source',
         jump: 'Locate',
@@ -395,10 +361,13 @@ const words = {
         chooseProject: 'Choose project folder',
         recentProjects: 'Recent projects',
         noRecentProjects: 'No recent projects yet.',
+        noMainPages: 'No main pages in this project. Expand Drafts in the contents to choose a draft.',
+        noMarkdownPages: 'No Markdown pages were found in this project.',
         projectLauncherTitle: 'Open Math Workspace',
         projectLauncherDescription: 'Choose a project folder containing .math-workspace/config.json.',
         projectSelectionCancelled: 'No project was selected.',
         leanAlignment: 'Lean alignment',
+        leanReview: 'Lean comparison',
         leanLoading: 'Loading Lean alignment…',
         leanUnavailable: 'Lean alignment details are unavailable.',
         leanContract: 'Contract',
@@ -560,11 +529,20 @@ function documentStatusBadge(page: ReaderPage | undefined, language: Language, i
     if (!interactive && !hasState) return undefined;
     const element = interactive ? document.createElement('button') : document.createElement('span');
     element.className = 'reader-document-status' + (interactive ? ' is-interactive' : '') + (lifecycle?.changedSinceCheckpoint ? ' is-changed' : '');
-    element.textContent = documentStatusText(page, language);
-    element.title = words[language].documentStage + '：' + documentStatusText(page, language);
+    const status = documentStatusText(page, language);
+    const detail = lifecycle?.checkpoint ? `${documentStageLabel(page, language)} · ${status}` : status;
+    const description = words[language].documentStage + '：' + detail;
     if (interactive) {
+        element.textContent = status;
+        element.title = description;
         (element as HTMLButtonElement).type = 'button';
         element.dataset.documentStatus = 'true';
+    } else {
+        element.classList.add('is-compact');
+        element.dataset.readerTooltip = description;
+        element.setAttribute('aria-hidden', 'true');
+        const icon: ReaderIconName = lifecycle?.stage ? `stage-${lifecycle.stage}` : 'stage-checkpoint';
+        element.append(readerIcon(icon, 16));
     }
     return element;
 }
@@ -579,6 +557,7 @@ function pageIntegrationGlyph(page: ReaderPage | undefined, language: Language):
     glyph.className = 'reader-page-integration is-' + integration.status;
     glyph.dataset.readerTooltip = pageIntegrationTooltip(page, language);
     glyph.setAttribute('aria-hidden', 'true');
+    glyph.append(readerIcon(`integration-${integration.status}`, 16));
     return glyph;
 }
 
@@ -586,7 +565,7 @@ const DEFAULT_FONT_SIZE = 14;
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 24;
 const FONT_SIZE_STORAGE_KEY = 'math-workspace.font-size';
-const DRAFT_COLLECTIONS_STORAGE_KEY = 'math-workspace.collapsed-draft-collections';
+const DRAFT_COLLECTIONS_STORAGE_KEY = 'math-workspace.expanded-draft-collections';
 const NAVIGATION_STORAGE_KEY = 'math-workspace.navigation-collapsed';
 const SOURCE_LINE_NUMBERS_STORAGE_KEY = 'math-workspace.source-line-numbers';
 
@@ -615,7 +594,7 @@ function storedSourceLineNumbers(): boolean {
     }
 }
 
-function storedCollapsedDraftCollections(): Set<string> {
+function storedExpandedDraftCollections(): Set<string> {
     try {
         const value = JSON.parse(localStorage.getItem(DRAFT_COLLECTIONS_STORAGE_KEY) || '[]');
         return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []);
@@ -645,7 +624,7 @@ class ReaderApplication {
     private sourceLineNumbersVisible = storedSourceLineNumbers();
     private sourceLineNumberAlignmentFrame = 0;
     private main!: HTMLElement;
-    private collapsedDraftCollections = storedCollapsedDraftCollections();
+    private expandedDraftCollections = storedExpandedDraftCollections();
     private article!: HTMLElement;
     private pageTitle!: HTMLElement;
     private liveStatus!: HTMLElement;
@@ -653,6 +632,7 @@ class ReaderApplication {
     private recallPopover!: ReaderRecallPopover;
     private dependencyPopover!: ReaderDependencyPopover;
     private leanPopover!: ReaderLeanPopover;
+    private leanReview!: ReaderLeanReview;
     private toolbarPanel!: ReaderToolbarPanel;
     private tooltip!: ReaderTooltip;
     private propositionReview!: ReaderPropositionReview;
@@ -660,14 +640,12 @@ class ReaderApplication {
     private symbolAudit!: ReaderSymbolAudit;
     private symbolAuditReport!: ReaderSymbolAuditReportView;
     private symbolAuditReportOpen = false;
-    private discussionMarks!: ReaderDiscussionMarks;
     private realtimeEvents: ReaderEvents | undefined;
 
     async start(): Promise<void> {
         this.buildShell();
         mountReaderEmbeddedView(this.main);
         await this.refreshState();
-        await this.refreshDiscussionMarks();
         this.installHandlers();
         if (!this.state?.available) {
             this.renderProjectLauncher();
@@ -679,9 +657,14 @@ class ReaderApplication {
 
     private async openInitialPage(): Promise<void> {
         const initialView = queryView();
-        const initialPath = queryPath() || this.state?.pages[0]?.filePath || '';
+        const requested = this.pageForPath(queryPath());
+        const initialPath = requested && (!isReaderPageRestored() || requested.documentMode !== 'draft')
+            ? requested.filePath : this.defaultPagePath();
         if (!initialPath) {
-            this.article.textContent = 'No Markdown pages were found in the bound project.';
+            this.page = undefined;
+            this.currentPath = '';
+            this.pageTitle.replaceChildren();
+            this.article.textContent = this.state?.pages.length ? this.dictionary().noMainPages : this.dictionary().noMarkdownPages;
             return;
         }
         this.selectedPagePaths = [initialPath];
@@ -702,7 +685,7 @@ class ReaderApplication {
             '<button id="reader-navigation-toggle" class="icon-button reader-navigation-toggle" type="button"></button>',
             '<div class="reader-history"><button id="reader-back" class="icon-button" aria-label="Back"></button><button id="reader-forward" class="icon-button" aria-label="Forward"></button></div>',
             '<div id="reader-page-title" class="reader-page-title"></div>',
-            '<div class="reader-tools">' + (isReaderEmbedded() ? '<button id="reader-expand" class="tool-button" type="button" aria-label="Expand">↗</button>' : '') + '<button id="reader-archive" class="tool-button" type="button" aria-label="Version history" aria-haspopup="dialog"></button><button class="tool-button" data-panel="contents" aria-label="Contents"></button><button class="tool-button" data-panel="definitions" aria-label="Definitions"></button><button class="tool-button" data-panel="symbols" aria-label="Symbols"></button><button class="tool-button" data-panel="propositions" aria-label="Proposition review"></button><button class="tool-button" data-panel="symbol-audit" aria-label="Symbol audit"></button><button id="reader-discussion-tools" class="tool-button" type="button" aria-label="Marking tools"></button><button id="reader-line-numbers" class="tool-button" type="button" aria-label="Show source line numbers" aria-pressed="false"></button></div>',
+            '<div class="reader-tools">' + (isReaderEmbedded() ? '<button id="reader-expand" class="tool-button" type="button" aria-label="Expand">↗</button>' : '') + '<button id="reader-archive" class="tool-button" type="button" aria-label="Version history" aria-haspopup="dialog"></button><button class="tool-button" data-panel="contents" aria-label="Contents"></button><button class="tool-button" data-panel="definitions" aria-label="Definitions"></button><button class="tool-button" data-panel="symbols" aria-label="Symbols"></button><button class="tool-button" data-panel="propositions" aria-label="Proposition review"></button><button id="reader-lean-review" class="tool-button" type="button" aria-label="Lean comparison"></button><button class="tool-button" data-panel="symbol-audit" aria-label="Symbol audit"></button><button id="reader-line-numbers" class="tool-button" type="button" aria-label="Show source line numbers" aria-pressed="false"></button></div>',
             '<div class="reader-type-control"><button type="button" class="type-size-button" data-font-size="-1" aria-label="Decrease text size">A−</button><output id="reader-font-size" aria-live="polite">' + this.fontSize + 'px</output><button type="button" class="type-size-button" data-font-size="1" aria-label="Increase text size">A+</button></div>',
             '<span id="reader-live" class="reader-live" aria-live="polite"></span>',
             '</header><article id="reader-article" class="reader-article"></article></main>',
@@ -727,8 +710,20 @@ class ReaderApplication {
             fetchDefinition: index => this.fetchJson<any>('/api/definition?index=' + index),
             renderDefinition: definition => this.renderDefinitionContent(definition),
             locateDefinition: definition => this.locateDefinition(definition),
-            markDiscussionLocation: async location => {
-                await this.addDiscussionMarks([location]);
+            canReference: canReferenceReaderInConversation,
+            reference: async (location, markdown) => {
+                try {
+                    const page = this.page, projectId = this.state?.projectId;
+                    if (!page || page.filePath !== location.filePath) throw new Error('The reference page has changed.');
+                    const context = await this.fetchJson<{ projectRoot: string }>('/api/plugin-context');
+                    if (page !== this.page || projectId !== this.state?.projectId) throw new Error('The reference page has changed.');
+                    await referenceReaderInConversation([readerReference({ source: page.content,
+                        projectRoot: context.projectRoot, title: page.page?.title || location.filePath }, location, markdown)]);
+                    this.reportLive(this.dictionary().referenceAdded);
+                } catch (error) {
+                    this.reportLive(this.dictionary().sourceActionFailed);
+                    throw error;
+                }
             },
             labels: () => {
                 const dictionary = this.dictionary();
@@ -741,9 +736,9 @@ class ReaderApplication {
                     copied: dictionary.copied,
                     noDefinitions: dictionary.noDefinitions,
                     refineDefinitionQuery: dictionary.refineDefinitionQuery,
-                    markSelection: dictionary.markSelection,
-                    markFormula: dictionary.markFormula,
-                    marked: dictionary.markAdded(1)
+                    reference: dictionary.reference,
+                    failed: dictionary.sourceActionFailed,
+                    referenceUnavailable: dictionary.referenceUnavailable
                 };
             }
         });
@@ -767,12 +762,36 @@ class ReaderApplication {
                 };
             }
         });
+        this.leanReview = new ReaderLeanReview(this.main, {
+            context: () => ({ projectId: this.state?.projectId || '', filePath: this.currentPath,
+                language: this.state?.language || 'zh', token: this.state?.requestToken || '', revision: this.state?.revision || 0 }),
+            request: readerFetch,
+            renderProse: source => renderFormalMarkdown(this.markdown, source.content, this.renderOptions(source.filePath)),
+            mountProse: container => {
+                const figures = mountReaderFigures(container, this.state?.language || 'zh');
+                const assets = mountReaderAssets(container);
+                return () => { figures(); assets(); };
+            },
+            locate: source => {
+                this.leanReview.close(false);
+                void this.openPage(source.filePath, 'push', '', false, { line: source.startLine });
+            },
+            navigatePage: filePath => this.openPage(filePath, 'push'),
+            canAssist: canReferenceReaderInConversation,
+            assist: referenceReaderInConversation,
+            report: message => this.reportLive(message)
+        });
+        this.root.querySelector('#reader-lean-review')?.addEventListener('click', event => {
+            this.toolbarPanel.close(); void this.leanReview.openPageQueue(event.currentTarget as HTMLElement);
+        });
         this.leanPopover = new ReaderLeanPopover({
             fetchAnchor: id => this.fetchJson<ReaderLeanAnchorPayload>('/api/lean?id=' + encodeURIComponent(id)),
+            openReview: (id, marker) => { this.toolbarPanel.close(); void this.leanReview.open(id, marker); },
             labels: () => {
                 const dictionary = this.dictionary();
                 return {
                     title: dictionary.leanAlignment,
+                    openReview: dictionary.leanReview,
                     loading: dictionary.leanLoading,
                     unavailable: dictionary.leanUnavailable,
                     contract: dictionary.leanContract,
@@ -803,44 +822,14 @@ class ReaderApplication {
                     terminalPropositions: dictionary.propositionReviewTerminalPropositions,
                     terminalPropositionSummary: dictionary.propositionReviewTerminalPropositionSummary,
                     terminalPropositionHint: dictionary.propositionReviewTerminalPropositionHint,
-                    markTerminal: dictionary.propositionReviewMarkTerminal,
-                    markTerminalHint: dictionary.propositionReviewMarkTerminalHint,
                     nodeLabel: dictionary.propositionReviewNodeLabel
                 };
             },
-            openProposition: id => this.openCurrentProposition(id),
-            markTerminalPropositions: items => this.markTerminalPropositions(items)
+            openProposition: id => this.openCurrentProposition(id)
         });
         this.symbolAudit = new ReaderSymbolAudit();
         this.symbolAuditReport = new ReaderSymbolAuditReportView();
-        this.discussionMarks = new ReaderDiscussionMarks({
-            addMarks: locations => this.addDiscussionMarks(locations),
-            removeMark: id => this.removeDiscussionMark(id),
-            clearMarks: () => this.clearDiscussionMarks(),
-            report: message => this.reportLive(message),
-            toolsChanged: () => {
-                this.updateDiscussionMarkControls();
-            },
-            labels: () => {
-                const dictionary = this.dictionary();
-                return {
-                    openTools: dictionary.discussionTools,
-                    closeTools: dictionary.closeDiscussionTools,
-                    selectTool: dictionary.discussionSelectTool,
-                    lassoTool: dictionary.discussionLassoTool,
-                    formalTool: dictionary.discussionFormalTool,
-                    eraseTool: dictionary.discussionEraseTool,
-                    selectHint: dictionary.discussionSelectHint,
-                    lassoHint: dictionary.discussionLassoHint,
-                    formalHint: dictionary.discussionFormalHint,
-                    eraseHint: dictionary.discussionEraseHint,
-                    markAdded: dictionary.markAdded,
-                    marksCleared: dictionary.marksCleared,
-                    remove: dictionary.removeDiscussionMark,
-                    noSourcesCircled: dictionary.noSourcesCircled
-                };
-            }
-        });
+
     }
 
     private dictionary() {
@@ -850,7 +839,7 @@ class ReaderApplication {
     private async fetchJson<T>(url: string): Promise<T> {
         const response = await readerFetch(url, {
             cache: 'no-store',
-            headers: (url === '/api/discussion-marks' || url === '/api/document-state' || url.startsWith('/api/symbol-audit')) && this.state?.requestToken
+            headers: (url === '/api/document-state' || url.startsWith('/api/symbol-audit')) && this.state?.requestToken
                 ? { 'x-math-workspace-token': this.state.requestToken }
                 : undefined
         });
@@ -860,7 +849,7 @@ class ReaderApplication {
 
     private async postJson<T>(url: string, value: unknown = {}): Promise<T> {
         const headers: Record<string, string> = { 'content-type': 'application/json' };
-        if ((url === '/api/discussion-marks' || url.startsWith('/api/symbol-audit')) && this.state?.requestToken) {
+        if (url.startsWith('/api/symbol-audit') && this.state?.requestToken) {
             headers['x-math-workspace-token'] = this.state.requestToken;
         }
         if (url === '/api/document-state' && this.state?.requestToken) {
@@ -878,7 +867,7 @@ class ReaderApplication {
 
     private async deleteJson<T>(url: string): Promise<T> {
         const headers: Record<string, string> = {};
-        if ((url.startsWith('/api/discussion-marks') || url.startsWith('/api/symbol-audit')) && this.state?.requestToken) {
+        if (url.startsWith('/api/symbol-audit') && this.state?.requestToken) {
             headers['x-math-workspace-token'] = this.state.requestToken;
         }
         const response = await readerFetch(url, { method: 'DELETE', cache: 'no-store', headers });
@@ -893,6 +882,7 @@ class ReaderApplication {
     private applyState(state: ReaderState): void {
         this.state = state;
         this.archive?.contextChanged();
+        this.leanReview?.contextChanged();
         const dictionary = this.dictionary();
         (this.root.querySelector('#reader-page-filter') as HTMLInputElement).placeholder = dictionary.search;
         this.renderNavigation((this.root.querySelector('#reader-page-filter') as HTMLInputElement).value);
@@ -958,7 +948,6 @@ class ReaderApplication {
             this.historyPaths = [];
             this.historyIndex = -1;
             readerHistory('replace', {}, window.location.pathname);
-            await this.refreshDiscussionMarks();
             await this.openInitialPage();
             this.installRealtimeUpdates();
         } catch (error) {
@@ -994,8 +983,11 @@ class ReaderApplication {
         increase.setAttribute('aria-label', dictionary.increaseFont);
         this.updateNavigationToggle();
         this.updateSourceLineNumberToggle();
-        this.updateDiscussionMarkControls();
         this.updateDraftToolbarAvailability();
+        const leanReviewButton = this.root.querySelector<HTMLButtonElement>('#reader-lean-review');
+        if (leanReviewButton) {
+            replaceReaderButtonIcon(leanReviewButton, 'compare');
+        }
         const archiveButton = this.root.querySelector<HTMLButtonElement>('#reader-archive');
         if (archiveButton) {
             const label = this.state?.language === 'en' ? 'Version history' : '版本记录';
@@ -1009,6 +1001,12 @@ class ReaderApplication {
         const isDraft = this.page?.page.documentMode === 'draft';
         const unavailablePanels = new Set(['definitions', 'symbols', 'propositions', 'symbol-audit']);
         const dictionary = this.dictionary();
+        const leanReviewButton = this.root.querySelector<HTMLButtonElement>('#reader-lean-review');
+        if (leanReviewButton) {
+            leanReviewButton.disabled = isDraft || !this.currentPath;
+            const label = isDraft ? dictionary.draftFormalToolsUnavailable : dictionary.leanReview;
+            leanReviewButton.dataset.tooltip = label; leanReviewButton.setAttribute('aria-label', label);
+        }
         this.root.querySelectorAll<HTMLButtonElement>('[data-panel]').forEach(button => {
             const panel = button.dataset.panel || '';
             const unavailable = isDraft && unavailablePanels.has(panel);
@@ -1109,11 +1107,16 @@ class ReaderApplication {
         });
     }
 
+    private draftCollectionKey(collectionId: string): string {
+        return (this.state?.projectId || this.state?.rootName || '') + ':' + collectionId;
+    }
+
     private setDraftCollectionCollapsed(collectionId: string, value: boolean): void {
-        if (value) this.collapsedDraftCollections.add(collectionId);
-        else this.collapsedDraftCollections.delete(collectionId);
+        const key = this.draftCollectionKey(collectionId);
+        if (value) this.expandedDraftCollections.delete(key);
+        else this.expandedDraftCollections.add(key);
         try {
-            localStorage.setItem(DRAFT_COLLECTIONS_STORAGE_KEY, JSON.stringify([...this.collapsedDraftCollections].sort()));
+            localStorage.setItem(DRAFT_COLLECTIONS_STORAGE_KEY, JSON.stringify([...this.expandedDraftCollections].sort()));
         } catch (_error) {
             // The in-memory setting still works in restricted browser contexts.
         }
@@ -1122,6 +1125,10 @@ class ReaderApplication {
     }
     private pageForPath(filePath: string): ReaderPage | undefined {
         return this.state?.pages.find(page => page.filePath === filePath);
+    }
+
+    private defaultPagePath(): string {
+        return this.state?.pages.find(page => page.documentMode !== 'draft')?.filePath || '';
     }
 
     private formalSelectedPagePaths(): string[] {
@@ -1272,20 +1279,6 @@ class ReaderApplication {
         }
     }
 
-    private updateDiscussionMarkControls(): void {
-        const tools = this.root.querySelector<HTMLButtonElement>('#reader-discussion-tools');
-        if (!tools) return;
-        const count = this.discussionMarks?.count() || 0;
-        const open = this.discussionMarks?.isToolsOpen() || false;
-        const labelBase = open ? this.dictionary().closeDiscussionTools : this.dictionary().discussionTools;
-        const label = count ? `${labelBase} (${count})` : labelBase;
-        tools.dataset.tooltip = label;
-        tools.dataset.markCount = count ? String(count) : '';
-        tools.setAttribute('aria-label', label);
-        tools.classList.toggle('has-discussion-marks', count > 0);
-        tools.classList.toggle('is-active', open);
-    }
-
     private installToolbarIcons(): void {
         const icons: Array<[string, ReaderIconName]> = [
             ['#reader-back', 'chevron-left'],
@@ -1295,7 +1288,6 @@ class ReaderApplication {
             ['[data-panel="symbols"]', 'sigma'],
             ['[data-panel="propositions"]', 'propositions'],
             ['[data-panel="symbol-audit"]', 'scan'],
-            ['#reader-discussion-tools', 'marker'],
             ['#reader-line-numbers', 'line-numbers']
         ];
         icons.forEach(([selector, icon]) => {
@@ -1339,7 +1331,7 @@ class ReaderApplication {
             summary.className = 'reader-nav-integration-summary';
             summary.textContent = summaryText;
             summary.title = summaryText;
-            const isCollapsed = Boolean(isDraftCollection && draftCollectionId && !normalized && this.collapsedDraftCollections.has(draftCollectionId));
+            const isCollapsed = Boolean(isDraftCollection && draftCollectionId && !normalized && !this.expandedDraftCollections.has(this.draftCollectionKey(draftCollectionId)));
             if (isDraftCollection && draftCollectionId) {
                 const toggle = document.createElement('button');
                 toggle.type = 'button';
@@ -1384,7 +1376,8 @@ class ReaderApplication {
                 const status = documentStatusBadge(page, this.state!.language);
                 if (status) button.append(status);
                 button.append(pageIntegrationGlyph(page, this.state!.language));
-                button.setAttribute('aria-label', `${title} — ${pageIntegrationTooltip(page, this.state!.language)}`);
+                button.setAttribute('aria-label', [title, status?.dataset.readerTooltip,
+                    pageIntegrationTooltip(page, this.state!.language)].filter(Boolean).join(' — '));
                 group.append(button);
             });
             navigation.append(group);
@@ -1407,6 +1400,7 @@ class ReaderApplication {
             ? 'replace'
             : historyMode;
         const requestId = ++this.pageRequestId;
+        this.leanReview.navigationStarted(filePath);
         this.toolbarPanel.close();
         this.symbolAuditReportOpen = false;
         this.article.classList.remove('is-symbol-audit-report');
@@ -1486,7 +1480,7 @@ class ReaderApplication {
         this.disposeFigures();
         this.disposeAssets();
         this.article.innerHTML = rendered.html;
-        this.disposeFigures = mountInteractiveFigures(this.article, this.state.language);
+        this.disposeFigures = mountReaderFigures(this.article, this.state.language);
         this.disposeAssets = mountReaderAssets(this.article);
         this.article.querySelectorAll<HTMLElement>('[data-source-start-line]').forEach(element => {
             if (!element.parentElement?.closest('[data-source-start-line]')) element.classList.add('reader-source-line-entry');
@@ -1500,19 +1494,10 @@ class ReaderApplication {
             source: this.page.content,
             formulas: rendered.formulas
         });
-        const formalRanges = Object.fromEntries(Object.entries(this.page.labels)
-            .filter(([id, label]) => this.page?.dependencyMarkers?.[id]?.kind === 'theorem-like'
-                && label.filePath === this.page?.filePath
-                && typeof (label as any).startLine === 'number'
-                && typeof (label as any).endLine === 'number')
-            .map(([id, label]) => [id, {
-                startLine: (label as any).startLine + 1,
-                endLine: (label as any).endLine + 1
-            }]));
-        this.discussionMarks.bind(this.article, { filePath: this.page.filePath, formalRanges });
         this.recallPopover.bind(this.article);
         this.dependencyPopover.bind(this.article);
         this.leanPopover.bind(this.article);
+        this.leanReview.contextChanged();
     }
 
     private openDependencyTarget(filePath: string, id: string): void {
@@ -1643,30 +1628,6 @@ class ReaderApplication {
         }
     }
 
-    private async refreshDiscussionMarks(): Promise<ReaderDiscussionMark[]> {
-        if (!this.state?.available) return [];
-        const response = await this.fetchJson<ReaderDiscussionMarksResponse>('/api/discussion-marks');
-        this.discussionMarks.setMarks(response.marks || []);
-        this.updateDiscussionMarkControls();
-        return response.marks || [];
-    }
-
-    private async addDiscussionMarks(locations: ReaderDiscussionMarkLocation[]): Promise<ReaderDiscussionMark[]> {
-        if (!locations.length) return this.refreshDiscussionMarks();
-        await this.postJson('/api/discussion-marks', { marks: locations });
-        return this.refreshDiscussionMarks();
-    }
-
-    private async removeDiscussionMark(id: string): Promise<void> {
-        await this.deleteJson('/api/discussion-marks?id=' + encodeURIComponent(id));
-        await this.refreshDiscussionMarks();
-    }
-
-    private async clearDiscussionMarks(): Promise<void> {
-        await this.deleteJson('/api/discussion-marks');
-        await this.refreshDiscussionMarks();
-    }
-
     private reportLive(message: string): void {
         this.liveStatus.textContent = message;
         window.setTimeout(() => {
@@ -1697,32 +1658,6 @@ class ReaderApplication {
         target.scrollIntoView({ behavior: 'smooth', block: 'start' });
         target.classList.add('is-proposition-highlighted');
         window.setTimeout(() => target.classList.remove('is-proposition-highlighted'), 1800);
-    }
-
-    private propositionDiscussionLocation(id: string): ReaderDiscussionMarkLocation | undefined {
-        if (!this.page) return undefined;
-        const label = this.page.labels[id] as any;
-        const target = this.article.querySelector<HTMLElement>('#formal-' + id);
-        const startLine = typeof label?.startLine === 'number' ? label.startLine + 1 : Number(target?.dataset.sourceStartLine);
-        const endLine = typeof label?.endLine === 'number' ? label.endLine + 1 : Number(target?.dataset.sourceEndLine);
-        if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || startLine < 1 || endLine < startLine) return undefined;
-        return {
-            filePath: this.page.filePath,
-            startLine,
-            endLine,
-            kind: 'formal',
-            formalId: id
-        };
-    }
-
-    private markTerminalPropositions(items: ReaderPropositionReviewItem[]): void {
-        const locations = items
-            .filter(item => item.marker.directDependents === 0)
-            .map(item => this.propositionDiscussionLocation(item.id))
-            .filter((location): location is ReaderDiscussionMarkLocation => !!location);
-        if (!locations.length) return;
-        this.toolbarPanel.close();
-        void this.addDiscussionMarks(locations).then(() => this.reportLive(this.dictionary().markAdded(locations.length)));
     }
 
     private renderContents(container: HTMLElement): void {
@@ -2012,12 +1947,12 @@ class ReaderApplication {
     }
 
     private async openSymbolAuditReport(historyMode: 'push' | 'replace' | 'pop' = 'push'): Promise<void> {
+        this.leanReview.close(false);
         if (!this.state?.available || !this.currentPath) return;
         const status = await this.fetchJson<ReaderSymbolAuditStatus>('/api/symbol-audit');
         if (!status.report) return;
         this.toolbarPanel.close();
         this.symbolAudit.dispose();
-        if (this.discussionMarks.isToolsOpen()) this.discussionMarks.toggleTools();
         this.symbolAuditReportOpen = true;
         this.article.classList.add('is-symbol-audit-report');
         const title = this.dictionary().symbolAuditOpenReport;
@@ -2116,12 +2051,6 @@ class ReaderApplication {
                 this.openPanel(panelButton.dataset.panel, panelButton);
                 return;
             }
-            const discussionTools = target.closest<HTMLElement>('#reader-discussion-tools');
-            if (discussionTools && this.page) {
-                this.toolbarPanel.close();
-                this.discussionMarks.toggleTools();
-                return;
-            }
             const sourceLineNumbers = target.closest<HTMLElement>('#reader-line-numbers');
             if (sourceLineNumbers) {
                 this.setSourceLineNumbers(!this.sourceLineNumbersVisible);
@@ -2142,6 +2071,7 @@ class ReaderApplication {
             const filePath = link.dataset.readerPage;
             if (!filePath) return;
             event.preventDefault();
+            if (link.closest('.reader-lean-review')) this.leanReview.close(false);
             const anchor = link.hash.replace(/^#/, '');
             if (filePath === this.currentPath && anchor) {
                 this.scrollToAnchor(anchor);
@@ -2169,6 +2099,10 @@ class ReaderApplication {
     private installRealtimeUpdates(): void {
         if (this.realtimeEvents) return;
         this.realtimeEvents = readerEvents();
+        this.realtimeEvents.addEventListener('reader-reconnect', event => {
+            // Refresh session metadata without replacing an in-flight navigation or its scroll position.
+            this.applyState(JSON.parse(event.data) as ReaderState);
+        });
         this.realtimeEvents.addEventListener('workspace-update', event => {
             let changedPaths: string[] = [];
             let revision: number | undefined;
@@ -2182,12 +2116,16 @@ class ReaderApplication {
                 // Missing event metadata falls back to a conservative page refresh.
             }
             if (initial && revision === this.state?.revision) return;
+            const requestId = this.pageRequestId;
             const current = this.currentPath;
+            const previousRevision = this.state?.revision;
             void this.refreshState().then(async () => {
-                await this.refreshDiscussionMarks();
+                if (requestId !== this.pageRequestId) return;
+                if (this.state?.revision === previousRevision) this.leanReview.metadataChanged(changedPaths);
                 this.liveStatus.textContent = this.dictionary().live;
                 window.setTimeout(() => { this.liveStatus.textContent = ''; }, 1200);
-                const next = this.state?.pages.some(page => page.filePath === current) ? current : this.state?.pages[0]?.filePath;
+                const next = this.state?.pages.some(page => page.filePath === current) ? current : this.defaultPagePath();
+                if (!next) return this.openInitialPage();
                 const projectMetadataChanged = changedPaths.some(filePath => (
                     filePath === '.math-workspace/config.json'
                     || filePath === '.math-workspace/definitions.json'

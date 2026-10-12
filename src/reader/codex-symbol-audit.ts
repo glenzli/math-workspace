@@ -322,7 +322,10 @@ export class CodexSymbolAuditRunner {
     private turnStarting = false;
 
     constructor(options: CodexSymbolAuditRunnerOptions = {}) {
-        this.command = options.command || process.env.MATH_WORKSPACE_CODEX_COMMAND || 'codex';
+        this.command = options.command
+            || process.env.MATH_WORKSPACE_CODEX_COMMAND
+            || process.env.CODEX_CLI_PATH
+            || 'codex';
     }
 
     async listModels(): Promise<CodexSymbolAuditModel[]> {

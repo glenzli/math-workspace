@@ -241,9 +241,11 @@ The line-number toolbar button shows each locatable source block's starting line
 
 Dependency markers read only explicit `@h-...` relationships. A short line above the dot means the statement or proof explicitly references formal items such as a section, definition, theorem-like object, or proof-backed hash remark. A vertical line below means a later dependency node depends on it; a fork means multiple direct downstream nodes. Mainline theorem-like nodes use the ordinary impact colors: muted is a terminal node, blue is directly cited, and green is both explicitly grounded and cited later. Hash remarks use a muted supplemental color and label; plain `注（...）` / `Remark (...)` entries have no graph node or marker. Hover for reference and transitive-impact counts. These are structural signals, not measures of mathematical importance.
 
-Open the in-document **Marking tools** to choose selection, lasso, proposition, or erase. The selection tool marks dragged text, the lasso marks source blocks inside a closed gesture, the proposition tool selects one whole formal object, and erase or the × shown at the top-right of a hovered highlight removes one mark. Marks remain visible as a soft highlight in the article. Discussion marks retain only a project root, Markdown file, line range, optional formal/formula anchor, and source hash. They do not retain manuscript text or create a temporary conversation or task binding.
+In a Math Workspace plugin panel beside a conversation, select text or click a formula, then click the quote icon in its popover. The tooltip reads “Quote in conversation.” The quote carries original Markdown or LaTeX, its file path, and its source-line range into the current conversation input. Add a question and send when ready; selecting content does not start a model turn.
 
-Then ask directly in a native Codex task. When the user refers to marked material, `read_marks` returns the lightweight locators, and Codex reads the corresponding Markdown from the same project before answering. This flow assumes Math Workspace and Codex share a project directory; cross-project handoff is deliberately out of scope.
+For multiple passages, select and quote each one into the same conversation input, then add a question and send them together. Quote and copy buttons have the same compact size. A failed handoff keeps the popover available for retry. Opening or navigating pages only saves reading position and does not add automatic conversation references.
+
+The Reader in an ordinary local browser supports Markdown selection and copying. Conversation references require the Math Workspace plugin panel beside a conversation; the UI explains where to use that feature. Discussion, tool calls, edits, and approvals remain in the native conversation.
 
 The project needs `.math-workspace/config.json`; run `prepare` once to create it. The Math Workspace does not require `workspace-index.json`.
 
@@ -305,11 +307,11 @@ codex plugin marketplace add /path/to/math-workspace
 codex plugin add math-workspace@personal
 ```
 
-The plugin calls `open` for the current project or a project-relative Markdown page. `read_marks` returns active source locators, while `lookup_formal_object`, `inspect_dependencies`, `lookup_knowledge`, `inspect_lean_alignment`, `read_symbol_audit`, and `verify` provide focused context on demand. The audit tool only reads results the user has already generated; it never starts model work. If no prepared project is available, `open` shows the local project launcher. MCP binds only to `127.0.0.1` and does not write manuscript or `.math-workspace/` artifacts.
+The plugin calls `open` for the current project or a project-relative Markdown page. Reader selections can be added directly to the current conversation input; `lookup_formal_object`, `inspect_dependencies`, `lookup_knowledge`, `inspect_lean_alignment`, `read_symbol_audit`, and `verify` provide focused context on demand. The audit tool only reads results the user has already generated; it never starts model work. If no prepared project is available, `open` shows the local project launcher. MCP binds only to `127.0.0.1` and does not write manuscript or `.math-workspace/` artifacts.
 
-Each panel keeps its own project, page, and scroll position. Closing one panel stops only its Reader instance; another panel is unaffected. The sidebar starts with the project chooser and recent projects, while the conversation entrypoint uses the prepared project bound to that conversation when available. Both load the Reader directly in the plugin resource and access each view’s local API through MCP, retaining its source access and mutation checks. Local HTTP frames are not required.
+When the host supplies exactly one current project containing `.math-workspace/config.json`, the sidebar and conversation entrypoints open it directly; otherwise they show the project chooser and recent projects. Each panel keeps its own project, page, and scroll position. Closing one panel stops only its Reader instance; another panel is unaffected. Both load the Reader directly in the plugin resource and access each view’s local API through MCP, retaining its source access and mutation checks. Local HTTP frames are not required.
 
-Current project and page locators can be passed to the conversation as context; manuscript bodies are not copied automatically. Discussion marks remain shared by the project. Hosts without UI entrypoint support can still use `open` to launch the local Reader. After updating the plugin, start a new conversation to load its new tool metadata.
+Content enters the conversation input only when the user clicks the quote button in a selection popover. Hosts without UI entrypoint support can still use `open` to launch the local Reader. After updating the plugin, start a new conversation to load its new tool metadata.
 
 ### Academic Archives
 
@@ -522,6 +524,28 @@ npm run workspace -- lean dependencies
 `capture` records a reviewed baseline for the Markdown object's type, title, statement, associated proof/solution content, and anchored declaration signature; later changes surface as contract drift. `build` runs `lake build [target]` in configured project roots and records the result; source changes make an older result stale. `dependencies` uses Lean elaboration to inspect direct references in anchored declaration types and proof values, then compares them only with explicit strict Markdown `@h-...` edges. Markdown-only edges merit review; Lean-only edges usually provide implementation or reusable-support context. Neither kind establishes a mathematical conflict by itself.
 
 The Reader marks anchored statements and graph nodes with a light `L`. Clicking an in-text `L` shows its anchored declarations, contract, latest build, and dependency-comparison state. These are auditable engineering signals, not a claim of semantic equivalence, complete formalization, or proof coverage. Coverage starts from configured `coverageTypes` and always retains anchored exercises; these numbers cannot substitute for a scope statement.
+
+#### Human review of Lean and prose
+
+The Reader's Lean review panel uses the stable formal-object ID to show the current statement, associated proof/hints/solutions, nearby context, explicitly referenced prose objects, and anchored declaration locations. **Refresh evidence** uses the project's already installed Lean toolchain to run a bounded, cancellable, offline local build and elaborator query. It displays complete types, including implicit parameters, section assumptions and certificate inputs, and recursive axioms returned by Lean `collectAxioms`, including `sorryAx`. It runs only with an existing Lake manifest and locally materialized dependencies. It does not install toolchains, dependencies or caches, or call a model. Opening the panel reads existing evidence; missing, failed and stale evidence are labelled explicitly.
+
+Expand key definitions to inspect source and elaborated types/values, including wrapper predicates and input assumptions. Machine facts (anchor links, build result and evidence freshness) remain separate from human verdicts. Choose **Aligned within scope**, **Partial**, **Difference** or **Undecided**, and enter the scope, note and reviewer. Define subclaims manually and map each to one or more declarations, or leave a subclaim unmapped. A successful build or evidence refresh never creates or refreshes a human conclusion.
+
+Declarations and key definitions can open their complete Lean file in a read-only source viewer with search, folding, location, copying and range selection; long files render the visible region. Highlighting recognizes Lean comments, strings, doc comments, keywords and declaration structure. Source changes are labelled rather than silently retaining an old position. Previous/current material uses unified line differences with previous/current source line numbers, additions, removals and context; bounded snapshots retain truncation notices.
+
+**Start Lean semantics** connects the already installed local Lean language server when its read-only protocol is supported. It provides real cursor hover types, definitions, tactic goals/expected types, diagnostics and semantic tokens supported by that server. F12 or ⌘/Ctrl click follows a definition, with a source return path. Missing toolchains, local dependencies, protocol capabilities or isolation support are labelled unavailable; complete source remains readable and lexical highlighting is never presented as semantic evidence. Live semantic sessions currently require the native read-only, network-isolated process boundary on macOS; complete source preview remains available on other platforms. Live semantics and deliberately saved build evidence are independent. Opening a file does not build, install dependencies or update human conclusions.
+
+Saving records only the current object in `.math-workspace/lean-reviews/<h-id>.json`; explicit refresh caches bounded object evidence in `.math-workspace/lean-review-evidence/<h-id>.json`. A record includes the verdict, time, subclaim mappings, a limited review snapshot and bounded human decision history, and is restored after reopening the Reader. Saves check both the record revision and the displayed evidence fingerprint. If another window has saved, or source has just changed, reload and inspect the current evidence before saving. These records are independent of the existing whole-index `lean capture` contract and never mark other objects reviewed.
+
+**Source associations and issues** lets a reviewer select exact prose from the current statement, proof or related excerpts, and a corresponding range from a Lean excerpt or the complete source viewer. Attach the link to a saved human subclaim, enter its scoped verdict and notes, and list explicit assumption/symbol correspondences. Each link retains both file hashes, quotes and positions in `.math-workspace/lean-audits/<h-id>.json`. Only deliberately created review artifacts are persisted; source Markdown and Lean files are read-only and no source index is created.
+
+Issues reference a link with both source ranges. Categories cover assumptions, symbols, scope, statements, proofs, trust and other concerns. Human dispositions are open, resolved or dismissed, with a rationale. Changes to either file, object evidence, linked human subclaim or correspondence make earlier decisions stale; a formerly resolved issue remains actionable. Ranges are never automatically rebased. Explicitly select and recheck both ranges, then record the issue recheck rationale. After another window saves, old drafts retain their original revision and cannot overwrite the newer record.
+
+The whole-project overview includes manual freshness across chapters, unanchored/unreviewed objects, stale links and unresolved issues, with filters and navigation. Export a current Markdown review report. History includes ordinary object verdicts and link/issue actions: at most 50 object decisions (1.5 MiB) and 120 audit actions (1 MiB) are retained, with explicit dropped counts. The overview supports at most 3000 current objects, and reports at most 500 objects with positional audit records. Exceeding a bound reports an error rather than exporting an incomplete report. Quoting audit material prepares candidate discussion without sending or applying a human verdict.
+
+Statement, associated proof, declaration, expanded definition or build-environment changes make the old human conclusion stale, with previous/current text available for comparison. Lean evidence uses conservative **project inputs** invalidation: changes to the configured project's or its local dependencies' Lean sources, lakefile, manifest, toolchain or target invalidate elaborated evidence. This is not a localization of the semantic difference. Prose context follows explicit references only; if it exceeds the bounded snapshot, freshness conservatively tracks all workspace Markdown fingerprints without creating a source knowledge base. The current page/chapter queue retains unanchored objects, reviewer and review time. Quoting evidence into a native conversation prepares discussion material; it does not send a message or save a verdict automatically.
+
+An interrupted process may leave `.math-workspace/lean-review-refresh.lock` or an object's `.lock` file. After confirming that process has stopped, remove the stale lock manually before retrying. If the declaration's actual defining module cannot be bound to the anchored source, its elaborated evidence remains unavailable.
 
 ### Project Structure
 
@@ -933,9 +957,11 @@ npm run workspace -- serve
 
 依赖标记只读取显式 `@h-...` 关系。圆点上方的短线表示该陈述或证明显式引用了 formal 对象（可为小节、定义或命题）；下方纵线表示后续依赖对象依赖它，分叉表示多个直接下游。主线命题使用常规颜色；带 hash 的、可证明的补充注释使用低强调度的注释颜色。灰色是没有下游对象的终点，蓝色表示被直接引用，绿色分叉表示既有显式前提也被后续对象引用。悬停可查看引用数与传递影响范围；这些是结构信号，不等同于数学重要性。权威依赖图包含命题/引理/定理/推论之间的边，也包含带 hash 补充注释的入边、出边；普通 `注（...）` 不进入图，也没有标记。
 
-打开正文中的“标记工具”后，可使用选区、圈选、命题与擦除。选区工具会将拖拽选中的正文加入标记；圈选会标记闭合区域内的来源块；命题工具可一键选择整条 formal 对象；擦除工具或每个高亮块悬停时右上角的 × 都可单独移除标记。讨论标记只保存项目根、Markdown 文件、行号、可选的 formal/公式锚点和来源 hash，不保存正文，也不创建临时会话或任务绑定。
+在会话内的 Math Workspace 插件面板中，拖拽选中文字或点击公式，然后点击浮层中的引用图标（提示为“引用到会话”）。引用会携带原始 Markdown / LaTeX、文件路径与源码行范围，加入当前会话输入框；补充问题后再发送。选择内容不会自动发起模型对话。
 
-之后直接在原生 Codex 任务中提问即可。用户提及标记材料时，Codex 可调用 `read_marks`，取得轻量定位后再读取同一项目中的对应 Markdown 源码；因此后续讨论、工具调用、修改与审批完全留在原生任务历史中。这个工作流假定 Math Workspace 和 Codex 面对的是同一项目目录；跨项目共享并非此交互的目标。
+多段内容可分次选取、分次加入同一会话输入框，最后统一补充问题并发送。引用按钮与复制按钮使用相同的紧凑尺寸；失败时保留弹窗供重试。打开页面和翻页仅保存阅读位置，不自动向会话添加引用。
+
+普通本地浏览器中的 Reader 可以选取和复制 Markdown；会话引用需要从会话内的 Math Workspace 插件面板使用。插件会明确提示入口位置。后续讨论、工具调用、修改与审批留在原生会话中。
 
 项目需要先有 `.math-workspace/config.json`；首次使用可运行 `prepare`。Math Workspace 不要求预先生成 `workspace-index.json`。
 
@@ -971,7 +997,7 @@ npm run workspace -- serve
 
 ## Codex MCP 入口
 
-Math Workspace 可作为独立本地客户端运行，也可通过 Codex MCP 打开。MCP 可启动或复用本机工作区，也提供讨论标记、命题、严格依赖、Lean 对齐与只读校验查询。支持 MCP 插件扩展的桌面端还可从全局侧边栏打开 Math Workspace，或在当前会话旁打开 Reader 面板；两个入口复用同一 Reader，不维护第二套渲染器或 Codex 对话实现。
+Math Workspace 可作为独立本地客户端运行，也可通过 Codex MCP 打开。MCP 可启动或复用本机工作区，也提供命题、严格依赖、Lean 对齐与只读校验查询。支持 MCP 插件扩展的桌面端还可从全局侧边栏打开 Math Workspace，或在当前会话旁打开 Reader 面板；两个入口复用同一 Reader，不维护第二套渲染器或 Codex 对话实现。
 
 CLI 入口是：
 
@@ -999,9 +1025,9 @@ codex plugin marketplace add /path/to/math-workspace
 codex plugin add math-workspace@personal
 ```
 
-发布版本同样可以从安装包根目录添加 marketplace。插件调用 `open` 打开当前项目或某个项目相对 Markdown 页面；`read_marks` 返回当前标记的轻量源码定位，`lookup_formal_object`、`inspect_dependencies`、`lookup_knowledge`、`inspect_lean_alignment`、`read_symbol_audit` 与 `verify` 提供按需的窄范围上下文。符号审计接口只读取用户已经运行的缓存结果，不会静默调用模型；没有可用项目时会打开 Math Workspace 的本机项目启动台。
+发布版本同样可以从安装包根目录添加 marketplace。插件调用 `open` 打开当前项目或某个项目相对 Markdown 页面；Reader 选取可直接引用到当前会话输入框；`lookup_formal_object`、`inspect_dependencies`、`lookup_knowledge`、`inspect_lean_alignment`、`read_symbol_audit` 与 `verify` 提供按需的窄范围上下文。符号审计接口只读取用户已经运行的缓存结果，不会静默调用模型；没有可用项目时会打开 Math Workspace 的本机项目启动台。
 
-全局侧边栏入口先显示项目选择与最近项目；会话面板在 MCP 已绑定项目时打开该项目，否则显示项目选择。各个面板独立保存所选项目、页面和滚动位置，可展开阅读长公式。当前项目和页面作为轻量定位同步给会话，供查询工具明确选择项目；正文仍从当前源码读取。讨论标记继续按项目共享，不随面板复制或改成会话私有。
+宿主提供唯一的当前项目且该项目已有 `.math-workspace/config.json` 时，侧边栏与会话入口会直接打开该项目；否则显示项目选择与最近项目。各个面板独立保存所选项目、页面和滚动位置，可展开阅读长公式。正文从当前源码读取；只有主动点击选取弹窗中的引用按钮，内容才进入当前会话输入框。
 
 插件页面直接加载 Reader，数据通过 MCP 访问各视图的本机 Reader API；保留现有的项目与操作校验，不要求宿主允许嵌入本机 HTTP 页面。关闭面板会释放对应 Reader，MCP 退出会关闭其全部视图。缺少 UI 扩展支持的客户端仍可调用 `open` 获取普通浏览器 URL。安装或更新插件后，新建会话以刷新入口。
 
@@ -1220,6 +1246,28 @@ npm run workspace -- lean dependencies
 `dependencies` 通过 Lean elaborator 读取锚定声明的直接类型与证明值引用，并只与正文中显式、严格的 `@h-...` 边比较。Markdown-only 边是需要核对的候选；Lean-only 边通常是实现细节或复用支撑，仅作为补充上下文。两者都不自动构成数学冲突，也不证明语义等价。
 
 Reader 在命题正文与关系图节点上用轻量 `L` 表示存在一个或多个 Lean 声明锚点。点击正文中的 `L` 可查看锚定声明、正文/声明契约、最近构建和依赖比对状态。这个标记不声称完整形式化或证明覆盖；覆盖以配置的 `coverageTypes` 为基础，并始终保留已锚定习题；数字不能替代范围声明。
+
+### Lean 与正文人工审阅
+
+Reader 的 Lean 审阅面板以稳定对象 ID 展示当前题面、关联证明/提示/解答、附近正文、显式引用的正文对象与锚定声明的源码位置。点击“刷新证据”后，Reader 使用项目已安装的 Lean toolchain，离线执行有时限、可取消的本地构建与 elaborator 查询，展示包括隐式参数、section 假设和 certificate 输入的完整类型，以及 Lean `collectAxioms` 返回的递归公理依赖；`sorryAx` 会保留显示。只有已有 Lake manifest 且依赖已在本地就绪时才执行；不会安装 toolchain、依赖或缓存，也不会自动调用模型。读取面板仅使用现有证据；缺失、失败和过期证据均明确标记。
+
+可展开关键定义的源码与 elaborated 类型/值，核对包装谓词与输入假设。机器事实（存在锚点、构建结果、证据是否新鲜）和人工结论分别显示。人工选择“范围内一致”“部分对应”“存在差异”或“未决定”，填写审阅范围、备注和审阅者；可手工拆分正文分项，将每项映射到一个或多个声明，也可保留未映射分项。构建通过或刷新证据不会生成或更新人工结论。
+
+声明与关键定义可打开完整 Lean 文件，在只读源码查看器中搜索、折叠、定位、复制和选择范围；长文件按可见区域显示。高亮识别 Lean 的注释、字符串、文档注释、关键字及声明结构。源码变化时，查看器明确提示旧位置已变化。上次与当前材料以统一差异展示，分别保留此前与当前源码行号，显示增删行和上下文；有界快照被截断时保留提示。
+
+点击“启动 Lean 语义”后，使用已安装且支持当前只读协议的本地 Lean 语言服务，按光标位置查看真实类型提示、定义位置、战术目标/期望类型、文件诊断和服务支持的语义 token。F12 或 ⌘/Ctrl 点击可沿定义跳转，保留源码返回路径。缺少工具链、本地依赖、协议能力或隔离支持时，明确显示不可用；完整源码仍可阅读，词法高亮不冒充语义结果。当前实时语义会话仅在 macOS 的原生只读、断网隔离下启用；其他平台继续提供完整源码预览。实时语义与显式保存的构建证据独立，打开文件不会自动构建、安装依赖或更新人工结论。
+
+点击保存只记录当前对象，存入项目的 `.math-workspace/lean-reviews/<h-id>.json`；显式刷新产生的证据缓存存入 `.math-workspace/lean-review-evidence/<h-id>.json`。记录包含人工结论、时间、分项映射、有限的审阅快照与有界的人工决定历史，重开 Reader 后恢复。保存同时核对记录版本和正在显示的证据指纹；另一窗口已保存，或源码刚发生变化时，必须重新读取和核对后再保存。它与现有全量 `lean capture` 契约互不替代，不会把其他对象标为已审阅。
+
+“位置关联与问题”面板可从当前题面、证明或相关正文摘录选择精确原文，再从 Lean 摘录或完整源码查看器选择对应范围。可附到已保存的人工分项，填写此范围的人工结论、说明，以及逐条假设/符号对应。每条关联保留两侧的文件指纹、原文和位置，存入 `.math-workspace/lean-audits/<h-id>.json`；只记录主动创建的审阅材料，不建立源码索引，也不修改 Markdown 或 Lean 源码。
+
+问题必须关联两侧范围，可按假设、符号、范围、陈述、证明、信任边界或其他类别记录，保留“未解决”“已解决”“已撤回”和处理依据。任一文件、对象证据、已关联人工分项或对应关系变化，都使相关旧决定待复核；先前已解决的问题仍计入待处理。位置不会自动重定位，需明确重新选择两侧范围、核对关联，再填写问题的复核依据。另一窗口保存后，旧草稿保留原版本且不能覆盖新记录。
+
+项目总览包含各章节的人工结论新鲜度、未锚定/未审阅对象、过期关联及未解决问题，支持筛选和跳转；可导出当前项目 Markdown 审阅报告。历史同时展示整对象结论与位置/问题动作：最多保留 50 次整对象决定（1.5 MiB）及 120 次位置/问题动作（1 MiB），被移除的旧项数量明确显示。项目总览最多处理 3000 个当前对象，报告最多读取 500 个位置审阅对象，超过上限会报错，不导出不完整报告。向会话引用审阅材料只准备候选讨论，不自动发送或应用人工结论。
+
+正文陈述、关联证明、声明、展开定义或构建环境变化后，旧人工结论显示为待复核，并可对照上次与当前文本。Lean 证据采用保守的“项目输入”失效范围：配置项目及其本地依赖的 Lean 源码、lakefile、manifest、toolchain 或 target 改变都会使已有 elaborated 证据过期，不能理解成工具已定位了具体语义差异。正文上下文只沿显式引用收集；超过有限快照范围时，审阅新鲜度保守地跟踪工作区全部 Markdown 的指纹，不建立源码知识库。当前页/章节的队列保留未锚定对象、审阅者与审阅时间，便于逐对象继续审阅。向原生会话引用证据只准备讨论材料，不自动发送，也不自动保存审阅结论。
+
+工具异常退出可能留下 `.math-workspace/lean-review-refresh.lock` 或对象旁的 `.lock` 文件；确认相应进程已停止后，人工移除该锁再重试。无法核对声明实际所属模块与锚定源码时，elaborated 证据保持不可用。
 
 ## 项目结构
 

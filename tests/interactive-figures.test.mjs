@@ -49,7 +49,9 @@ export async function testInteractiveFigures({ makeWorkspace, runCli, startReade
         assert.match(rendered, /<\/figcaption>\s*<\/figure>\s*<p[^>]*>正文继续。/);
     }
     const ordinary = renderer.renderFormalMarkdown(markdown, '![图](figures/graph.svg)\n\n**说明**：普通正文。', options);
+    assert.match(ordinary, /<p[^>]*class="reader-static-figure"[^>]*><img/);
     assert.doesNotMatch(ordinary, /reader-figure-caption/);
+    assert.doesNotMatch(renderer.renderFormalMarkdown(markdown, '正文 ![图](figures/graph.svg) 继续。', options), /reader-static-figure/);
     await build({ configFile: false, logLevel: 'silent', build: { outDir: bundle, emptyOutDir: false,
         lib: { entry: path.join(repo, 'src/figures/captions.ts'), formats: ['cjs'], fileName: () => 'captions.cjs' }, minify: false } });
     const { figureMarkdownForPdf, splitFigureCaption } = require(path.join(bundle, 'captions.cjs'));
