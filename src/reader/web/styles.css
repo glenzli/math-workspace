@@ -271,7 +271,6 @@ button { cursor: pointer; }
 .reader-icon { display: block; flex: 0 0 auto; width: 17px; height: 17px; stroke: currentColor; }
 .icon-button .reader-icon { width: 18px; height: 18px; }
 .tool-button .reader-icon { width: 18px; height: 18px; }
-.tool-button.has-action-label { display: inline-flex; align-items: center; gap: 5px; width: auto; padding: 0 7px; font-size: 11px; line-height: 1.2; white-space: nowrap; }
 .reader-tools { flex: 0 1 auto; min-width: 0; height: 38px; overflow-x: auto; gap: 4px; scrollbar-width: thin; scrollbar-color: #aebac3 transparent; }
 .reader-tools > button { flex: 0 0 auto; }
 .reader-tools:focus-visible { outline: 2px solid #6478b7; outline-offset: 1px; border-radius: 4px; }
@@ -852,9 +851,6 @@ button { cursor: pointer; }
 .reader-source-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .reader-source-popover.is-actions-only { padding: 3px; overflow: visible; }
 .reader-source-popover.is-actions-only .reader-source-actions { margin: 0; }
-/* Source actions name both the operation and its format/range without tiny overlaid glyphs. */
-.reader-source-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; max-width: 100%; height: auto; min-height: 30px; padding: 5px 8px; font: inherit; font-size: 12px; line-height: 1.35; text-align: left; }
-.reader-source-action .reader-action-label { min-width: 0; overflow-wrap: anywhere; }
 .reader-source-message { margin: 2px 3px; color: #626a70; }
 .reader-definition-choices { display: grid; min-width: 200px; gap: 3px; }
 .reader-definition-choices button { border: 0; border-radius: 5px; background: transparent; color: inherit; padding: 7px 8px; text-align: left; }
@@ -1082,7 +1078,6 @@ button { cursor: pointer; }
 .reader-archive .archive-header button { min-height: 28px; border-color: transparent; background: transparent; color: #53606a; padding: 4px 8px; }
 .reader-archive .archive-header button:hover { border-color: #cbd9e4; background: #edf5fa; color: #176195; }
 .reader-archive .archive-icon-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 32px; height: 32px; padding: 0; vertical-align: middle; }
-.reader-archive .archive-icon-button.has-action-label { gap: 6px; width: auto; padding: 5px 9px; white-space: nowrap; }
 .reader-archive .archive-header .archive-icon-button { width: 28px; height: 28px; min-height: 28px; padding: 0; }
 .archive-header .archive-icon-button::after { left: auto; right: 0; transform: translateY(-2px); }
 .archive-header .archive-icon-button:hover::after, .archive-header .archive-icon-button:focus-visible::after { transform: translateY(0); }

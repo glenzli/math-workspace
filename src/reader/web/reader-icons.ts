@@ -7,6 +7,7 @@ import {
     createElement,
     ChevronUp,
     Copy,
+    CodeXml,
     Columns2,
     Download,
     Eraser,
@@ -33,6 +34,7 @@ import {
     ShieldCheck,
     Star,
     TextCursor,
+    TextSelect,
     Trash2,
     TriangleAlert,
     Workflow,
@@ -107,8 +109,8 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     definition: BookOpenText,
     'chevron-left': ChevronLeft,
     'chevron-right': ChevronRight,
-    'copy-source': Copy,
-    'copy-line': Copy,
+    'copy-source': CodeXml,
+    'copy-line': TextSelect,
     marker: Bookmark,
     quote: MessageSquareQuote,
     'marker-pen': PenLine,
@@ -161,10 +163,6 @@ export function readerIcon(name: ReaderIconName, size = 16): SVGSVGElement {
     return icon;
 }
 
-export function replaceReaderButtonIcon(button: HTMLElement, name: ReaderIconName, size = 16, label?: string): void {
+export function replaceReaderButtonIcon(button: HTMLElement, name: ReaderIconName, size = 16): void {
     button.replaceChildren(readerIcon(name, size));
-    button.classList.toggle('has-action-label', Boolean(label));
-    if (label) {
-        const text = document.createElement('span'); text.className = 'reader-action-label'; text.textContent = label; button.append(text);
-    }
 }

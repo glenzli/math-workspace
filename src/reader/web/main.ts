@@ -980,7 +980,6 @@ class ReaderApplication {
             const label = typeof dictionary[view] === 'string' ? dictionary[view] : '';
             button.dataset.readerTooltip = label;
             button.setAttribute('aria-label', label);
-            const visibleLabel = button.querySelector('.reader-action-label'); if (visibleLabel) visibleLabel.textContent = label;
         });
         const fontSize = this.root.querySelector('.reader-type-control') as HTMLElement;
         fontSize.setAttribute('aria-label', dictionary.fontSize);
@@ -995,7 +994,7 @@ class ReaderApplication {
         this.updateDraftToolbarAvailability();
         const leanReviewButton = this.root.querySelector<HTMLButtonElement>('#reader-lean-review');
         if (leanReviewButton) {
-            replaceReaderButtonIcon(leanReviewButton, 'lean-compare', 16, dictionary.leanReview);
+            replaceReaderButtonIcon(leanReviewButton, 'lean-compare');
         }
         const archiveButton = this.root.querySelector<HTMLButtonElement>('#reader-archive');
         if (archiveButton) {
@@ -1301,12 +1300,7 @@ class ReaderApplication {
         ];
         icons.forEach(([selector, icon]) => {
             const button = this.root.querySelector<HTMLElement>(selector);
-            if (button) {
-                const panel = button.dataset.panel, key = panel === 'symbol-audit' ? 'symbolAudit' : panel;
-                const label = key && ['propositions', 'symbol-audit'].includes(panel!)
-                    ? this.dictionary()[key as keyof ReturnType<ReaderApplication['dictionary']>] : undefined;
-                replaceReaderButtonIcon(button, icon, 16, typeof label === 'string' ? label : undefined);
-            }
+            if (button) replaceReaderButtonIcon(button, icon);
         });
         this.updateNavigationToggle();
     }

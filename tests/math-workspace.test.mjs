@@ -2667,7 +2667,7 @@ const tests = [
     ['Lean review issue and link audit backend', testLeanAuditBackend],
     ['Lean review issue and link audit Reader', testReaderLeanAudit],
     ['Reader definition titles and navigation targets', testReaderDefinitions],
-    ['Reader icon clarity and labelled actions', testReaderIconClarity],
+    ['Reader icon clarity and action tooltips', testReaderIconClarity],
     ['interactive figures, isolation and static export', () => testInteractiveFigures({ makeWorkspace, runCli, startReader, stopReader })],
     ['academic archive evidence and compatibility', testArchives],
     ['academic archive Reader API', testArchiveReaderApi],

@@ -63,6 +63,16 @@ async function harness() {
     return { document, window, copied, icons, ReaderSourceActions, ReaderApplication, words, renderLeanAnchorBadge, ReaderPropositionReview, archiveAction };
 }
 
+function assertIconOnly(button, label, tooltip = 'tooltip') {
+    assert.equal(button.textContent, '', 'Action buttons explain their meaning on hover, without a visible title.');
+    assert.equal(button.children.length, 1); assert.equal(button.children[0].tagName, 'svg');
+    assert.equal(button.getAttribute('aria-label'), label); assert.equal(button.dataset[tooltip], label);
+}
+
+function iconShape(button) {
+    return button.querySelector('svg').children.map(node => [node.tagName, node.attributes]);
+}
+
 async function toolbarAndIconContract(h) {
     const app = Object.create(h.ReaderApplication.prototype); app.root = new Element('main'); app.state = { language: 'zh' }; app.currentPath = 'book/01.md'; app.sourceLineNumbersVisible = false;
     const tools = new Element('div'); tools.className = 'reader-tools'; app.root.append(tools);
@@ -73,21 +83,23 @@ async function toolbarAndIconContract(h) {
     for (const value of ['-1', '1']) { const button = new Element('button'); button.dataset.fontSize = value; type.append(button); }
     for (const panel of ['contents', 'definitions', 'symbols', 'propositions', 'symbol-audit']) { const button = new Element('button'); button.dataset.panel = panel; tools.append(button); }
     app.installToolbarIcons(); app.updateToolbarLabels();
-    const lean = tools.querySelector('#reader-lean-review'); assert.equal(lean.textContent, 'Lean 对照'); assert.equal(lean.getAttribute('aria-label'), 'Lean 对照');
+    const lean = tools.querySelector('#reader-lean-review'); assertIconOnly(lean, 'Lean 对照', 'readerTooltip');
     assert.equal(lean.querySelector('path').getAttribute('d'), 'M12 3v18', 'Lean comparison uses a distinct equal-column symbol.');
-    assert.equal(tools.querySelector('[data-panel="propositions"]').textContent, '命题审阅');
-    assert.equal(tools.querySelector('[data-panel="symbol-audit"]').textContent, '符号审计');
-    for (const selector of ['[data-panel="contents"]', '[data-panel="definitions"]', '[data-panel="symbols"]', '#reader-archive']) assert.equal(tools.querySelector(selector).textContent, '', 'Familiar toolbar icons stay compact.');
-    assert.equal(tools.querySelector('#reader-expand').getAttribute('aria-label'), '全屏阅读');
-    assert.equal(tools.querySelector('#reader-expand').textContent, '', 'A four-corner fullscreen icon replaces the external-link arrow.');
-    for (const button of tools.children) { assert.ok(button.dataset.readerTooltip, 'Scrolling toolbar uses viewport tooltips.'); assert.equal(button.dataset.tooltip, undefined); }
+    assertIconOnly(tools.querySelector('[data-panel="propositions"]'), '命题审阅', 'readerTooltip');
+    assertIconOnly(tools.querySelector('[data-panel="symbol-audit"]'), '符号审计', 'readerTooltip');
+    assertIconOnly(tools.querySelector('#reader-expand'), '全屏阅读', 'readerTooltip');
+    for (const button of tools.children) { assert.ok(button.dataset.readerTooltip, 'Scrolling toolbar uses viewport tooltips.'); assertIconOnly(button, button.dataset.readerTooltip, 'readerTooltip'); assert.equal(button.dataset.tooltip, undefined); }
     for (const svg of tools.querySelectorAll('svg')) { assert.equal(svg.getAttribute('aria-hidden'), 'true'); assert.equal(svg.getAttribute('focusable'), 'false'); }
     app.state.language = 'en'; app.updateToolbarLabels();
-    assert.equal(lean.textContent, 'Lean comparison'); assert.equal(tools.querySelector('[data-panel="propositions"]').textContent, 'Proposition review');
-    assert.equal(tools.querySelector('#reader-expand').dataset.readerTooltip, 'Full screen');
+    assertIconOnly(lean, 'Lean comparison', 'readerTooltip');
+    assertIconOnly(tools.querySelector('[data-panel="propositions"]'), 'Proposition review', 'readerTooltip');
+    assertIconOnly(tools.querySelector('[data-panel="symbol-audit"]'), 'Symbol audit', 'readerTooltip');
+    assertIconOnly(tools.querySelector('#reader-expand'), 'Full screen', 'readerTooltip');
     app.page = { page: { documentMode: 'draft' } }; app.updateDraftToolbarAvailability();
-    assert.equal(lean.disabled, true); assert.equal(lean.textContent, 'Lean comparison', 'Disabled states retain the visible action name.');
-    assert.equal(lean.dataset.readerTooltip, h.words.en.draftFormalToolsUnavailable);
+    assert.equal(lean.disabled, true); assertIconOnly(lean, h.words.en.draftFormalToolsUnavailable, 'readerTooltip');
+    app.state.language = 'zh'; app.updateToolbarLabels(); assertIconOnly(lean, h.words.zh.draftFormalToolsUnavailable, 'readerTooltip');
+    app.page = { page: { documentMode: 'formal' } }; app.updateDraftToolbarAvailability();
+    assert.equal(lean.disabled, false); assertIconOnly(lean, 'Lean 对照', 'readerTooltip');
     assert.notDeepEqual(h.icons.readerIcon('lean-compare').children.map(node => node.attributes), h.icons.readerIcon('compare').children.map(node => node.attributes));
 }
 
@@ -100,20 +112,27 @@ async function sourceAndArchiveActions(h) {
         actions.selectedSource = () => ({ text: 'selected', markdown: '**selected**', sourceLines: 'whole source line', rect: new Element('span').getBoundingClientRect(), startLine: 4, endLine: 6 });
         actions.showSelectionActions();
         const popover = h.document.body.querySelector('.reader-source-popover'), buttons = popover.querySelectorAll('button');
-        assert.deepEqual(buttons.map(button => button.textContent), [words.copySelectedMarkdown, words.copySourceLines, words.reference]);
-        assert.match(buttons[2].textContent, /Codex/);
+        [words.copySelectedMarkdown, words.copySourceLines, words.reference].forEach((label, index) => assertIconOnly(buttons[index], label));
+        assert.match(buttons[2].getAttribute('aria-label'), /Codex/);
         await buttons[0].emit('click'); await buttons[1].emit('click'); await buttons[2].emit('click');
         assert.deepEqual(h.copied.slice(-2), ['**selected**', 'whole source line']); assert.equal(quoted[0][0].startLine, 4); assert.equal(quoted[0][0].endLine, 6);
         actions.showFormulaActions({ id: 'formula', latex: 'x^2', source: '$x^2$', sourceStartLine: 8, sourceEndLine: 8 }, new Element('span').getBoundingClientRect());
         const formulaButtons = h.document.body.querySelector('.reader-source-popover').querySelectorAll('button');
-        assert.equal(formulaButtons[0].textContent, words.copyLatex); await formulaButtons[0].emit('click'); assert.equal(h.copied.at(-1), 'x^2');
+        assertIconOnly(formulaButtons[0], words.copyLatex);
+        const shapes = [formulaButtons[0], buttons[0], buttons[1]].map(iconShape);
+        assert.equal(new Set(shapes.map(shape => JSON.stringify(shape))).size, 3, 'LaTeX, selected Markdown, and source lines have distinct full-size glyphs.');
+        assert.ok(formulaButtons[0].querySelector('rect'), 'LaTeX keeps the familiar overlapping-page copy symbol.');
+        assert.equal(buttons[0].querySelector('path').getAttribute('d'), 'm18 16 4-4-4-4', 'Selected Markdown uses code brackets.');
+        assert.equal(buttons[1].querySelectorAll('line').length, 3, 'Source lines use a bounded multiline selection.');
+        await formulaButtons[0].emit('click'); assert.equal(h.copied.at(-1), 'x^2');
         actions.host.canReference = () => false; actions.showFormulaActions({ id: 'formula', latex: 'x', source: '$x$', sourceStartLine: 8, sourceEndLine: 8 }, new Element('span').getBoundingClientRect());
-        const disabled = h.document.body.querySelector('.reader-source-reference'); assert.equal(disabled.disabled, true); assert.equal(disabled.textContent, words.reference); assert.match(disabled.getAttribute('aria-label'), /Codex/);
+        const disabled = h.document.body.querySelector('.reader-source-reference'); assert.equal(disabled.disabled, true); assertIconOnly(disabled, words.referenceUnavailable);
+        const before = quoted.length; await disabled.emit('click'); assert.equal(quoted.length, before, 'Unavailable Codex actions never send a reference.');
         actions.dispose();
     }
     let invoked = 0;
     for (const [icon, label] of [['verify', '验证签名'], ['download', 'Export evidence'], ['compare', 'Compare versions']]) {
-        const action = h.archiveAction(label, icon, () => { invoked++; }); assert.equal(action.textContent, label); assert.ok(action.classList.contains('has-action-label')); await action.emit('click');
+        const action = h.archiveAction(label, icon, () => { invoked++; }); assertIconOnly(action, label); await action.emit('click');
     }
     assert.equal(invoked, 3); assert.equal(h.archiveAction('Close', 'x', () => {}).textContent, '');
 }
@@ -138,7 +157,9 @@ export async function testReaderIconClarity() {
     try {
         await toolbarAndIconContract(h); await sourceAndArchiveActions(h); await anchorSemantics(h);
         const css = await fs.readFile(path.join(root, 'src/reader/web/styles.css'), 'utf8');
-        assert.doesNotMatch(css, /is-source-copy|is-line-copy/);
+        assert.doesNotMatch(css, /is-source-copy|is-line-copy|has-action-label|reader-action-label/);
+        assert.match(css, /\.reader-panel-close, \.reader-panel-action, \.reader-source-action \{[^}]*width: 28px;[^}]*height: 28px;/);
+        assert.match(css, /\.reader-archive \.archive-icon-button \{[^}]*width: 32px;[^}]*height: 32px;/);
         assert.match(css, /\.reader-toolbar\s*\{[^}]*height: 56px;[^}]*min-height: 56px;/);
         assert.match(css, /\.reader-tools \{[^}]*min-width: 0;[^}]*overflow-x: auto;[^}]*scrollbar-width: thin;/);
         assert.doesNotMatch(css, /\.reader-tools[^}]*scrollbar-width: none/);
@@ -147,7 +168,7 @@ export async function testReaderIconClarity() {
         assert.match(css, /\.reader-source-actions \{[^}]*flex-wrap: wrap;/);
         const main = await fs.readFile(path.join(root, 'src/reader/web/main.ts'), 'utf8');
         assert.match(main, /<div class="reader-tools"[^>]*tabindex="0"[^>]*>[\s\S]*?<button id="reader-lean-review"/);
-        console.log('Reader icon clarity and labelled action tests passed.');
+        console.log('Reader compact icon clarity and hover action tests passed.');
     } finally { globalThis.document = previous; }
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await testReaderIconClarity();

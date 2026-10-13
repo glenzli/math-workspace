@@ -67,10 +67,6 @@ function iconButton(text: string, icon: ReaderIconName, action: () => void): HTM
     result.setAttribute('aria-label', text);
     result.dataset.tooltip = text;
     result.append(readerIcon(icon));
-    if (['verify', 'download', 'compare'].includes(icon)) {
-        result.classList.add('has-action-label');
-        const label = element('span', text, 'reader-action-label'); result.append(label);
-    }
     return result;
 }
 
