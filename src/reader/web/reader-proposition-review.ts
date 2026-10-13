@@ -362,15 +362,17 @@ function appendLeanAnchorBadge(svg: SVGElement, x: number, y: number): void {
     const badge = svgElement('g');
     badge.setAttribute('class', 'reader-proposition-map-lean-badge');
     badge.setAttribute('aria-hidden', 'true');
-    const background = svgElement('circle');
-    background.setAttribute('cx', String(x + 15));
-    background.setAttribute('cy', String(y + 15));
-    background.setAttribute('r', '6');
+    const background = svgElement('rect');
+    background.setAttribute('x', String(x - 14.5));
+    background.setAttribute('y', String(y + 10));
+    background.setAttribute('width', '29');
+    background.setAttribute('height', '13');
+    background.setAttribute('rx', '4');
     const label = svgElement('text');
-    label.setAttribute('x', String(x + 15));
-    label.setAttribute('y', String(y + 17.2));
+    label.setAttribute('x', String(x));
+    label.setAttribute('y', String(y + 19));
     label.setAttribute('text-anchor', 'middle');
-    label.textContent = 'L';
+    label.textContent = 'Lean';
     badge.append(background, label);
     svg.append(badge);
 }

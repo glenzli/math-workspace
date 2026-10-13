@@ -7,10 +7,10 @@ import {
     createElement,
     ChevronUp,
     Copy,
+    Columns2,
     Download,
     Eraser,
     File,
-    GitBranch,
     GitCompareArrows,
     History,
     ListTree,
@@ -20,6 +20,7 @@ import {
     LocateFixed,
     MousePointer2,
     MessageSquareQuote,
+    Maximize,
     Bookmark,
     PenLine,
     PanelLeftClose,
@@ -34,6 +35,7 @@ import {
     TextCursor,
     Trash2,
     TriangleAlert,
+    Workflow,
     X,
     type IconNode
 } from 'lucide';
@@ -69,6 +71,8 @@ export type ReaderIconName =
     | 'trash'
     | 'download'
     | 'compare'
+    | 'lean-compare'
+    | 'expand'
     | 'search'
     | 'verify'
     | 'stage-draft'
@@ -110,7 +114,7 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     'marker-pen': PenLine,
     'marker-select': TextCursor,
     'marker-formal': MousePointer2,
-    propositions: GitBranch,
+    propositions: Workflow,
     contents: ListTree,
     history: History,
     'line-numbers': ListOrdered,
@@ -125,6 +129,8 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     trash: Trash2,
     download: Download,
     compare: GitCompareArrows,
+    'lean-compare': Columns2,
+    expand: Maximize,
     search: Search,
     verify: ShieldCheck,
     'stage-draft': documentStageIcon(),
@@ -152,11 +158,13 @@ export function readerIcon(name: ReaderIconName, size = 16): SVGSVGElement {
     icon.setAttribute('width', String(size));
     icon.setAttribute('stroke-width', '1.8');
     icon.classList.add('reader-icon');
-    if (name === 'copy-source') icon.classList.add('is-source-copy');
-    if (name === 'copy-line') icon.classList.add('is-line-copy');
     return icon;
 }
 
-export function replaceReaderButtonIcon(button: HTMLElement, name: ReaderIconName, size = 16): void {
+export function replaceReaderButtonIcon(button: HTMLElement, name: ReaderIconName, size = 16, label?: string): void {
     button.replaceChildren(readerIcon(name, size));
+    button.classList.toggle('has-action-label', Boolean(label));
+    if (label) {
+        const text = document.createElement('span'); text.className = 'reader-action-label'; text.textContent = label; button.append(text);
+    }
 }

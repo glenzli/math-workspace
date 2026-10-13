@@ -250,7 +250,7 @@ button { cursor: pointer; }
     padding: 10px max(20px, 3vw);
 }
 .reader-history, .reader-tools, .reader-type-control { display: flex; align-items: center; gap: 2px; height: 34px; }
-.reader-history, .reader-type-control { border: 1px solid #e0e5e8; border-radius: 6px; background: rgba(255, 255, 255, .68); padding: 2px; }
+.reader-history, .reader-type-control { flex-shrink: 0; border: 1px solid #e0e5e8; border-radius: 6px; background: rgba(255, 255, 255, .68); padding: 2px; }
 .reader-page-title { display: flex; align-items: center; min-width: 0; height: 32px; flex: 1; overflow: hidden; color: #3a424a; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .reader-live { display: flex; align-items: center; position: absolute; top: calc(100% + 4px); right: 12px; max-width: calc(100% - 24px); padding: 6px 10px; border-radius: 6px; background: #edf8f1; color: #27704a; font-size: 12px; z-index: 32; }
 .reader-live:empty { display: none; }
@@ -271,6 +271,10 @@ button { cursor: pointer; }
 .reader-icon { display: block; flex: 0 0 auto; width: 17px; height: 17px; stroke: currentColor; }
 .icon-button .reader-icon { width: 18px; height: 18px; }
 .tool-button .reader-icon { width: 18px; height: 18px; }
+.tool-button.has-action-label { display: inline-flex; align-items: center; gap: 5px; width: auto; padding: 0 7px; font-size: 11px; line-height: 1.2; white-space: nowrap; }
+.reader-tools { flex: 0 1 auto; min-width: 0; height: 38px; overflow-x: auto; gap: 4px; scrollbar-width: thin; scrollbar-color: #aebac3 transparent; }
+.reader-tools > button { flex: 0 0 auto; }
+.reader-tools:focus-visible { outline: 2px solid #6478b7; outline-offset: 1px; border-radius: 4px; }
 .icon-button:hover:not(:disabled), .tool-button:hover:not(:disabled), .tool-button.is-active { background: #e8edf0; color: #175889; }
 .icon-button:disabled, .tool-button:disabled { cursor: default; opacity: .35; }
 .reader-type-control { gap: 0; }
@@ -404,16 +408,17 @@ button { cursor: pointer; }
 .reader-lean-anchor {
     display: inline-block;
     appearance: none;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    margin-left: 2px;
+    padding: 1px 4px;
+    border: 1px solid rgb(67 84 168 / .28);
+    border-radius: 4px;
+    background: rgb(67 84 168 / .05);
+    margin-left: 6px;
     color: #4354a8;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: .6em;
-    font-weight: 800;
-    line-height: 1;
-    vertical-align: sub;
+    font-size: 10px;
+    font-weight: 650;
+    line-height: 1.2;
+    vertical-align: middle;
     cursor: pointer;
 }
 .reader-lean-anchor:hover { color: #27398e; }
@@ -741,8 +746,8 @@ button { cursor: pointer; }
 .reader-proposition-map-reference-badge rect { fill: #176fc1; stroke: #fff; stroke-width: 1.2; }
 .reader-proposition-map-reference-badge text { fill: #fff; font-family: Inter, ui-sans-serif, sans-serif; font-size: 7px; font-weight: 800; pointer-events: none; }
 .reader-proposition-map-lean-badge { pointer-events: none; }
-.reader-proposition-map-lean-badge circle { fill: #5a68bb; stroke: #fff; stroke-width: 1.2; }
-.reader-proposition-map-lean-badge text { fill: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 6.6px; font-weight: 800; pointer-events: none; }
+.reader-proposition-map-lean-badge rect { fill: #5a68bb; stroke: #fff; stroke-width: 1.2; }
+.reader-proposition-map-lean-badge text { fill: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 8.5px; font-weight: 700; pointer-events: none; }
 .reader-proposition-map-group { stroke-width: 1; }
 .reader-proposition-map-group.is-cluster { fill: rgba(240, 247, 251, .72); stroke: #cbdce7; }
 .reader-proposition-map-group.is-terminal { fill: rgba(255, 247, 235, .78); stroke: #efd5ad; }
@@ -847,35 +852,9 @@ button { cursor: pointer; }
 .reader-source-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .reader-source-popover.is-actions-only { padding: 3px; overflow: visible; }
 .reader-source-popover.is-actions-only .reader-source-actions { margin: 0; }
-.reader-source-action:has(.reader-icon.is-source-copy)::before {
-    content: '<>';
-    position: absolute;
-    right: 1px;
-    bottom: 1px;
-    border-radius: 2px;
-    background: inherit;
-    color: currentColor;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 7px;
-    font-weight: 700;
-    letter-spacing: -1px;
-    line-height: 1;
-    pointer-events: none;
-}
-.reader-source-action:has(.reader-icon.is-line-copy)::before {
-    content: '≡';
-    position: absolute;
-    right: 1px;
-    bottom: 0;
-    border-radius: 2px;
-    background: inherit;
-    color: currentColor;
-    font-family: Inter, ui-sans-serif, sans-serif;
-    font-size: 9px;
-    font-weight: 750;
-    line-height: .8;
-    pointer-events: none;
-}
+/* Source actions name both the operation and its format/range without tiny overlaid glyphs. */
+.reader-source-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; max-width: 100%; height: auto; min-height: 30px; padding: 5px 8px; font: inherit; font-size: 12px; line-height: 1.35; text-align: left; }
+.reader-source-action .reader-action-label { min-width: 0; overflow-wrap: anywhere; }
 .reader-source-message { margin: 2px 3px; color: #626a70; }
 .reader-definition-choices { display: grid; min-width: 200px; gap: 3px; }
 .reader-definition-choices button { border: 0; border-radius: 5px; background: transparent; color: inherit; padding: 7px 8px; text-align: left; }
@@ -957,7 +936,7 @@ button { cursor: pointer; }
     .reader-sidebar { display: none; }
     .reader-navigation-toggle { display: none; }
     .reader-toolbar { gap: 4px; padding: 8px 12px; overflow: clip; }
-    .reader-tools { min-width: 0; margin-left: auto; overflow-x: auto; scrollbar-width: none; }
+    .reader-tools { min-width: 0; margin-left: auto; }
     .reader-type-control output { display: none; }
     .reader-history, .reader-type-control { flex-shrink: 0; border-color: transparent; background: transparent; }
     .icon-button, .tool-button { min-width: 28px; }
@@ -1019,10 +998,10 @@ button { cursor: pointer; }
     .reader-proposition-map-external-count { fill: #aebdc6; }
     .reader-proposition-map-reference-badge rect { fill: #4b9ce8; stroke: #1e262b; }
     .reader-proposition-map-reference-badge text { fill: #101b22; }
-    .reader-proposition-map-lean-badge circle { fill: #8590dc; stroke: #1e262b; }
+    .reader-proposition-map-lean-badge rect { fill: #8590dc; stroke: #1e262b; }
     .reader-proposition-map-lean-badge text { fill: #11172b; }
     .reader-article .formal-anchor > strong:has(+ .reader-lean-anchor) { text-decoration-color: rgb(141 153 232 / .74); }
-    .reader-lean-anchor { color: #bdc5ff; }
+    .reader-lean-anchor { color: #bdc5ff; border-color: rgb(189 197 255 / .4); background: rgb(189 197 255 / .07); }
     .reader-lean-anchor:hover { color: #e1e5ff; }
     .reader-lean-anchor:focus-visible { outline-color: rgb(189 197 255 / .55); }
     .reader-lean-popover { border-color: #454c52; background: rgba(36, 41, 45, .99); color: #e1e5e8; box-shadow: 0 16px 38px rgba(0, 0, 0, .36); }
@@ -1103,6 +1082,7 @@ button { cursor: pointer; }
 .reader-archive .archive-header button { min-height: 28px; border-color: transparent; background: transparent; color: #53606a; padding: 4px 8px; }
 .reader-archive .archive-header button:hover { border-color: #cbd9e4; background: #edf5fa; color: #176195; }
 .reader-archive .archive-icon-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 32px; height: 32px; padding: 0; vertical-align: middle; }
+.reader-archive .archive-icon-button.has-action-label { gap: 6px; width: auto; padding: 5px 9px; white-space: nowrap; }
 .reader-archive .archive-header .archive-icon-button { width: 28px; height: 28px; min-height: 28px; padding: 0; }
 .archive-header .archive-icon-button::after { left: auto; right: 0; transform: translateY(-2px); }
 .archive-header .archive-icon-button:hover::after, .archive-header .archive-icon-button:focus-visible::after { transform: translateY(0); }

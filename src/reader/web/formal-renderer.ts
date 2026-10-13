@@ -179,7 +179,7 @@ function renderLeanAnchorBadge(id: string, count: number, status: ReaderDependen
         ? `Lean anchor: ${count} declaration${count === 1 ? '' : 's'}; ${review}; open alignment details`
         : `Lean 锚点：${count} 个声明；${review}；点击查看对齐详情`;
     return '<button type="button" class="reader-lean-anchor" aria-label="' + escapeHtml(label)
-        + '" title="' + escapeHtml(label) + '" data-reader-lean-anchor="' + escapeHtml(id) + '">L</button>';
+        + '" title="' + escapeHtml(label) + '" data-reader-lean-anchor="' + escapeHtml(id) + '">Lean</button>';
 }
 
 function hasOddBackslashPrefix(value: string, index: number): boolean {

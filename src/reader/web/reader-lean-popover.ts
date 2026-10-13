@@ -50,7 +50,7 @@ export interface ReaderLeanPopoverHost {
 }
 
 /**
- * Owns the on-demand Lean alignment inspector for the deliberately small `L`
+ * Owns the on-demand Lean alignment inspector for the compact `Lean`
  * marker. It keeps request identity with the popover so a late response cannot
  * repopulate a marker that has already been dismissed or replaced.
  */

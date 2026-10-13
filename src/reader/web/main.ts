@@ -82,6 +82,7 @@ interface ReaderPagePayload {
 const words = {
     zh: {
         contents: '目录',
+        readerTools: '阅读工具',
         definitions: '定义',
         symbols: '符号',
         propositions: '命题审阅',
@@ -145,9 +146,9 @@ const words = {
         symbolAuditLoading: '正在读取审计状态…',
         symbolAuditModelLoadFailed: '无法读取可用模型',
         symbolAuditActionFailed: '符号审计操作失败',
-        reference: '引用到会话',
+        reference: '引用到 Codex',
         referenceAdded: '已加入当前会话输入框',
-        referenceUnavailable: '请在会话中的 Math Workspace 面板使用引用',
+        referenceUnavailable: '请在 Codex 会话中的 Math Workspace 面板使用引用',
         sourceActionFailed: '当前操作未完成，请重试。',
         back: '返回',
         forward: '前进',
@@ -163,7 +164,7 @@ const words = {
         noChapterDefinitions: '本章没有提及可检索定义',
         noSymbols: '当前页没有已索引的项目符号',
         propositionReviewGraphTitle: '本章关系图',
-        propositionReviewGraphHint: '实线为严格依赖；数字虚线为图外严格关系；数字徽章表示正文补充提及，L 表示存在 Lean 锚点。颜色与快审只看严格下游。',
+        propositionReviewGraphHint: '实线为严格依赖；数字虚线为图外严格关系；数字徽章表示正文补充提及，Lean 徽章表示存在 Lean 锚点。颜色与快审只看严格下游。',
         propositionReviewEmpty: '当前章没有命题、引理、定理或推论。',
         propositionReviewHub: '支撑枢纽',
         propositionReviewLinked: '一般关联',
@@ -245,6 +246,7 @@ const words = {
     },
     en: {
         contents: 'Contents',
+        readerTools: 'Reader tools',
         definitions: 'Definitions',
         symbols: 'Symbols',
         propositions: 'Proposition review',
@@ -308,9 +310,9 @@ const words = {
         symbolAuditLoading: 'Reading audit status…',
         symbolAuditModelLoadFailed: 'Could not load available models',
         symbolAuditActionFailed: 'Symbol audit action failed',
-        reference: 'Quote in conversation',
+        reference: 'Quote in Codex',
         referenceAdded: 'Added to the current conversation input',
-        referenceUnavailable: 'Quote from the Math Workspace panel inside a conversation',
+        referenceUnavailable: 'Quote from the Math Workspace panel inside a Codex conversation',
         sourceActionFailed: 'The action did not complete. Please try again.',
         back: 'Back',
         forward: 'Forward',
@@ -326,7 +328,7 @@ const words = {
         noChapterDefinitions: 'No indexed definitions are mentioned in this chapter',
         noSymbols: 'No indexed project notation occurs on this page',
         propositionReviewGraphTitle: 'Chapter relation map',
-        propositionReviewGraphHint: 'Solid lines are strict dependencies; numbered dashed lines are outside-map strict relations; numbered badges count supplemental text mentions, and L marks a Lean anchor. Color and review use strict downstream only.',
+        propositionReviewGraphHint: 'Solid lines are strict dependencies; numbered dashed lines are outside-map strict relations; numbered badges count supplemental text mentions, and a Lean badge marks a Lean anchor. Color and review use strict downstream only.',
         propositionReviewEmpty: 'No proposition, lemma, theorem, or corollary occurs in this chapter.',
         propositionReviewHub: 'Support hub',
         propositionReviewLinked: 'Linked',
@@ -685,7 +687,12 @@ class ReaderApplication {
             '<button id="reader-navigation-toggle" class="icon-button reader-navigation-toggle" type="button"></button>',
             '<div class="reader-history"><button id="reader-back" class="icon-button" aria-label="Back"></button><button id="reader-forward" class="icon-button" aria-label="Forward"></button></div>',
             '<div id="reader-page-title" class="reader-page-title"></div>',
-            '<div class="reader-tools">' + (isReaderEmbedded() ? '<button id="reader-expand" class="tool-button" type="button" aria-label="Expand">↗</button>' : '') + '<button id="reader-archive" class="tool-button" type="button" aria-label="Version history" aria-haspopup="dialog"></button><button class="tool-button" data-panel="contents" aria-label="Contents"></button><button class="tool-button" data-panel="definitions" aria-label="Definitions"></button><button class="tool-button" data-panel="symbols" aria-label="Symbols"></button><button class="tool-button" data-panel="propositions" aria-label="Proposition review"></button><button id="reader-lean-review" class="tool-button" type="button" aria-label="Lean comparison"></button><button class="tool-button" data-panel="symbol-audit" aria-label="Symbol audit"></button><button id="reader-line-numbers" class="tool-button" type="button" aria-label="Show source line numbers" aria-pressed="false"></button></div>',
+            '<div class="reader-tools" tabindex="0" role="group" aria-label="Reader tools">',
+            '<button id="reader-lean-review" class="tool-button" type="button" aria-label="Lean comparison"></button>',
+            '<button class="tool-button" data-panel="contents" aria-label="Contents"></button><button class="tool-button" data-panel="definitions" aria-label="Definitions"></button><button class="tool-button" data-panel="symbols" aria-label="Symbols"></button><button class="tool-button" data-panel="propositions" aria-label="Proposition review"></button><button class="tool-button" data-panel="symbol-audit" aria-label="Symbol audit"></button>',
+            '<button id="reader-archive" class="tool-button" type="button" aria-label="Version history" aria-haspopup="dialog"></button>',
+            (isReaderEmbedded() ? '<button id="reader-expand" class="tool-button" type="button" aria-label="Full screen"></button>' : ''),
+            '<button id="reader-line-numbers" class="tool-button" type="button" aria-label="Show source line numbers" aria-pressed="false"></button></div>',
             '<div class="reader-type-control"><button type="button" class="type-size-button" data-font-size="-1" aria-label="Decrease text size">A−</button><output id="reader-font-size" aria-live="polite">' + this.fontSize + 'px</output><button type="button" class="type-size-button" data-font-size="1" aria-label="Increase text size">A+</button></div>',
             '<span id="reader-live" class="reader-live" aria-live="polite"></span>',
             '</header><article id="reader-article" class="reader-article"></article></main>',
@@ -958,8 +965,9 @@ class ReaderApplication {
 
     private updateToolbarLabels(): void {
         const dictionary = this.dictionary();
+        this.root.querySelector('.reader-tools')?.setAttribute('aria-label', dictionary.readerTools);
         const expand = this.root.querySelector<HTMLElement>('#reader-expand');
-        if (expand) { const label = this.state?.language === 'en' ? 'Expand' : '展开'; expand.dataset.tooltip = label; expand.setAttribute('aria-label', label); }
+        if (expand) { const label = this.state?.language === 'en' ? 'Full screen' : '全屏阅读'; replaceReaderButtonIcon(expand, 'expand'); expand.dataset.readerTooltip = label; expand.setAttribute('aria-label', label); }
         const back = this.root.querySelector('#reader-back') as HTMLElement;
         const forward = this.root.querySelector('#reader-forward') as HTMLElement;
         back.dataset.tooltip = dictionary.back;
@@ -970,8 +978,9 @@ class ReaderApplication {
             const panel = button.dataset.panel || '';
             const view = (panel === 'symbol-audit' ? 'symbolAudit' : panel) as keyof typeof dictionary;
             const label = typeof dictionary[view] === 'string' ? dictionary[view] : '';
-            button.dataset.tooltip = label;
+            button.dataset.readerTooltip = label;
             button.setAttribute('aria-label', label);
+            const visibleLabel = button.querySelector('.reader-action-label'); if (visibleLabel) visibleLabel.textContent = label;
         });
         const fontSize = this.root.querySelector('.reader-type-control') as HTMLElement;
         fontSize.setAttribute('aria-label', dictionary.fontSize);
@@ -986,14 +995,14 @@ class ReaderApplication {
         this.updateDraftToolbarAvailability();
         const leanReviewButton = this.root.querySelector<HTMLButtonElement>('#reader-lean-review');
         if (leanReviewButton) {
-            replaceReaderButtonIcon(leanReviewButton, 'compare');
+            replaceReaderButtonIcon(leanReviewButton, 'lean-compare', 16, dictionary.leanReview);
         }
         const archiveButton = this.root.querySelector<HTMLButtonElement>('#reader-archive');
         if (archiveButton) {
             const label = this.state?.language === 'en' ? 'Version history' : '版本记录';
             replaceReaderButtonIcon(archiveButton, 'history');
             archiveButton.setAttribute('aria-label', label);
-            archiveButton.dataset.tooltip = label;
+            archiveButton.dataset.readerTooltip = label;
         }
     }
 
@@ -1005,7 +1014,7 @@ class ReaderApplication {
         if (leanReviewButton) {
             leanReviewButton.disabled = isDraft || !this.currentPath;
             const label = isDraft ? dictionary.draftFormalToolsUnavailable : dictionary.leanReview;
-            leanReviewButton.dataset.tooltip = label; leanReviewButton.setAttribute('aria-label', label);
+            leanReviewButton.dataset.readerTooltip = label; leanReviewButton.setAttribute('aria-label', label);
         }
         this.root.querySelectorAll<HTMLButtonElement>('[data-panel]').forEach(button => {
             const panel = button.dataset.panel || '';
@@ -1017,7 +1026,7 @@ class ReaderApplication {
             const label = unavailable
                 ? dictionary.draftFormalToolsUnavailable
                 : (typeof candidate === 'string' ? candidate : panel);
-            button.dataset.tooltip = label;
+            button.dataset.readerTooltip = label;
             button.setAttribute('aria-label', label);
         });
     }
@@ -1082,7 +1091,7 @@ class ReaderApplication {
         const label = this.sourceLineNumbersVisible
             ? this.dictionary().hideSourceLineNumbers
             : this.dictionary().showSourceLineNumbers;
-        toggle.dataset.tooltip = label;
+        toggle.dataset.readerTooltip = label;
         toggle.setAttribute('aria-label', label);
         toggle.setAttribute('aria-pressed', String(this.sourceLineNumbersVisible));
         toggle.classList.toggle('is-active', this.sourceLineNumbersVisible);
@@ -1292,7 +1301,12 @@ class ReaderApplication {
         ];
         icons.forEach(([selector, icon]) => {
             const button = this.root.querySelector<HTMLElement>(selector);
-            if (button) replaceReaderButtonIcon(button, icon);
+            if (button) {
+                const panel = button.dataset.panel, key = panel === 'symbol-audit' ? 'symbolAudit' : panel;
+                const label = key && ['propositions', 'symbol-audit'].includes(panel!)
+                    ? this.dictionary()[key as keyof ReturnType<ReaderApplication['dictionary']>] : undefined;
+                replaceReaderButtonIcon(button, icon, 16, typeof label === 'string' ? label : undefined);
+            }
         });
         this.updateNavigationToggle();
     }

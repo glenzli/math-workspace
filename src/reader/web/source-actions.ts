@@ -365,6 +365,7 @@ export class ReaderSourceActions {
         button.type = 'button';
         button.className = 'reader-source-action';
         button.append(readerIcon(icon));
+        const text = document.createElement('span'); text.className = 'reader-action-label'; text.textContent = label; button.append(text);
         button.dataset.tooltip = label;
         button.setAttribute('aria-label', label);
         button.addEventListener('click', async () => {

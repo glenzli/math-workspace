@@ -523,7 +523,7 @@ npm run workspace -- lean dependencies
 
 `capture` records a reviewed baseline for the Markdown object's type, title, statement, associated proof/solution content, and anchored declaration signature; later changes surface as contract drift. `build` runs `lake build [target]` in configured project roots and records the result; source changes make an older result stale. `dependencies` uses Lean elaboration to inspect direct references in anchored declaration types and proof values, then compares them only with explicit strict Markdown `@h-...` edges. Markdown-only edges merit review; Lean-only edges usually provide implementation or reusable-support context. Neither kind establishes a mathematical conflict by itself.
 
-The Reader marks anchored statements and graph nodes with a light `L`. Clicking an in-text `L` shows its anchored declarations, contract, latest build, and dependency-comparison state. These are auditable engineering signals, not a claim of semantic equivalence, complete formalization, or proof coverage. Coverage starts from configured `coverageTypes` and always retains anchored exercises; these numbers cannot substitute for a scope statement.
+The Reader marks anchored statements and graph nodes with a compact `Lean` badge. Clicking an in-text `Lean` badge shows its anchored declarations, contract, latest build, and dependency-comparison state; **Lean comparison** in the toolbar opens the side-by-side review workbench. These are auditable engineering signals, not a claim of semantic equivalence, complete formalization, or proof coverage. Coverage starts from configured `coverageTypes` and always retains anchored exercises; these numbers cannot substitute for a scope statement.
 
 #### Human review of Lean and prose
 
@@ -1253,7 +1253,7 @@ npm run workspace -- lean dependencies
 
 `dependencies` 通过 Lean elaborator 读取锚定声明的直接类型与证明值引用，并只与正文中显式、严格的 `@h-...` 边比较。Markdown-only 边是需要核对的候选；Lean-only 边通常是实现细节或复用支撑，仅作为补充上下文。两者都不自动构成数学冲突，也不证明语义等价。
 
-Reader 在命题正文与关系图节点上用轻量 `L` 表示存在一个或多个 Lean 声明锚点。点击正文中的 `L` 可查看锚定声明、正文/声明契约、最近构建和依赖比对状态。这个标记不声称完整形式化或证明覆盖；覆盖以配置的 `coverageTypes` 为基础，并始终保留已锚定习题；数字不能替代范围声明。
+Reader 在命题正文与关系图节点上用紧凑的 `Lean` 标记表示存在一个或多个 Lean 声明锚点。点击正文中的 `Lean` 可查看锚定声明、正文/声明契约、最近构建和依赖比对状态；工具栏的“Lean 对照”打开正文与 Lean 的并排审阅工作台。这个标记不声称完整形式化或证明覆盖；覆盖以配置的 `coverageTypes` 为基础，并始终保留已锚定习题；数字不能替代范围声明。
 
 ### Lean 与正文人工审阅
 

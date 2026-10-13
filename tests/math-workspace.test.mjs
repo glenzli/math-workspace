@@ -1,5 +1,6 @@
 import { testReaderApps } from './reader-app.test.mjs';
 import { testReaderDefinitions } from './reader-definitions.test.mjs';
+import { testReaderIconClarity } from './reader-icon-clarity.test.mjs';
 import { testLeanReviewBackend } from './lean-review.test.mjs';
 import { testReaderLeanReview } from './reader-lean-review.test.mjs';
 import { testLeanLanguageBackend } from './lean-language.test.mjs';
@@ -2666,6 +2667,7 @@ const tests = [
     ['Lean review issue and link audit backend', testLeanAuditBackend],
     ['Lean review issue and link audit Reader', testReaderLeanAudit],
     ['Reader definition titles and navigation targets', testReaderDefinitions],
+    ['Reader icon clarity and labelled actions', testReaderIconClarity],
     ['interactive figures, isolation and static export', () => testInteractiveFigures({ makeWorkspace, runCli, startReader, stopReader })],
     ['academic archive evidence and compatibility', testArchives],
     ['academic archive Reader API', testArchiveReaderApi],
