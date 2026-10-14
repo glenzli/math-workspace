@@ -1,6 +1,6 @@
 {
   "name": "math-workspace",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Query local Math Workspace context from Codex.",
   "author": {
     "name": "Glen Li",

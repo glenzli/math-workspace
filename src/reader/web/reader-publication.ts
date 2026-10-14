@@ -181,11 +181,13 @@ export class ReaderPublication {
         else if (this.dialog && context.language !== this.locale) { this.locale = context.language; this.render(); }
     }
     close(): void {
+        const returnFocus = this.dialog ? this.returnFocus : undefined;
+        this.returnFocus = undefined;
         ++this.generation; this.controller.abort(); if (this.timer) clearTimeout(this.timer); this.timer = undefined;
         this.clearPreview(); for (const url of this.blobs) URL.revokeObjectURL(url); this.blobs.clear();
         this.dialog?.close(); this.dialog?.remove(); this.dialog = undefined; this.content = undefined; this.live = undefined;
         this.busy = false; this.publishConfirmed = false; this.versionConfirmed = false;
-        if (this.returnFocus?.isConnected) this.returnFocus.focus({ preventScroll: true });
+        if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     }
     async open(): Promise<void> {
         const context = this.context(), previousProject = this.project;

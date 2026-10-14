@@ -10,6 +10,7 @@ import {
     CodeXml,
     Columns2,
     Download,
+    Ellipsis,
     Eraser,
     Eye,
     EyeOff,
@@ -76,6 +77,7 @@ export type ReaderIconName =
     | 'contents'
     | 'history'
     | 'publication'
+    | 'more'
     | 'line-numbers'
     | 'eraser'
     | 'visible'
@@ -148,6 +150,7 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     contents: ListTree,
     history: History,
     publication: FileOutput,
+    more: Ellipsis,
     'line-numbers': ListOrdered,
     eraser: Eraser,
     visible: Eye,

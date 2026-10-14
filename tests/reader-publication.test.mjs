@@ -108,6 +108,11 @@ const step = async (h, index) => { const nav = h.document.body.querySelector('.p
 const check = async (h, attribute) => { const control = h.document.body.querySelector('[' + attribute + ']'); assert.ok(control); control.checked = true; await control.emit('change'); await drain(); };
 
 async function testPublicationUi() {
+    const focus = await harness(), more = focus.document.createElement('button'), contents = focus.document.createElement('button');
+    focus.document.body.append(more, contents); more.focus(); await focus.reader.open(); focus.reader.close();
+    assert.equal(focus.document.activeElement, more, 'Closing the actual publication dialog returns focus to its visible launcher.');
+    contents.focus(); focus.reader.close();
+    assert.equal(focus.document.activeElement, contents, 'An idempotent close during another toolbar action cannot restore stale publication focus.');
     for (const language of ['zh', 'en']) {
         const h = await harness(language), number = language === 'zh' ? '第1章' : 'Chapter 1', title = language === 'zh' ? '第 1 章 空间与距离' : 'Chapter 1 Space and distance';
         h.model.pages[0] = { ...h.model.pages[0], number, title };

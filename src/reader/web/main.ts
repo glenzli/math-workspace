@@ -29,6 +29,7 @@ import { ReaderLeanPopover, type ReaderLeanAnchorPayload } from './reader-lean-p
 import { leanAssistanceUpdatePaths, ReaderLeanReview } from './reader-lean-review';
 import { readerIcon, replaceReaderButtonIcon, type ReaderIconName } from './reader-icons';
 import { ReaderToolbarPanel } from './reader-toolbar-panel';
+import { ReaderToolbarMenu } from './reader-toolbar-menu';
 import { ReaderPropositionReview, type ReaderPropositionReviewItem } from './reader-proposition-review';
 import { ReaderTooltip } from './reader-tooltip';
 import {
@@ -84,6 +85,14 @@ const words = {
     zh: {
         contents: '目录',
         readerTools: '阅读工具',
+        moreTools: '更多工具',
+        toolsReference: '查阅',
+        toolsReview: '审阅',
+        toolsEdition: '版本与出版',
+        toolsDisplay: '显示',
+        versionHistory: '版本记录',
+        pdfPublication: 'PDF 出版',
+        sourceLineNumbers: '源码行号',
         definitions: '定义',
         symbols: '符号',
         propositions: '命题审阅',
@@ -248,6 +257,14 @@ const words = {
     en: {
         contents: 'Contents',
         readerTools: 'Reader tools',
+        moreTools: 'More tools',
+        toolsReference: 'Reference',
+        toolsReview: 'Review',
+        toolsEdition: 'Versions & publication',
+        toolsDisplay: 'Display',
+        versionHistory: 'Version history',
+        pdfPublication: 'PDF publication',
+        sourceLineNumbers: 'Source line numbers',
         definitions: 'Definitions',
         symbols: 'Symbols',
         propositions: 'Proposition review',
@@ -637,6 +654,7 @@ class ReaderApplication {
     private leanPopover!: ReaderLeanPopover;
     private leanReview!: ReaderLeanReview;
     private toolbarPanel!: ReaderToolbarPanel;
+    private toolbarMenu!: ReaderToolbarMenu;
     private tooltip!: ReaderTooltip;
     private propositionReview!: ReaderPropositionReview;
     private archive!: ReaderArchive;
@@ -690,14 +708,11 @@ class ReaderApplication {
             '<button id="reader-navigation-toggle" class="icon-button reader-navigation-toggle" type="button"></button>',
             '<div class="reader-history"><button id="reader-back" class="icon-button" aria-label="Back"></button><button id="reader-forward" class="icon-button" aria-label="Forward"></button></div>',
             '<div id="reader-page-title" class="reader-page-title"></div>',
-            '<div class="reader-tools" tabindex="0" role="group" aria-label="Reader tools">',
+            '<div class="reader-tools" role="group" aria-label="Reader tools">',
             '<button id="reader-lean-review" class="tool-button" type="button" aria-label="Lean comparison"></button>',
-            '<button class="tool-button" data-panel="contents" aria-label="Contents"></button><button class="tool-button" data-panel="definitions" aria-label="Definitions"></button><button class="tool-button" data-panel="symbols" aria-label="Symbols"></button><button class="tool-button" data-panel="propositions" aria-label="Proposition review"></button><button class="tool-button" data-panel="symbol-audit" aria-label="Symbol audit"></button>',
-            '<button id="reader-archive" class="tool-button" type="button" aria-label="Version history" aria-haspopup="dialog"></button>',
-            '<button id="reader-publication" class="tool-button" type="button" aria-label="PDF publication" aria-haspopup="dialog"></button>',
+            '<button class="tool-button" type="button" data-panel="contents" aria-label="Contents"></button>',
             (isReaderEmbedded() ? '<button id="reader-expand" class="tool-button" type="button" aria-label="Full screen"></button>' : ''),
-            '<button id="reader-line-numbers" class="tool-button" type="button" aria-label="Show source line numbers" aria-pressed="false"></button></div>',
-            '<div class="reader-type-control"><button type="button" class="type-size-button" data-font-size="-1" aria-label="Decrease text size">A−</button><output id="reader-font-size" aria-live="polite">' + this.fontSize + 'px</output><button type="button" class="type-size-button" data-font-size="1" aria-label="Increase text size">A+</button></div>',
+            '<button id="reader-more" class="tool-button" type="button" aria-label="More tools" aria-haspopup="menu" aria-expanded="false"></button></div>',
             '<span id="reader-live" class="reader-live" aria-live="polite"></span>',
             '</header><article id="reader-article" class="reader-article"></article></main>',
             '</div>'
@@ -706,6 +721,8 @@ class ReaderApplication {
         this.article = this.root.querySelector('#reader-article') as HTMLElement;
         this.pageTitle = this.root.querySelector('#reader-page-title') as HTMLElement;
         this.liveStatus = this.root.querySelector('#reader-live') as HTMLElement;
+        this.toolbarMenu = new ReaderToolbarMenu(this.root, this.root.querySelector('#reader-more') as HTMLElement,
+            () => this.dictionary(), () => this.prepareToolbarView('menu'));
         this.tooltip = new ReaderTooltip();
         this.tooltip.bind(this.root);
         this.installToolbarIcons();
@@ -793,11 +810,11 @@ class ReaderApplication {
             report: message => this.reportLive(message)
         });
         this.root.querySelector('#reader-lean-review')?.addEventListener('click', event => {
-            this.toolbarPanel.close(); void this.leanReview.openPageQueue(event.currentTarget as HTMLElement);
+            this.prepareToolbarView('lean'); void this.leanReview.openPageQueue(event.currentTarget as HTMLElement);
         });
         this.leanPopover = new ReaderLeanPopover({
             fetchAnchor: id => this.fetchJson<ReaderLeanAnchorPayload>('/api/lean?id=' + encodeURIComponent(id)),
-            openReview: (id, marker) => { this.toolbarPanel.close(); void this.leanReview.open(id, marker); },
+            openReview: (id, marker) => { this.prepareToolbarView('lean'); void this.leanReview.open(id, marker); },
             labels: () => {
                 const dictionary = this.dictionary();
                 return {
@@ -817,9 +834,9 @@ class ReaderApplication {
             }
         });
         this.archive = new ReaderArchive(() => ({ language: this.state?.language || 'zh', currentPath: this.currentPath, token: this.state?.requestToken || '', project: this.state?.projectId || '' }));
-        this.root.querySelector('#reader-archive')?.addEventListener('click', () => void this.archive.open());
+        this.root.querySelector('#reader-archive')?.addEventListener('click', () => { this.prepareToolbarView('archive'); void this.archive.open(); });
         this.publication = new ReaderPublication(() => ({ language: this.state?.language || 'zh', token: this.state?.requestToken || '', project: this.state?.projectId || '' }));
-        this.root.querySelector('#reader-publication')?.addEventListener('click', () => { this.toolbarPanel.close(); void this.publication.open(); });
+        this.root.querySelector('#reader-publication')?.addEventListener('click', () => { this.prepareToolbarView('publication'); void this.publication.open(); });
         this.toolbarPanel = new ReaderToolbarPanel(() => ({ close: this.dictionary().close }));
         this.propositionReview = new ReaderPropositionReview({
             labels: () => {
@@ -893,6 +910,7 @@ class ReaderApplication {
     }
 
     private applyState(state: ReaderState): void {
+        if (this.state?.projectId !== state.projectId) this.toolbarMenu?.close();
         this.state = state;
         this.archive?.contextChanged();
         this.publication?.contextChanged();
@@ -972,6 +990,7 @@ class ReaderApplication {
 
     private updateToolbarLabels(): void {
         const dictionary = this.dictionary();
+        this.toolbarMenu?.updateLabels();
         this.root.querySelector('.reader-tools')?.setAttribute('aria-label', dictionary.readerTools);
         const expand = this.root.querySelector<HTMLElement>('#reader-expand');
         if (expand) { const label = this.state?.language === 'en' ? 'Full screen' : '全屏阅读'; replaceReaderButtonIcon(expand, 'expand'); expand.dataset.readerTooltip = label; expand.setAttribute('aria-label', label); }
@@ -992,9 +1011,11 @@ class ReaderApplication {
         fontSize.setAttribute('aria-label', dictionary.fontSize);
         const decrease = this.root.querySelector<HTMLElement>('[data-font-size="-1"]') as HTMLElement;
         const increase = this.root.querySelector<HTMLElement>('[data-font-size="1"]') as HTMLElement;
-        decrease.dataset.tooltip = dictionary.decreaseFont;
+        decrease.dataset.readerTooltip = dictionary.decreaseFont;
+        delete decrease.dataset.tooltip;
         decrease.setAttribute('aria-label', dictionary.decreaseFont);
-        increase.dataset.tooltip = dictionary.increaseFont;
+        increase.dataset.readerTooltip = dictionary.increaseFont;
+        delete increase.dataset.tooltip;
         increase.setAttribute('aria-label', dictionary.increaseFont);
         this.updateNavigationToggle();
         this.updateSourceLineNumberToggle();
@@ -1005,19 +1026,18 @@ class ReaderApplication {
         }
         const archiveButton = this.root.querySelector<HTMLButtonElement>('#reader-archive');
         if (archiveButton) {
-            const label = this.state?.language === 'en' ? 'Version history' : '版本记录';
-            replaceReaderButtonIcon(archiveButton, 'history');
+            const label = dictionary.versionHistory;
             archiveButton.setAttribute('aria-label', label);
             archiveButton.dataset.readerTooltip = label;
         }
         const publicationButton = this.root.querySelector<HTMLButtonElement>('#reader-publication');
         if (publicationButton) {
-            const label = this.state?.language === 'en' ? 'PDF publication' : 'PDF 出版';
-            replaceReaderButtonIcon(publicationButton, 'publication');
+            const label = dictionary.pdfPublication;
             publicationButton.setAttribute('aria-label', label);
             publicationButton.dataset.readerTooltip = label;
             publicationButton.disabled = !this.state?.projectId;
         }
+        this.toolbarMenu?.refreshFocus();
     }
 
     private updateDraftToolbarAvailability(): void {
@@ -1043,6 +1063,7 @@ class ReaderApplication {
             button.dataset.readerTooltip = label;
             button.setAttribute('aria-label', label);
         });
+        this.toolbarMenu?.refreshFocus();
     }
 
     private updateFontSize(value: number, persist = true): void {
@@ -1054,6 +1075,7 @@ class ReaderApplication {
         const increase = this.root.querySelector<HTMLButtonElement>('[data-font-size="1"]');
         if (decrease) decrease.disabled = this.fontSize <= MIN_FONT_SIZE;
         if (increase) increase.disabled = this.fontSize >= MAX_FONT_SIZE;
+        this.toolbarMenu?.refreshFocus();
         this.queueSourceLineNumberAlignment();
         if (!persist) return;
         try {
@@ -1107,7 +1129,7 @@ class ReaderApplication {
             : this.dictionary().showSourceLineNumbers;
         toggle.dataset.readerTooltip = label;
         toggle.setAttribute('aria-label', label);
-        toggle.setAttribute('aria-pressed', String(this.sourceLineNumbersVisible));
+        toggle.setAttribute('aria-checked', String(this.sourceLineNumbersVisible));
         toggle.classList.toggle('is-active', this.sourceLineNumbersVisible);
     }
 
@@ -1307,11 +1329,7 @@ class ReaderApplication {
             ['#reader-back', 'chevron-left'],
             ['#reader-forward', 'chevron-right'],
             ['[data-panel="contents"]', 'contents'],
-            ['[data-panel="definitions"]', 'definition'],
-            ['[data-panel="symbols"]', 'sigma'],
-            ['[data-panel="propositions"]', 'propositions'],
-            ['[data-panel="symbol-audit"]', 'scan'],
-            ['#reader-line-numbers', 'line-numbers']
+            ['#reader-more', 'more']
         ];
         icons.forEach(([selector, icon]) => {
             const button = this.root.querySelector<HTMLElement>(selector);
@@ -1425,6 +1443,7 @@ class ReaderApplication {
         const requestId = ++this.pageRequestId;
         this.clearSourceLocationHighlight?.();
         this.leanReview.navigationStarted(filePath);
+        this.toolbarMenu.close();
         this.toolbarPanel.close();
         this.symbolAuditReportOpen = false;
         this.article.classList.remove('is-symbol-audit-report');
@@ -1595,6 +1614,7 @@ class ReaderApplication {
         if (!this.state) return;
         if (this.page?.page.documentMode === 'draft'
             && ['definitions', 'symbols', 'propositions', 'symbol-audit'].includes(view)) return;
+        this.prepareToolbarView('panel');
         const dictionary = this.dictionary();
         const titleKey = view === 'symbol-audit' ? 'symbolAudit' : view;
         const candidate = dictionary[titleKey as keyof typeof dictionary];
@@ -1605,13 +1625,22 @@ class ReaderApplication {
             if (view === 'symbols') this.renderSymbols(content);
             if (view === 'propositions') this.propositionReview.render(content, this.currentPropositionReviewItems());
             if (view === 'symbol-audit') this.renderSymbolAudit(content);
-        });
+        }, this.toolbarMenu.anchorFor(trigger));
+    }
+
+    private prepareToolbarView(view: 'menu' | 'panel' | 'lean' | 'archive' | 'publication'): void {
+        if (view !== 'menu') this.toolbarMenu?.close();
+        if (view !== 'panel') this.toolbarPanel?.close();
+        if (view !== 'lean') this.leanReview?.close(false);
+        if (view !== 'archive') this.archive?.close();
+        if (view !== 'publication') this.publication?.close();
     }
 
     private openDocumentStage(trigger: HTMLElement): void {
         const page = this.page?.page;
         if (!page || !this.state) return;
         if (page.documentMode === 'draft') return;
+        this.prepareToolbarView('panel');
         const dictionary = this.dictionary();
         this.toolbarPanel.open('document-stage', trigger, dictionary.documentStage, content => {
             const summary = document.createElement('p');
@@ -2078,7 +2107,7 @@ class ReaderApplication {
                 return;
             }
             const panelButton = target.closest<HTMLElement>('[data-panel]');
-            if (panelButton?.dataset.panel) {
+            if (panelButton?.dataset.panel && !(panelButton as HTMLButtonElement).disabled) {
                 this.openPanel(panelButton.dataset.panel, panelButton);
                 return;
             }

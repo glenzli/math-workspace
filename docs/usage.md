@@ -242,7 +242,9 @@ The command prints a URL bound only to `127.0.0.1`. Open it in Codex's local bro
 - optional source-block starting line numbers remembered in the local browser;
 - live refresh after source changes.
 
-The line-number toolbar button shows each locatable source block's starting line in the article gutter. It helps map rendered content back to Markdown without pretending that visual wraps are source lines or changing article layout. The view is off by default and its preference stays in the current browser.
+The upper-right toolbar keeps Lean comparison, Contents and More tools as compact icon buttons with hover text. More tools groups Definitions and Symbols under Reference, Proposition review and Symbol audit under Review, Version history and PDF publication under Versions & publication, and source line numbers and text size under Display. Embedded panels also keep Full screen available in the toolbar. The menu supports arrow keys, Home, End and Escape.
+
+In More tools → Display, Source line numbers shows each locatable source block's starting line in the article gutter. It helps map rendered content back to Markdown without pretending that visual wraps are source lines or changing article layout. The view is off by default and its preference stays in the current browser.
 
 Dependency markers read only explicit `@h-...` relationships. A short line above the dot means the statement or proof explicitly references formal items such as a section, definition, theorem-like object, or proof-backed hash remark. A vertical line below means a later dependency node depends on it; a fork means multiple direct downstream nodes. Mainline theorem-like nodes use the ordinary impact colors: muted is a terminal node, blue is directly cited, and green is both explicitly grounded and cited later. Hash remarks use a muted supplemental color and label; plain `注（...）` / `Remark (...)` entries have no graph node or marker. Hover for reference and transitive-impact counts. These are structural signals, not measures of mathematical importance.
 
@@ -348,7 +350,7 @@ A total successor binds both the preceding record and its original bundle digest
 
 `--auth-flow normal` is the default and explicitly uses Cosign's browser authentication and localhost callback, including Reader background operations. Choose `--auth-flow device` when device authentication is needed. Each new signature may require authentication; the Reader shows the authentication link and signing progress, and displays a device code only when one is supplied. After authentication, the workflow rechecks the source set, policy, identity, predecessor, and historical objects before atomically publishing the head. A partial failure retains completed volume signatures and valid bundles. Retry the same `--prepared` operation digest; partial completion does not publish a total. Prepare again if source or policy no longer matches the plan. `archive recover-lock` releases a local abandoned lock only when its recorded process no longer exists.
 
-The Reader's history icon, labeled Version history, opens a timeline with totals and work snapshots, optional volume records, original text, source view, gaps, file comparisons, and stable-ID history. Preparation shows changed volumes, reused original receipts, completed new signatures, and outside-volume file digests. Total details show the bound volume receipts and provide independent volume exports. Action buttons use icons, hover text, and accessible names. Historical reading does not substitute current workspace content or reference targets. Signature validity, source completeness, and current-source coverage by the active head are shown separately. A valid historical signature can still have source gaps. Lean status remains with the existing Lean tools. The earliest occurrence in available evidence does not establish original authorship or priority.
+In the Reader, More tools → Versions & publication → Version history opens a timeline with totals and work snapshots, optional volume records, original text, source view, gaps, file comparisons, and stable-ID history. Preparation shows changed volumes, reused original receipts, completed new signatures, and outside-volume file digests. Total details show the bound volume receipts and provide independent volume exports. Action buttons use icons, hover text, and accessible names. Historical reading does not substitute current workspace content or reference targets. Signature validity, source completeness, and current-source coverage by the active head are shown separately. A valid historical signature can still have source gaps. Lean status remains with the existing Lean tools. The earliest occurrence in available evidence does not establish original authorship or priority.
 
 #### Daily History and Locally Hidden Records
 
@@ -661,7 +663,7 @@ Lean `root` and `sourceRoots` paths are relative to the Math Workspace project r
 
 ### Publish Selected Chapters as PDF
 
-For successive releases of the same book, open **PDF publication** in the Reader toolbar and create or resume a profile. Select this edition's volumes and chapters, enter its title, authors, version and DOI, and configure the cover, preface, contents and conclusion. Review included and omitted pages and references outside the edition before building, previewing and downloading the actual PDF. Zenodo draft upload and public publication are separate later actions.
+For successive releases of the same book, open **More tools → Versions & publication → PDF publication** in the Reader and create or resume a profile. Select this edition's volumes and chapters, enter its title, authors, version and DOI, and configure the cover, preface, contents and conclusion. Review included and omitted pages and references outside the edition before building, previewing and downloading the actual PDF. Zenodo draft upload and public publication are separate later actions.
 
 Profiles save selections and metadata without rewriting the manuscript. Chapters and formal objects retain the book's original numbering: selecting chapters 3 and 5 does not turn them into chapters 1 and 2. The output order is cover, publication information, front matter, generated contents, selected chapters, back matter, and a default **To be continued** notice for partial editions. Contents and the notice can be disabled. References outside the edition are shown for review without automatically adding other chapters.
 
@@ -1115,7 +1117,9 @@ npm run workspace -- serve
 - 可切换并在本机记忆的源码块起始行号；
 - 源文件改动后的实时刷新。
 
-工具栏的行号按钮在正文左侧显示每个可定位源码块的起始行。它用于从渲染结果回到 Markdown 位置，不把视觉换行伪装成源码行，也不改变正文排版；默认关闭，选择只保存在当前浏览器。
+右上角保留“Lean 对照”“目录”和省略号“更多工具”；插件内嵌阅读器还可直接全屏。“更多工具”按查阅、审阅、版本与出版、显示分组，提供定义、符号、命题审阅、符号审计、版本记录、PDF 出版、源码行号和字号调整。菜单支持方向键切换、Home / End 跳到首尾，以及 Escape 关闭并返回入口。
+
+在“更多工具 → 显示”切换源码行号，可在正文左侧显示每个可定位源码块的起始行。它用于从渲染结果回到 Markdown 位置，不把视觉换行伪装成源码行，也不改变正文排版；默认关闭，选择只保存在当前浏览器。
 
 依赖标记只读取显式 `@h-...` 关系。圆点上方的短线表示该陈述或证明显式引用了 formal 对象（可为小节、定义或命题）；下方纵线表示后续依赖对象依赖它，分叉表示多个直接下游。主线命题使用常规颜色；带 hash 的、可证明的补充注释使用低强调度的注释颜色。灰色是没有下游对象的终点，蓝色表示被直接引用，绿色分叉表示既有显式前提也被后续对象引用。悬停可查看引用数与传递影响范围；这些是结构信号，不等同于数学重要性。权威依赖图包含命题/引理/定理/推论之间的边，也包含带 hash 补充注释的入边、出边；普通 `注（...）` 不进入图，也没有标记。
 
@@ -1225,7 +1229,7 @@ math-workspace archive update-policy --policy archive-policy.json
 
 `--auth-flow normal` 是默认流程，显式使用 Cosign 的普通浏览器认证与本机 localhost 回调，适用于 Reader 后台操作；需要设备认证时可选择 `--auth-flow device`。每份新签材料可能分别需要认证，Reader 显示认证入口和签署进度，有设备码时才显示设备码。认证完成后再次检查正文集合、策略、身份、前驱及历史对象，再原子更新链头。中途失败保留已完成卷签名及有效 bundle，用同一个 `--prepared` 操作摘要重试；不把部分完成当作已发布的总记录。准备后正文或策略改变时需重新准备。若进程退出留下本机锁，`archive recover-lock` 仅在记录的本机进程已不存在时释放它。
 
-Reader 工具栏的历史图标（提示为“版本记录”）打开时间线，默认显示总记录与作品快照，可加入分卷记录，查看原稿、源码、缺失引用、文件差异以及按稳定 ID 找到的历史声明。准备区列出变化的卷、复用的原始卷证据、已完成的新签和卷外文件摘要；总记录详情展示绑定的卷证据，并可直接独立导出各卷。操作按钮通过图标、hover 提示和无障碍名称说明用途。原稿阅读不套用当前工作区正文或引用目标。界面分别显示签名核验、原稿完整性与当前内容是否被当前链头覆盖；旧材料可以签名有效而原稿有缺口，Lean 状态仍由原有 Lean 功能解释。某个对象在现有材料中的最早出现不是原创性或优先权裁定。
+Reader 的“更多工具 → 版本与出版 → 版本记录”打开时间线，默认显示总记录与作品快照，可加入分卷记录，查看原稿、源码、缺失引用、文件差异以及按稳定 ID 找到的历史声明。准备区列出变化的卷、复用的原始卷证据、已完成的新签和卷外文件摘要；总记录详情展示绑定的卷证据，并可直接独立导出各卷。操作按钮通过图标、hover 提示和无障碍名称说明用途。原稿阅读不套用当前工作区正文或引用目标。界面分别显示签名核验、原稿完整性与当前内容是否被当前链头覆盖；旧材料可以签名有效而原稿有缺口，Lean 状态仍由原有 Lean 功能解释。某个对象在现有材料中的最早出现不是原创性或优先权裁定。
 
 ### 日常列表与本机隐藏历史
 
@@ -1540,7 +1544,7 @@ Lean 项目的 `root` 与 `sourceRoots` 都相对于 Math Workspace 项目根；
 
 ## 按章节发布 PDF
 
-需要逐步发布同一部书时，在 Reader 工具栏打开“PDF 出版”，新建或继续已有方案。选择本版的卷和章节，填写书名、作者、版本与 DOI，配置封面、写在前面/导言、目录和结语。先审阅收录范围、未收录页与跨范围引用，再生成、预览和下载实际 PDF；Zenodo 的草稿上传与正式发布是之后分别启动的动作。
+需要逐步发布同一部书时，在 Reader 的“更多工具 → 版本与出版 → PDF 出版”新建或继续已有方案。选择本版的卷和章节，填写书名、作者、版本与 DOI，配置封面、写在前面/导言、目录和结语。先审阅收录范围、未收录页与跨范围引用，再生成、预览和下载实际 PDF；Zenodo 的草稿上传与正式发布是之后分别启动的动作。
 
 发布方案保存选择与元数据，不改写原稿。正文保留整书原有的章号与对象编号；选取第 3、5 章不会改成第 1、2 章。成品顺序为封面、出版信息、前文、目录、所选正文、后文，以及部分发布默认附上的“未完待续 / To be continued”声明；目录和声明可按方案关闭。范围外引用会列入审阅，不会因此自动加入其他章节。
 

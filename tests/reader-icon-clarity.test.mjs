@@ -71,12 +71,13 @@ async function harness() {
     const icons = await load('src/reader/web/reader-icons.ts', './reader-icons');
     const { ReaderTooltip } = await load('src/reader/web/reader-tooltip.ts', './reader-tooltip');
     await load('src/reader/web/reader-popover.ts', './reader-popover');
+    const { ReaderToolbarMenu } = await load('src/reader/web/reader-toolbar-menu.ts', './reader-toolbar-menu');
     const { ReaderSourceActions } = await load('src/reader/web/source-actions.ts', './source-actions');
     const { ReaderApplication, words } = await load('src/reader/web/main.ts', './main', '\nexports.ReaderApplication = ReaderApplication; exports.words = words;');
     const { renderLeanAnchorBadge } = await load('src/reader/web/formal-renderer.ts', './formal-renderer', '\nexports.renderLeanAnchorBadge = renderLeanAnchorBadge;');
     const { ReaderPropositionReview } = await load('src/reader/web/reader-proposition-review.ts', './reader-proposition-review');
     const { archiveAction } = await load('src/reader/web/reader-archive.ts', './reader-archive', '\nexports.archiveAction = iconButton;');
-    return { document, window, copied, icons, ReaderTooltip, observers, notifyMutation, ReaderSourceActions, ReaderApplication, words, renderLeanAnchorBadge, ReaderPropositionReview, archiveAction };
+    return { document, window, copied, icons, ReaderTooltip, ReaderToolbarMenu, observers, notifyMutation, ReaderSourceActions, ReaderApplication, words, renderLeanAnchorBadge, ReaderPropositionReview, archiveAction };
 }
 
 function assertIconOnly(button, label, tooltip = 'tooltip') {
@@ -90,32 +91,38 @@ function iconShape(button) {
 }
 
 async function toolbarAndIconContract(h) {
-    const app = Object.create(h.ReaderApplication.prototype); app.root = new Element('main'); app.state = { language: 'zh' }; app.currentPath = 'book/01.md'; app.sourceLineNumbersVisible = false;
+    const app = Object.create(h.ReaderApplication.prototype); app.root = new Element('main'); app.state = { language: 'zh', projectId: 'project-a' }; app.currentPath = 'book/01.md'; app.sourceLineNumbersVisible = false;
     const tools = new Element('div'); tools.className = 'reader-tools'; app.root.append(tools);
-    for (const id of ['reader-back', 'reader-forward', 'reader-navigation-toggle', 'reader-expand', 'reader-archive', 'reader-lean-review', 'reader-line-numbers']) {
+    for (const id of ['reader-back', 'reader-forward', 'reader-navigation-toggle', 'reader-expand', 'reader-lean-review', 'reader-more']) {
         const button = new Element('button'); button.id = id; (['reader-back', 'reader-forward', 'reader-navigation-toggle'].includes(id) ? app.root : tools).append(button);
     }
-    const type = new Element('div'); type.className = 'reader-type-control'; app.root.append(type);
-    for (const value of ['-1', '1']) { const button = new Element('button'); button.dataset.fontSize = value; type.append(button); }
-    for (const panel of ['contents', 'definitions', 'symbols', 'propositions', 'symbol-audit']) { const button = new Element('button'); button.dataset.panel = panel; tools.append(button); }
+    const contents = new Element('button'); contents.dataset.panel = 'contents'; tools.append(contents);
+    app.toolbarMenu = new h.ReaderToolbarMenu(app.root, tools.querySelector('#reader-more'), () => app.dictionary(), () => {});
     app.installToolbarIcons(); app.updateToolbarLabels();
     const lean = tools.querySelector('#reader-lean-review'); assertIconOnly(lean, 'Lean 对照', 'readerTooltip');
     assert.equal(lean.querySelector('path').getAttribute('d'), 'M12 3v18', 'Lean comparison uses a distinct equal-column symbol.');
-    assertIconOnly(tools.querySelector('[data-panel="propositions"]'), '命题审阅', 'readerTooltip');
-    assertIconOnly(tools.querySelector('[data-panel="symbol-audit"]'), '符号审计', 'readerTooltip');
+    const assertSecondary = (selector, name) => { const item = app.root.querySelector(selector);
+        assert.equal(item.querySelector('.reader-tool-name').textContent, name, 'Secondary tools keep a visible localized name.');
+        assert.ok(item.querySelector('svg')); assert.equal(item.getAttribute('aria-label'), name); };
+    assertSecondary('[data-panel="propositions"]', '命题审阅');
+    assertSecondary('[data-panel="symbol-audit"]', '符号审计');
     assertIconOnly(tools.querySelector('#reader-expand'), '全屏阅读', 'readerTooltip');
-    for (const button of tools.children) { assert.ok(button.dataset.readerTooltip, 'Scrolling toolbar uses viewport tooltips.'); assertIconOnly(button, button.dataset.readerTooltip, 'readerTooltip'); assert.equal(button.dataset.tooltip, undefined); }
+    for (const button of tools.children) { assert.ok(button.dataset.readerTooltip, 'Primary icons retain viewport tooltips.'); assertIconOnly(button, button.dataset.readerTooltip, 'readerTooltip'); assert.equal(button.dataset.tooltip, undefined); }
     for (const svg of tools.querySelectorAll('svg')) { assert.equal(svg.getAttribute('aria-hidden'), 'true'); assert.equal(svg.getAttribute('focusable'), 'false'); }
     app.state.language = 'en'; app.updateToolbarLabels();
     assertIconOnly(lean, 'Lean comparison', 'readerTooltip');
-    assertIconOnly(tools.querySelector('[data-panel="propositions"]'), 'Proposition review', 'readerTooltip');
-    assertIconOnly(tools.querySelector('[data-panel="symbol-audit"]'), 'Symbol audit', 'readerTooltip');
+    assertSecondary('[data-panel="propositions"]', 'Proposition review');
+    assertSecondary('[data-panel="symbol-audit"]', 'Symbol audit');
+    assertSecondary('#reader-archive', 'Version history'); assertSecondary('#reader-publication', 'PDF publication');
     assertIconOnly(tools.querySelector('#reader-expand'), 'Full screen', 'readerTooltip');
     app.page = { page: { documentMode: 'draft' } }; app.updateDraftToolbarAvailability();
     assert.equal(lean.disabled, true); assertIconOnly(lean, h.words.en.draftFormalToolsUnavailable, 'readerTooltip');
     app.state.language = 'zh'; app.updateToolbarLabels(); assertIconOnly(lean, h.words.zh.draftFormalToolsUnavailable, 'readerTooltip');
+    assert.equal(app.root.querySelector('[data-panel="propositions"]').querySelector('.reader-tool-name').textContent, '命题审阅', 'A draft restriction explains availability without replacing the tool name.');
     app.page = { page: { documentMode: 'formal' } }; app.updateDraftToolbarAvailability();
     assert.equal(lean.disabled, false); assertIconOnly(lean, 'Lean 对照', 'readerTooltip');
+    assertSecondary('#reader-archive', '版本记录'); assertSecondary('#reader-publication', 'PDF 出版');
+    app.toolbarMenu.dispose();
     assert.notDeepEqual(h.icons.readerIcon('lean-compare').children.map(node => node.attributes), h.icons.readerIcon('compare').children.map(node => node.attributes));
 }
 
@@ -216,13 +223,15 @@ export async function testReaderIconClarity() {
         assert.match(css, /\.reader-panel-close, \.reader-panel-action, \.reader-source-action \{[^}]*width: 28px;[^}]*height: 28px;/);
         assert.match(css, /\.reader-archive \.archive-icon-button \{[^}]*width: 32px;[^}]*height: 32px;/);
         assert.match(css, /\.reader-toolbar\s*\{[^}]*height: 56px;[^}]*min-height: 56px;/);
-        assert.match(css, /\.reader-tools \{[^}]*min-width: 0;[^}]*overflow-x: auto;[^}]*scrollbar-width: thin;/);
-        assert.doesNotMatch(css, /\.reader-tools[^}]*scrollbar-width: none/);
+        assert.match(css, /\.reader-tools \{[^}]*flex: 0 0 auto;[^}]*min-width: 0;/);
+        assert.doesNotMatch(css, /\.reader-tools[^}]*overflow-x:/, 'Only the small primary action set occupies the toolbar.');
+        assert.doesNotMatch(css, /\.reader-type-control output \{[^}]*display: none/);
+        assert.doesNotMatch(css, /\.reader-page-title \{[^}]*display: none/);
         assert.match(css, /\.reader-history, \.reader-type-control \{ flex-shrink: 0;/);
         assert.match(css, /\.reader-tools > button \{ flex: 0 0 auto;/);
         assert.match(css, /\.reader-source-actions \{[^}]*flex-wrap: wrap;/);
         const main = await fs.readFile(path.join(root, 'src/reader/web/main.ts'), 'utf8');
-        assert.match(main, /<div class="reader-tools"[^>]*tabindex="0"[^>]*>[\s\S]*?<button id="reader-lean-review"/);
+        assert.match(main, /<div class="reader-tools"[^>]*role="group"[^>]*>[\s\S]*?<button id="reader-lean-review"/);
         console.log('Reader compact icon clarity and hover action tests passed.');
     } finally { globalThis.document = previous; }
 }
