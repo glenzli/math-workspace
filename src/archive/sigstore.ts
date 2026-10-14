@@ -30,6 +30,20 @@ export function deviceAuthentication(output: string): ArchiveAuthentication | un
         } catch (_) { /* Ignore unrelated or incomplete process output. */ }
     }
 }
+/** Only a Sigstore authorization link with a local callback is exposed to the Reader. */
+export function normalAuthentication(output: string): ArchiveAuthentication | undefined {
+    for (const match of output.matchAll(/https:\/\/oauth2\.sigstore\.dev\/[^\s<>"']+(?=[\s<>"'])/g)) {
+        try {
+            const url = new URL(match[0]), redirect = new URL(url.searchParams.get('redirect_uri') || '');
+            if (url.origin !== 'https://oauth2.sigstore.dev' || url.pathname !== '/auth/auth' || url.username || url.password || url.hash
+                || url.searchParams.get('client_id') !== 'sigstore' || url.searchParams.get('response_type') !== 'code'
+                || redirect.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(redirect.hostname)
+                || !redirect.port || redirect.pathname !== '/auth/callback' || redirect.username || redirect.password || redirect.search || redirect.hash
+                || url.href.length > 8000) continue;
+            return { url: url.href, flow: 'normal' };
+        } catch (_) { /* Ignore incomplete or unrelated links. */ }
+    }
+}
 export function sameIdentity(a: ArchiveIdentity, b: ArchiveIdentity): boolean { return a?.identity === b?.identity && a?.issuer === b?.issuer; }
 export function validIdentity(value: any): ArchiveIdentity {
     if (!value || typeof value.identity !== 'string' || !value.identity || value.identity.length > 512

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const api = () => require(path.join(repo, 'out/cli/archive.js'));
+const api = () => require(process.env.MATH_ARCHIVE_TEST_API || path.join(repo, 'out/cli/archive.js'));
 const identity = { identity: 'archive-tests@example.invalid', issuer: 'https://issuer.example.invalid' };
 const sha = data => createHash('sha256').update(data).digest('hex');
 const exists = file => fs.access(file).then(() => true, () => false);
@@ -42,7 +42,7 @@ async function fixture() {
     return { root, archive, verifier, policy, source: path.join(root, 'book/01.md'), store: path.join(root, '.math-archive') };
 }
 async function signer(recordPath, bundlePath) { await fs.writeFile(bundlePath, testBundle(await fs.readFile(recordPath))); }
-async function signed(f, label = 'Example') { const prepared = await f.archive.prepare(label); await f.archive.sign(prepared.prepared, signer); return prepared; }
+async function signed(f, label = 'Example') { const prepared = await f.archive.prepare(label); const result = await f.archive.sign(prepared.prepared, signer); return { ...prepared, operation: prepared.prepared, prepared: result.head.record }; }
 
 function manifest(members) {
     return Buffer.from('# Generated: 2026-03-12T00:00:00Z\n\n' + Object.entries(members).map(([name, bytes]) => {
@@ -245,7 +245,7 @@ export async function testArchives() {
 export async function testArchiveReaderApi() {
     const f = await fixture();
     await fs.mkdir(path.join(f.root, '.math-workspace')); await fs.writeFile(path.join(f.root, '.math-workspace/config.json'), '{"language":"en"}');
-    const cli = path.join(repo, 'out/cli/math-workspace.js');
+    const cli = process.env.MATH_ARCHIVE_TEST_CLI || path.join(repo, 'out/cli/math-workspace.js');
     const stateRoot = path.join(f.root, '.reader-state'); await fs.mkdir(stateRoot);
     const bin = path.join(f.root, 'bin'); await fs.mkdir(bin);
     const finishAuthentication = path.join(f.root, 'finish-authentication');
@@ -297,7 +297,7 @@ export async function testArchiveReaderApi() {
         assert.equal(after.pending.length, 1); assert.equal(after.pending[0].changes.length, 1); assert.equal(after.pending[0].currentMatches, true);
         assert.deepEqual(await fs.readFile(f.source), source); assert.equal(await exists(path.join(f.store, 'HEAD.json')), false);
         const signResponse = await fetch(url + '/api/archive/action', { method: 'POST', headers,
-            body: JSON.stringify({ action: 'sign', prepared: after.pending[0].prepared }) });
+            body: JSON.stringify({ action: 'sign', prepared: after.pending[0].prepared, authFlow: 'device' }) });
         assert.equal(signResponse.status, 202); let signing = await signResponse.json();
         for (let tries = 0; tries < 100 && !output.includes('user_code=WRONG'); tries++) await new Promise(resolve => setTimeout(resolve, 20));
         assert(output.includes('user_code=WRONG'), output);

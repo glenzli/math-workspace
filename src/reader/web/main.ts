@@ -643,6 +643,7 @@ class ReaderApplication {
     private symbolAuditReport!: ReaderSymbolAuditReportView;
     private symbolAuditReportOpen = false;
     private realtimeEvents: ReaderEvents | undefined;
+    private clearSourceLocationHighlight: (() => void) | undefined;
 
     async start(): Promise<void> {
         this.buildShell();
@@ -1408,6 +1409,7 @@ class ReaderApplication {
             ? 'replace'
             : historyMode;
         const requestId = ++this.pageRequestId;
+        this.clearSourceLocationHighlight?.();
         this.leanReview.navigationStarted(filePath);
         this.toolbarPanel.close();
         this.symbolAuditReportOpen = false;
@@ -1426,7 +1428,9 @@ class ReaderApplication {
             if (anchor) {
                 window.requestAnimationFrame(() => this.scrollToAnchor(anchor));
             } else if (sourceLocation) {
-                window.requestAnimationFrame(() => this.scrollToSourceLocation(sourceLocation));
+                window.requestAnimationFrame(() => {
+                    if (requestId === this.pageRequestId) this.scrollToSourceLocation(sourceLocation);
+                });
             } else {
                 this.main.scrollTop = preserveScroll ? previousScroll : 0;
             }
@@ -1463,6 +1467,7 @@ class ReaderApplication {
 
     private renderArticle(): void {
         if (!this.page || !this.state) return;
+        this.clearSourceLocationHighlight?.();
         const title = this.page.page?.displayHeading || this.page.page?.title || this.page.filePath;
         const titleLabel = document.createElement('span');
         titleLabel.className = 'reader-page-title-label';
@@ -1525,6 +1530,7 @@ class ReaderApplication {
     }
 
     private scrollToSourceLocation(location: ReaderSourceLocation): void {
+        this.clearSourceLocationHighlight?.();
         const candidates = Array.from(this.article.querySelectorAll<HTMLElement>('[data-source-line], [data-source-start-line]'));
         const exact = this.article.querySelector<HTMLElement>(`[data-source-line="${location.line}"]`);
         const containing = candidates.find(element => {
@@ -1538,11 +1544,24 @@ class ReaderApplication {
             .sort((left, right) => Math.abs(left.line - location.line) - Math.abs(right.line - location.line))[0]?.element;
         const target = exact || containing || nearest;
         if (!target) return;
-        this.article.querySelectorAll('.is-source-location-target').forEach(element => element.classList.remove('is-source-location-target'));
         revealExerciseTarget(target);
-        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
         target.classList.add('is-source-location-target');
-        window.setTimeout(() => target.classList.remove('is-source-location-target'), 1800);
+        let timer: number | undefined;
+        const clearHighlight = () => {
+            window.clearTimeout(timer);
+            target.classList.remove('is-source-location-target');
+            this.main.removeEventListener('scroll', keepHighlight);
+            this.clearSourceLocationHighlight = undefined;
+        };
+        const keepHighlight = () => {
+            window.clearTimeout(timer);
+            // Leave time to recognize the target after a long smooth scroll has settled.
+            timer = window.setTimeout(clearHighlight, 1800);
+        };
+        this.clearSourceLocationHighlight = clearHighlight;
+        this.main.addEventListener('scroll', keepHighlight, { passive: true });
+        keepHighlight();
+        target.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     }
 
     private navigateHistory(direction: -1 | 1): void {
@@ -1777,9 +1796,7 @@ class ReaderApplication {
             this.panelIconButton('arrow-left', this.dictionary().definitions, () => this.renderDefinitions(container)),
             this.panelIconButton('locate', this.dictionary().jump, () => {
                 this.toolbarPanel.close();
-                void this.openPage(definition.filePath, 'push').then(() => {
-                    this.article.querySelector<HTMLElement>('[data-source-line="' + definition.line + '"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                });
+                this.locateDefinition(definition);
             })
         );
         const content = document.createElement('div');
@@ -1830,9 +1847,7 @@ class ReaderApplication {
     }
 
     private locateDefinition(definition: ReaderDefinitionMatch): void {
-        void this.openPage(definition.filePath, 'push').then(() => {
-            this.article.querySelector<HTMLElement>('[data-source-line="' + definition.line + '"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        });
+        void this.openPage(definition.filePath, 'push', '', false, { line: definition.line });
     }
 
     private renderSymbols(container: HTMLElement): void {
@@ -1857,9 +1872,7 @@ class ReaderApplication {
             if (symbol.sourceFilePath && symbol.sourceLine) {
                 detail.append(this.panelIconButton('locate', this.dictionary().jump, () => {
                     this.toolbarPanel.close();
-                    void this.openPage(symbol.sourceFilePath as string, 'push').then(() => {
-                        this.article.querySelector<HTMLElement>('[data-source-line="' + symbol.sourceLine + '"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    });
+                    void this.openPage(symbol.sourceFilePath as string, 'push', '', false, { line: symbol.sourceLine as number });
                 }));
             }
             this.toolbarPanel.reposition();
@@ -1945,9 +1958,7 @@ class ReaderApplication {
             openReport: () => void this.openSymbolAuditReport('push'),
             locate: (filePath, line) => {
                 this.toolbarPanel.close();
-                void this.openPage(filePath, 'push').then(() => {
-                    this.article.querySelector<HTMLElement>('[data-source-line="' + line + '"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                });
+                void this.openPage(filePath, 'push', '', false, { line });
             },
             currentFilePath: () => this.page?.filePath,
             changed: () => this.toolbarPanel.reposition()
@@ -1983,9 +1994,7 @@ class ReaderApplication {
                 return page?.displayHeading || page?.title || filePath.split('/').pop() || filePath;
             },
             locate: (filePath, line) => {
-                void this.openPage(filePath, 'push').then(() => {
-                    this.article.querySelector<HTMLElement>('[data-source-line="' + line + '"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                });
+                void this.openPage(filePath, 'push', '', false, { line });
             },
             close: () => this.closeSymbolAuditReport()
         });

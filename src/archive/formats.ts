@@ -1,42 +1,21 @@
 import * as path from 'node:path';
 import { canonical, digest, parseJson, relative, sha256 } from './io';
 import { validIdentity } from './sigstore';
-import type { ArchiveFormat, ArchiveFormatContext, ArchiveProjection, ArchiveScope } from './types';
+import type { ArchiveFormat, ArchiveFormatContext, ArchiveProjection, ArchiveMissing } from './types';
+import { fileMap, inScope, partitionFiles, sameJson, validPolicy, validScope, validWorkId as workId } from './policy';
+export { fileMap, validScope } from './policy';
 const crypto = require('node:crypto');
 
-export function validScope(value: any): ArchiveScope {
-    if (!value || !Array.isArray(value.paths) || !value.paths.length || value.paths.length > 128
-        || !Array.isArray(value.extensions) || !value.extensions.length
-        || value.extensions.some(item => typeof item !== 'string' || !/^\.[a-zA-Z0-9]+$/.test(item))) throw new Error('An explicit archive file scope is required.');
-    const paths = value.paths.map(relative);
-    if (new Set(paths).size !== paths.length) throw new Error('Archive scope paths must be unique.');
-    if (value.maxDepth !== undefined && (!Number.isSafeInteger(value.maxDepth) || value.maxDepth < 1 || value.maxDepth > 100)) throw new Error('Invalid archive scope depth.');
-    if (value.exclude !== undefined && (!Array.isArray(value.exclude) || value.exclude.length > 128)) throw new Error('Invalid archive exclusions.');
-    return { paths: [...paths].sort(), extensions: [...new Set<string>(value.extensions)].sort(),
-        ...(value.maxDepth !== undefined ? { maxDepth: value.maxDepth } : {}),
-        ...(value.exclude !== undefined ? { exclude: [...new Set<string>(value.exclude.map(relative))].sort() } : {}) };
-}
-export function fileMap(value: any): Record<string, string> {
-    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 30000) throw new Error('Invalid archive file map.');
-    return Object.fromEntries(Object.entries(value).map(([name, hash]) => [relative(name), digest(hash)]));
-}
-function inScope(name: string, scope: ArchiveScope): boolean {
-    if (name.split('/').some(part => part === '.git' || part === '.math-archive')
-        || scope.exclude?.some(prefix => name === prefix || name.startsWith(prefix + '/'))) return false;
-    return scope.paths.some(prefix => name === prefix || name.startsWith(prefix + '/')
-        && scope.extensions.includes(path.extname(name).toLowerCase())
-        && name.slice(prefix.length + 1).split('/').length <= (scope.maxDepth || 100)
-        && !name.slice(prefix.length + 1).split('/').some(part => part.startsWith('.')));
-}
 function pointer(value: any, recordKey = 'record', bundleKey = 'bundle') {
     return value === null ? null : { record: digest(value?.[recordKey]), bundle: digest(value?.[bundleKey]) };
 }
-function workId(value: unknown): string {
-    if (typeof value !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value)) throw new Error('Invalid stable work identifier.');
-    return value;
-}
-async function checkFiles(context: ArchiveFormatContext, files: Record<string, string>): Promise<void> {
-    for (const hash of new Set(Object.values(files))) await context.object(hash);
+async function checkFiles(context: ArchiveFormatContext, files: Record<string, string>): Promise<ArchiveMissing[]> {
+    const missing: ArchiveMissing[] = [];
+    for (const [name, hash] of Object.entries(files)) {
+        try { await context.object(hash); }
+        catch (error: any) { if (error.code !== 'ENOENT') throw error; missing.push({ path: name, expected: hash }); }
+    }
+    return missing;
 }
 
 const nativeFormat: ArchiveFormat = {
@@ -52,15 +31,77 @@ const nativeFormat: ArchiveFormat = {
         const files = fileMap(record.files);
         if (!Object.keys(files).length) throw new Error('An archive snapshot cannot be empty.');
         if (Object.keys(files).some(name => !inScope(name, scope))) throw new Error('A snapshot file is outside its signed scope.');
-        await checkFiles(context, files);
+        const missing = await checkFiles(context, files);
         for (const hash of record.imports) {
             const imported = parseJson(await context.object(digest(hash)), true);
             if (imported.schema !== 'math-workspace.archive-import/v1' || imported.workId !== record.workId
                 || !Array.isArray(imported.objects)) throw new Error('A native archive import binding is invalid.');
-            for (const objectHash of imported.objects) await context.object(digest(objectHash));
+            for (const objectHash of imported.objects) {
+                try { await context.object(digest(objectHash)); }
+                catch (error: any) { if (error.code !== 'ENOENT') throw error; }
+            }
         }
-        return { workId: workId(record.workId), label: record.label, kind: 'snapshot', files, missing: [],
+        return { workId: workId(record.workId), label: record.label, kind: 'snapshot', files, missing,
             sequence: record.sequence, previous, imports: record.imports.map(digest), signer: validIdentity(record.signer),
+            ...(record.sourceLocator ? { sourceLocator: record.sourceLocator } : {}) };
+    }
+};
+
+async function signedPolicy(context: ArchiveFormatContext, record: any) {
+    const policyDigest = digest(record.policy), bytes = await context.object(policyDigest);
+    const raw = parseJson(bytes, true), policy = validPolicy(raw);
+    if (sha256(bytes) !== policyDigest || !sameJson(raw, policy) || record.workId !== policy.workId
+        || !sameJson(validIdentity(record.signer), policy.signingIdentity)) throw new Error('The signed archive policy, work or author identity differs.');
+    if (typeof record.preparedAt !== 'string' || !Number.isFinite(Date.parse(record.preparedAt))) throw new Error('Invalid archive preparation time.');
+    return { policy, policyDigest };
+}
+const volumeFormat: ArchiveFormat = {
+    id: 'math-workspace.archive-volume/v1',
+    async project(context) {
+        const record = parseJson(context.payload, true);
+        if (record.schema !== this.id) throw new Error('Invalid archive volume payload.');
+        const { policy, policyDigest } = await signedPolicy(context, record);
+        const volume = policy.volumes?.find(item => item.id === record.volumeId);
+        if (!volume || volume.title !== record.title) throw new Error('The volume is not declared by its signed policy.');
+        const files = fileMap(record.files), partition = partitionFiles(files, policy);
+        if (!sameJson(partition.volumes.find(item => item.id === volume.id)!.files, files)) throw new Error('A volume includes a file outside its declared mapping.');
+        const missing = await checkFiles(context, files);
+        return { workId: policy.workId, label: volume.title, kind: 'volume', volumeId: volume.id, policyDigest,
+            files, missing, signer: policy.signingIdentity };
+    }
+};
+const totalFormat: ArchiveFormat = {
+    id: 'math-workspace.archive-total/v1',
+    async project(context) {
+        const record = parseJson(context.payload, true);
+        if (record.schema !== this.id || !Number.isSafeInteger(record.sequence) || record.sequence < 1
+            || typeof record.label !== 'string' || !record.label || record.label.length > 200
+            || !Array.isArray(record.imports) || !Array.isArray(record.volumes)) throw new Error('Invalid archive total payload.');
+        const { policy, policyDigest } = await signedPolicy(context, record), scope = validScope(record.scope);
+        if (!sameJson(scope, policy.scope)) throw new Error('The total scope differs from its signed policy.');
+        const previous = pointer(record.previous);
+        if ((record.sequence === 1) !== (previous === null)) throw new Error('Invalid archive total predecessor.');
+        const files = fileMap(record.files);
+        if (!Object.keys(files).length) throw new Error('An archive total cannot be empty.');
+        const partition = partitionFiles(files, policy);
+        const volumes = record.volumes.map(item => ({ id: workId(item.id), record: digest(item.record), bundle: digest(item.bundle) }));
+        if (volumes.length !== partition.volumes.length || new Set(volumes.map(item => item.id)).size !== volumes.length) throw new Error('Total volume mappings are missing, additional or repeated.');
+        for (const volume of partition.volumes) {
+            const receipt = volumes.find(item => item.id === volume.id);
+            if (!receipt) throw new Error('A declared volume is missing from the total.');
+            const payload = await context.object(receipt.record), bundle = await context.object(receipt.bundle);
+            if (sha256(payload) !== receipt.record || sha256(bundle) !== receipt.bundle) throw new Error('A total volume receipt digest differs.');
+            const projected = await volumeFormat.project({ ...context, input: { format: volumeFormat.id, payload: receipt.record, bundle: receipt.bundle }, payload });
+            if (projected.volumeId !== volume.id || projected.policyDigest !== policyDigest || !sameJson(projected.files, volume.files)) throw new Error('A total does not bind the exact declared volume file map and policy.');
+        }
+        const imports = record.imports.map(digest);
+        if (new Set(imports).size !== imports.length) throw new Error('Total imports must be unique.');
+        for (const hash of imports) {
+            const imported = parseJson(await context.object(hash), true);
+            if (imported.schema !== 'math-workspace.archive-import/v1' || imported.workId !== policy.workId || !Array.isArray(imported.objects)) throw new Error('A total import binding is invalid.');
+        }
+        return { workId: policy.workId, label: record.label, kind: 'total', policyDigest, files, missing: await checkFiles(context, files),
+            sequence: record.sequence, previous, imports, signer: policy.signingIdentity, volumes, outside: partition.outside,
             ...(record.sourceLocator ? { sourceLocator: record.sourceLocator } : {}) };
     }
 };
@@ -195,7 +236,7 @@ const oetRecordFormat: ArchiveFormat = {
 
 /** Explicit source registration; projects cannot load arbitrary converter code into the Reader. */
 export const archiveFormats: ReadonlyMap<string, ArchiveFormat> = new Map(
-    [nativeFormat, oetLegacyFormat, oetRecordFormat].map(format => [format.id, format])
+    [nativeFormat, volumeFormat, totalFormat, oetLegacyFormat, oetRecordFormat].map(format => [format.id, format])
 );
 export async function projectArchiveRecord(context: ArchiveFormatContext): Promise<ArchiveProjection> {
     digest(context.input.payload); digest(context.input.bundle);

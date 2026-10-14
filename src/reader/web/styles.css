@@ -8,12 +8,10 @@
 }
 
 .reader-article .is-source-location-target {
-    animation: reader-source-location-pulse 1.8s ease-out;
-}
-
-@keyframes reader-source-location-pulse {
-    0%, 35% { background-color: rgba(72, 141, 206, .16); }
-    100% { background-color: transparent; }
+    background-color: rgba(72, 141, 206, .2);
+    outline: 2px solid rgba(72, 141, 206, .55);
+    outline-offset: 3px;
+    border-radius: 3px;
 }
 
 * { box-sizing: border-box; }

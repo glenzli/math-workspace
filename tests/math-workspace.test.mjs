@@ -14,6 +14,8 @@ import { testInteractiveFigures } from './interactive-figures.test.mjs';
 import assert from 'node:assert/strict';
 import { testExercises } from './exercises.test.mjs';
 import { testArchives, testArchiveReaderApi } from './archives.test.mjs';
+import { testReaderArchiveVolumes } from './reader-archive-volume.test.mjs';
+import { testArchiveVolumes } from './archive-volumes.test.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -2670,7 +2672,9 @@ const tests = [
     ['Reader icon clarity and action tooltips', testReaderIconClarity],
     ['interactive figures, isolation and static export', () => testInteractiveFigures({ makeWorkspace, runCli, startReader, stopReader })],
     ['academic archive evidence and compatibility', testArchives],
+    ['volume signatures, total binding and recoverable history', testArchiveVolumes],
     ['academic archive Reader API', testArchiveReaderApi],
+    ['volume and total signing Reader workflow', testReaderArchiveVolumes],
     ['native exercises, Reader, export and proof drift', testExercises],
     ['finalize cross-file safety', testFinalizeCrossFileSafety],
     ['finish finalizes and verifies', testFinishFinalizesAndVerifies],

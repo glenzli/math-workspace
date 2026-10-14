@@ -11,6 +11,8 @@ import {
     Columns2,
     Download,
     Eraser,
+    Eye,
+    EyeOff,
     File,
     GitCompareArrows,
     History,
@@ -63,6 +65,8 @@ export type ReaderIconName =
     | 'history'
     | 'line-numbers'
     | 'eraser'
+    | 'visible'
+    | 'hidden'
     | 'navigation-close'
     | 'navigation-open'
     | 'plus'
@@ -121,6 +125,8 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     history: History,
     'line-numbers': ListOrdered,
     eraser: Eraser,
+    visible: Eye,
+    hidden: EyeOff,
     'navigation-close': PanelLeftClose,
     'navigation-open': PanelLeftOpen,
     plus: Plus,

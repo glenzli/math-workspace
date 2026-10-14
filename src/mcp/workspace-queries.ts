@@ -106,7 +106,7 @@ export class WorkspaceQueries {
         this.symbolAudit = new SymbolAuditStore({ stateFilePath: options.symbolAuditStatePath });
     }
 
-    async archiveRead(input: { action?: string; record?: string; filePath?: string; formalId?: string; offset?: number; limit?: number }, projectRoot?: string): Promise<Record<string, unknown>> {
+    async archiveRead(input: { action?: string; record?: string; filePath?: string; formalId?: string; offset?: number; limit?: number; includeHidden?: boolean }, projectRoot?: string): Promise<Record<string, unknown>> {
         const root = await this.resolveRoot(projectRoot);
         const archive = await AcademicArchive.open(root);
         const offset = Math.max(0, Math.min(10000, Number(input.offset) || 0));
@@ -125,11 +125,12 @@ export class WorkspaceQueries {
             return { ...history, matches: history.matches.slice(offset, offset + limit), total: history.matches.length, offset };
         }
         if (!await archive.configured()) return { configured: false };
-        const state = await archive.records();
+        const state = await archive.records(false, undefined, input.includeHidden === true);
         return { configured: true, head: state.head, total: state.records.length, offset,
             records: state.records.slice(offset, offset + limit).map(row => ({ id: row.id, label: row.label, kind: row.kind,
                 files: Object.keys(row.files).length, loggedAt: row.loggedAt, identity: row.identity,
-                contentComplete: row.contentComplete, missing: row.missing, verification: row.verification })),
+                contentComplete: row.contentComplete, missing: row.missing, verification: row.verification, hidden: row.hidden,
+                ...(row.volumes ? { volumes: row.volumes, outsideFiles: Object.keys(row.outside || {}).length } : {}), ...(row.volumeId ? { volumeId: row.volumeId } : {}) })),
             interpretation: 'Read archived source before making historical claims. Signature status is separate from source completeness and proof status.' };
     }
 

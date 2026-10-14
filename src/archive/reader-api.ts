@@ -36,7 +36,7 @@ export class ArchiveReaderApi {
         if (route === '/api/archive/compare') {
             return archive.compare(params.get('left') || '', params.get('right') || '');
         }
-        if (route === '/api/archive/export') return archive.export();
+        if (route === '/api/archive/export') return archive.export(params.get('record') || undefined);
         if (route === '/api/archive/oet-preview') {
             const converted = await convertOetArchive(root, params.get('source') || '');
             return { policy: converted.suggestedPolicy, records: converted.exchange.records.length, objects: Object.keys(converted.exchange.objects).length, signatureCreated: false };
@@ -45,7 +45,7 @@ export class ArchiveReaderApi {
     }
     async start(root: string, body: any): Promise<ArchiveJob> {
         if (!body || typeof body.action !== 'string') throw new Error('Choose an archive operation.');
-        const allowed = new Set(['verify', 'prepare', 'sign', 'import-oet', 'initialize']);
+        const allowed = new Set(['verify', 'prepare', 'sign', 'import-oet', 'initialize', 'update-policy', 'hide', 'restore']);
         if (!allowed.has(body.action)) throw new Error('Unknown archive write operation.');
         if (this.jobs.get(root)?.state === 'running') throw new Error('An archive operation is already running in this project.');
         const job: ArchiveJob = { id: crypto.randomBytes(16).toString('hex'), action: body.action, state: 'running' };
@@ -56,8 +56,12 @@ export class ArchiveReaderApi {
                 const archive = await this.service(root);
                 if (body.action === 'verify') job.result = await archive.verify(body.expectedHead || undefined, progress);
                 else if (body.action === 'prepare') job.result = await archive.prepare(body.label);
-                else if (body.action === 'sign') job.result = await archive.sign(body.prepared, undefined, authentication => { job.authentication = authentication; });
+                else if (body.action === 'sign') job.result = await archive.sign(body.prepared, undefined, authentication => { job.authentication = authentication; },
+                    { authFlow: body.authFlow || 'normal', onProgress: progress });
                 else if (body.action === 'initialize') job.result = await archive.initialize(body.policy);
+                else if (body.action === 'update-policy') job.result = await archive.updatePolicy(body.policy, body.expectedPolicy);
+                else if (body.action === 'hide') job.result = await archive.hide(body.record, body.retireHead === true);
+                else if (body.action === 'restore') job.result = await archive.restore(body.record);
                 else {
                     const converted = await convertOetArchive(root, body.source);
                     if (body.initialize === true) {

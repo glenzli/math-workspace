@@ -20,6 +20,14 @@ export interface Catalog {
     orphans: string[];
 }
 export function inputId(input: ArchiveInputRecord): string { return sha256(canonical(input)); }
+export function selectRecord<T extends { id: string; payload: string }>(records: T[], selector: string): T {
+    digest(selector);
+    const exact = records.find(record => record.id === selector);
+    if (exact) return exact;
+    const matches = records.filter(record => record.payload === selector);
+    if (matches.length !== 1) throw new Error(matches.length ? 'The archive payload selector is ambiguous; use its record ID.' : 'Archive record not found.');
+    return matches[0];
+}
 export function inputRecord(value: any): ArchiveInputRecord {
     if (!value || typeof value.format !== 'string' || !archiveFormats.has(value.format)) throw new Error('Unknown archive evidence format.');
     if (value.metadata !== undefined && (!value.metadata || typeof value.metadata !== 'object' || Array.isArray(value.metadata))) throw new Error('Archive metadata must be an object.');
@@ -30,6 +38,16 @@ export async function readHead(store: string): Promise<{ pointer: ArchivePointer
     const head = parseJson(await readFile(store, 'HEAD.json'), true);
     if (head.schema !== 'math-workspace.archive-head/v1' || !Number.isSafeInteger(head.sequence) || head.sequence < 1) throw new Error('Invalid archive head.');
     return { pointer: { record: digest(head.record), bundle: digest(head.bundle) }, sequence: head.sequence };
+}
+/** Local retirement retains an exact original branch; it does not rewrite signed history. */
+export async function readRetainedHeads(store: string): Promise<Array<{ pointer: ArchivePointer; sequence: number }>> {
+    if (!await exists(path.join(store, 'retained-heads.json'))) return [];
+    const value = parseJson(await readFile(store, 'retained-heads.json'), true);
+    if (value.schema !== 'math-workspace.archive-retained-heads/v1' || !Array.isArray(value.heads) || value.heads.length > 5000) throw new Error('Invalid retained archive heads.');
+    return value.heads.map(head => {
+        if (!Number.isSafeInteger(head.sequence) || head.sequence < 1) throw new Error('Invalid retained archive sequence.');
+        return { pointer: { record: digest(head.record), bundle: digest(head.bundle) }, sequence: head.sequence };
+    });
 }
 export async function readCatalog(store: string, policy: ArchivePolicy): Promise<Catalog> {
     const imports: string[] = [], inputs: ArchiveInputRecord[] = [], objects = new Set<string>();
@@ -48,23 +66,48 @@ export async function readCatalog(store: string, policy: ArchivePolicy): Promise
             inputs.push(...index.records.map(inputRecord));
         }
     }
-    const head = await readHead(store); let pointer = head?.pointer || null, sequence = head?.sequence || 0;
-    const seen = new Set<string>();
-    while (pointer) {
-        if (seen.has(pointer.record)) throw new Error('Archive chain contains a cycle.'); seen.add(pointer.record);
-        const payload = await readFile(store, `entries/${pointer.record}/record.json`);
-        const bundle = await readFile(store, `entries/${pointer.record}/record.bundle`);
-        if (sha256(payload) !== pointer.record || sha256(bundle) !== pointer.bundle) throw new Error('Archive chain receipt has changed.');
-        const record = parseJson(payload, true);
-        if (record.schema !== 'math-workspace.archive-record/v1' || record.workId !== policy.workId || record.sequence !== sequence) throw new Error('Archive chain sequence or work identity differs.');
-        inputs.push({ format: record.schema, payload: pointer.record, bundle: pointer.bundle });
-        objects.add(pointer.record); objects.add(pointer.bundle);
-        Object.values(record.files || {}).forEach(hash => objects.add(digest(hash)));
-        if (!Array.isArray(record.imports) || record.imports.some(hash => !imports.includes(digest(hash)))) throw new Error('An archive import bound by the chain is missing.');
-        pointer = record.previous === null ? null : { record: digest(record.previous?.record), bundle: digest(record.previous?.bundle) };
-        sequence--;
-    }
-    if (sequence !== 0) throw new Error('Archive chain ended before its first entry.');
+    const head = await readHead(store);
+    const retained = await readRetainedHeads(store);
+    const seen = new Map<string, { bundle: string; sequence: number }>();
+    const volumeInputs: ArchiveInputRecord[] = [];
+    const walk = async (start: { pointer: ArchivePointer; sequence: number } | null) => {
+        let pointer = start?.pointer || null, sequence = start?.sequence || 0;
+        const chain = new Set<string>();
+        while (pointer) {
+            if (chain.has(pointer.record)) throw new Error('Archive chain contains a cycle.'); chain.add(pointer.record);
+            if (seen.has(pointer.record)) {
+                const old = seen.get(pointer.record)!;
+                if (old.bundle !== pointer.bundle || old.sequence !== sequence) throw new Error('Retained archive predecessor bundle or sequence differs.');
+                break;
+            }
+            const payload = await readFile(store, `entries/${pointer.record}/record.json`);
+            const bundle = await readFile(store, `entries/${pointer.record}/record.bundle`);
+            if (sha256(payload) !== pointer.record || sha256(bundle) !== pointer.bundle) throw new Error('Archive chain receipt has changed.');
+            const record = parseJson(payload, true);
+            if (!['math-workspace.archive-record/v1', 'math-workspace.archive-total/v1'].includes(record.schema)
+                || record.workId !== policy.workId || record.sequence !== sequence) throw new Error('Archive chain sequence or work identity differs.');
+            seen.set(pointer.record, { bundle: pointer.bundle, sequence });
+            inputs.push({ format: record.schema, payload: pointer.record, bundle: pointer.bundle });
+            objects.add(pointer.record); objects.add(pointer.bundle);
+            Object.values(record.files || {}).forEach(hash => objects.add(digest(hash)));
+            if (record.schema === 'math-workspace.archive-total/v1') {
+                objects.add(digest(record.policy));
+                if (!Array.isArray(record.volumes)) throw new Error('Invalid total volume bindings.');
+                for (const item of record.volumes) {
+                    const payload = digest(item.record), bundle = digest(item.bundle);
+                    volumeInputs.push({ format: 'math-workspace.archive-volume/v1', payload, bundle });
+                    objects.add(payload); objects.add(bundle);
+                }
+            }
+            if (!Array.isArray(record.imports) || record.imports.some(hash => !imports.includes(digest(hash)))) throw new Error('An archive import bound by the chain is missing.');
+            pointer = record.previous === null ? null : { record: digest(record.previous?.record), bundle: digest(record.previous?.bundle) };
+            sequence--;
+        }
+        if (!pointer && sequence !== 0) throw new Error('Archive chain ended before its first entry.');
+    };
+    await walk(head);
+    for (const old of retained) await walk(old);
+    inputs.push(...volumeInputs);
     const entryDir = await safePath(store, 'entries');
     const orphans = await exists(entryDir) ? (await fs.readdir(entryDir)).filter(name => !seen.has(name)).map(digest) : [];
     const unique = new Map<string, ArchiveInputRecord>();
@@ -103,9 +146,14 @@ export async function projectInputs(inputs: ArchiveInputRecord[], object: (hash:
             const imported = parseJson(await object(hash), true);
             for (const input of imported.records) if (!byReceipt.has(`${input.payload}:${input.bundle}`)) throw new Error('A snapshot is missing a signature from its bound import.');
         }
+        for (const receipt of view.volumes || []) {
+            const volume = byReceipt.get(`${receipt.record}:${receipt.bundle}`);
+            if (!volume || volume.format !== 'math-workspace.archive-volume/v1' || volume.volumeId !== receipt.id
+                || volume.policyDigest !== view.policyDigest || !sameIdentity(volume.identity, view.identity)) throw new Error('A total is missing the exact original volume signature.');
+        }
         if (!view.previous) continue;
         const previous = byReceipt.get(`${view.previous.record}:${view.previous.bundle}`);
-        if (!previous || previous.sequence !== view.sequence! - 1 || previous.format !== view.format) throw new Error('Archive predecessor or original predecessor bundle is missing.');
+        if (!previous || previous.sequence !== view.sequence! - 1 || !(previous.format === view.format || view.format === 'math-workspace.archive-total/v1' && previous.format === 'math-workspace.archive-record/v1')) throw new Error('Archive predecessor or original predecessor bundle is missing.');
     }
     return views.sort((a, b) => (b.loggedAt || '').localeCompare(a.loggedAt || '') || a.id.localeCompare(b.id));
 }
@@ -130,7 +178,11 @@ export async function importExchange(store: string, policy: ArchivePolicy, excha
         totalBytes += data.length; if (totalBytes > MAX_ARCHIVE_BYTES) throw new Error('Archive exchange exceeds its byte limit.');
         bytes.set(hash, data);
     }
-    const object = async (hash: string) => { const data = bytes.get(digest(hash)); if (!data) throw new Error(`Exchange is missing original evidence: ${hash}`); return data; };
+    const object = async (hash: string) => {
+        const data = bytes.get(digest(hash));
+        if (!data) { const error: any = new Error(`Exchange is missing original evidence: ${hash}`); error.code = 'ENOENT'; throw error; }
+        return data;
+    };
     const records = exchange.records.map(inputRecord);
     await projectInputs(records, object, policy, verifier, true, progress);
     const index: ArchiveImportIndex = { schema: 'math-workspace.archive-import/v1', workId: policy.workId, records, objects: hashes.sort() };
@@ -160,14 +212,30 @@ export async function importExchange(store: string, policy: ArchivePolicy, excha
         return { imported, records: records.length, objects: hashes.length, alreadyPresent };
     });
 }
-export async function exportExchange(store: string, policy: ArchivePolicy): Promise<ArchiveExchange> {
+export async function exportExchange(store: string, policy: ArchivePolicy, recordId?: string): Promise<ArchiveExchange> {
     const catalog = await readCatalog(store, policy);
+    let inputs = catalog.inputs, hashes = catalog.objects;
+    if (recordId) {
+        const selected = selectRecord(catalog.inputs.map(item => ({ ...item, id: inputId(item) })), recordId);
+        const { id: _, ...input } = selected;
+        if (input.format === 'math-workspace.archive-volume/v1') {
+            const payload = await readObject(store, input.payload), object = cachedObjects(store);
+            const projection = await projectArchiveRecord({ input, payload, object });
+            inputs = [input];
+            hashes = new Set([input.payload, input.bundle, projection.policyDigest!, ...Object.values(projection.files)]);
+        }
+    }
     const objects: Record<string, string> = {};
     let total = 0;
-    for (const hash of [...catalog.objects].sort()) {
-        const data = await readObject(store, hash); total += data.length;
+    for (const hash of [...hashes].sort()) {
+        let data: any;
+        try { data = await readObject(store, hash); }
+        catch (error: any) { if (error.code !== 'ENOENT') throw error; continue; }
+        total += data.length;
         if (total > MAX_ARCHIVE_BYTES) throw new Error('Archive export exceeds its byte limit.');
         objects[hash] = data.toString('base64');
     }
-    return { schema: 'math-workspace.archive-exchange/v1', workId: policy.workId, records: catalog.inputs, objects };
+    // Original signature payloads/bundles remain mandatory, even when historical source bytes are absent.
+    for (const input of inputs) if (!objects[input.payload] || !objects[input.bundle]) throw new Error('Archive export is missing original signature evidence.');
+    return { schema: 'math-workspace.archive-exchange/v1', workId: policy.workId, records: inputs, objects };
 }

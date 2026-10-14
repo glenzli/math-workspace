@@ -315,24 +315,51 @@ Content enters the conversation input only when the user clicks the quote button
 
 ### Academic Archives
 
-Academic archives retain original drafts, signing evidence, and version relationships in the writing project's `.math-archive/` directory. This storage is separate from rebuildable Reader indexes and document stage labels. Only explicit `archive sign` or the Reader's Authenticate and sign action starts a signing operation. Reading, conversion, import, verification, and preparation do not sign, edit source prose, commit Git changes, or publish a work.
+Academic archives retain original drafts, signing evidence, and version relationships in the writing project's `.math-archive/` directory. This storage is separate from rebuildable Reader indexes and document stage labels. Daily signing uses explicit volumes and a total record; only `archive sign` or the Reader's Authenticate and sign action starts a new signature. Reading, conversion, import, verification, and preparation do not sign, edit source prose, commit Git changes, or publish a work.
 
 Declare a stable work ID, a file scope, and an accepted signing identity:
 
 ```bash
-math-workspace archive init --work-id my-book --title "My Book" --path book --identity author@example.com --issuer https://accounts.google.com
+math-workspace archive init --work-id my-book --title "My Book" --path book --volume vol-i=book/vol-i --volume vol-ii=book/vol-ii --volume-title "vol-i=Volume I" --volume-title "vol-ii=Volume II" --identity author@example.com --issuer https://accounts.google.com
 math-workspace archive prepare --label "September draft"
-math-workspace archive sign --prepared <returned-full-digest>
+math-workspace archive sign --prepared <returned-operation-digest> --auth-flow normal
 math-workspace archive verify
 ```
 
 Repeat `--path` for several source roots. Directory scopes recursively include `.md` files by default; use `--extension`, `--depth`, and `--exclude` to refine the scope. Explicitly selected files are captured as original bytes. Directory traversal skips hidden paths, Git, dependencies, and generated output, and rejects symbolic links. Include Lean source or build evidence explicitly when needed. Signing a build report neither reruns a proof nor establishes complete formalization.
 
-Preparation freezes original bytes and records their relative paths, full SHA-256 digests, scope, label, signer, and predecessor. A successor binds both the preceding record and its original bundle digest. The first native record binds the imported history indexes. `preparedAt` and a Git base commit are locators, not independently authenticated signing times. Records use UTF-8 JSON with keys sorted by UTF-8 byte order, no insignificant whitespace, one final LF, and safe integer values.
+Volumes are explicit archive-policy entries, `volumes: [{ id, title, paths }]`. Directory names, depth, and file counts never infer volumes. Repeat `--volume ID=PATH` to declare them and use `--volume-title ID=TITLE` for names; volumes cannot overlap. The policy's `scope` defines all work files, and volumes partition only part of that set. The total still covers outside-volume files. With no declared volumes, a total covers the entire scope as outside-volume files.
 
-After authentication, the workflow rechecks the source set, scope, identity, predecessor, and historical objects before atomically publishing the head. Existing valid bundles are reused on retry. Resume with the same `--prepared` digest; `archive recover-lock` releases a local abandoned lock only when its recorded process no longer exists. Signed records keep their original bytes. A project policy may be edited explicitly, while retaining the identities needed to verify older evidence.
+An existing project can update its policy using either form below. `--policy` reads a complete policy JSON containing the work ID, scope, identities, and volumes. Updates retain the stable work ID and accepted historical identities.
 
-The Reader's history icon, labeled Version history, opens a timeline with work snapshots and optional volume records, original text, source view, gaps, file comparisons, and stable-ID history. Historical reading does not substitute current workspace content or reference targets. Signature validity, source completeness, and current-source coverage are shown separately. Lean status remains with the existing Lean tools. The earliest occurrence in available evidence does not establish original authorship or priority.
+```bash
+math-workspace archive update-policy --volume vol-i=book/vol-i --volume vol-ii=book/vol-ii --volume-title "vol-i=Volume I" --volume-title "vol-ii=Volume II"
+math-workspace archive update-policy --policy archive-policy.json
+```
+
+Preparation freezes original bytes and records their relative paths, full SHA-256 digests, policy, label, signer, and predecessor. It reports which volumes need signatures, which original receipts can be reused, and the outside-volume files. Each `math-workspace.archive-volume/v1` binds an exact file set. Under the same policy and file mapping, an unchanged volume reuses its verified original record and bundle without a new signature or replacement signing time. Changed volumes are signed first, then `math-workspace.archive-total/v1` is generated and signed. The total binds each exact volume record and original bundle digest and includes the complete in-scope file mapping. Root documents, drafts, and review material remain covered even when they belong to no volume.
+
+A total successor binds both the preceding record and its original bundle digest. The first native record binds the imported history indexes. The returned `prepared` digest identifies a signing operation; the final total payload digest can differ. Retain `head.record` from the signing result for an independent `verify --expected-head` check. `preparedAt` and a Git base commit are locators, not independently authenticated signing times. Signed records use UTF-8 JSON with keys sorted by UTF-8 byte order, no insignificant whitespace, one final LF, and safe integer values.
+
+`--auth-flow normal` is the default and explicitly uses Cosign's browser authentication and localhost callback, including Reader background operations. Choose `--auth-flow device` when device authentication is needed. Each new signature may require authentication; the Reader shows the authentication link and signing progress, and displays a device code only when one is supplied. After authentication, the workflow rechecks the source set, policy, identity, predecessor, and historical objects before atomically publishing the head. A partial failure retains completed volume signatures and valid bundles. Retry the same `--prepared` operation digest; partial completion does not publish a total. Prepare again if source or policy no longer matches the plan. `archive recover-lock` releases a local abandoned lock only when its recorded process no longer exists.
+
+The Reader's history icon, labeled Version history, opens a timeline with totals and work snapshots, optional volume records, original text, source view, gaps, file comparisons, and stable-ID history. Preparation shows changed volumes, reused original receipts, completed new signatures, and outside-volume file digests. Total details show the bound volume receipts and provide independent volume exports. Action buttons use icons, hover text, and accessible names. Historical reading does not substitute current workspace content or reference targets. Signature validity, source completeness, and current-source coverage by the active head are shown separately. A valid historical signature can still have source gaps. Lean status remains with the existing Lean tools. The earliest occurrence in available evidence does not establish original authorship or priority.
+
+#### Daily History and Locally Hidden Records
+
+Existing single-snapshot records retain their original bytes. Hiding changes only the local daily list. Choose Include locally hidden records in the Reader to inspect, restore, or export them. The default `list` omits hidden rows; verification and full exports always include them. Hiding cannot bypass an invalid signature.
+
+```bash
+math-workspace archive list
+math-workspace archive list --include-hidden
+math-workspace archive hide --record <record-ID>
+math-workspace archive restore --record <record-ID>
+math-workspace archive hide --record <active-head-record-ID> --retire-head
+math-workspace archive verify
+math-workspace archive export --out all-evidence.json
+```
+
+`--retire-head` explicitly retains the original active branch and rolls the active head back to its original predecessor, or clears it when no predecessor exists. It does not delete, rewrite, or manufacture signed evidence. Restoring visibility does not reactivate a retired head. Later signing prepares a new total from the active head. Hiding alone does not change predecessors or the current-source coverage calculation.
 
 #### OET Conversion and Compatibility
 
@@ -346,7 +373,7 @@ math-workspace archive convert --format oet --from the-operator-evolution-theory
 math-workspace archive import-oet --from the-operator-evolution-theory/.signatures --initialize
 ```
 
-`convert` writes the exchange document and reports a suggested project policy. `import-oet --initialize` adopts the declared work scope and identities and performs cryptographic verification; it will not replace a different existing policy. The Reader previews the scope and identities before an explicit import action. Older OET tooling may keep producing its original formats, which can be converted and imported again. New native signing signs the declared source snapshot directly and does not require separate per-volume MANIFEST bundles.
+`convert` writes the exchange document and reports a suggested project policy. `import-oet --initialize` adopts the declared work scope and identities and performs cryptographic verification; it will not replace a different existing policy. The Reader previews the scope and identities before an explicit import action. Older handwritten volume and root MANIFEST histories remain readable, verifiable, and exportable. New signatures use native volume records and totals without rewriting old MANIFEST files or replacing original bundles. An OET volume policy should explicitly declare its nine actual volumes; other in-scope root, draft, and review files belong to the total's outside-volume coverage, not inferred volumes.
 
 #### Format Interface and Portable Evidence
 
@@ -360,6 +387,7 @@ A converter cannot supply a trusted verified status. Import checks object digest
 
 ```bash
 math-workspace archive export --out evidence.json
+math-workspace archive export --record <volume-record-ID> --out volume-evidence.json
 math-workspace archive import --from evidence.json
 math-workspace archive history --formal-id h-0123456789abcdef
 math-workspace archive show --record <record-ID> --file book/01.md
@@ -367,7 +395,7 @@ math-workspace archive compare --left <record-ID> --right <record-ID>
 math-workspace archive verify --expected-head <independently-retained-head-digest>
 ```
 
-An export includes original drafts and evidence for verification in another project copy under the chosen trust policy. Import preserves the original records and relationships. The receiving project's next native signing operation binds the import indexes; import time never replaces historical signing time. An independently retained head enables rollback checks. Verifying one history alone cannot establish that it is complete or current. Export does not publish anything, and the author chooses whether to share the private drafts it contains.
+A full export includes hidden history, original drafts, and evidence for verification in another project copy under the chosen trust policy. `export --record` exports the original evidence closure required by the selected record. An independent volume export includes its signed payload, original bundle, bound policy, and exact source bytes; compare its payload and bundle digests with the total's volume pointers. A volume receipt alone does not establish membership in an unavailable total or signing of the entire work. Import preserves the original records and relationships. The receiving project's next native signing operation binds the import indexes; import time never replaces historical signing time. An independently retained head enables rollback checks. Verifying one history alone cannot establish that it is complete or current. Export does not publish anything, and the author chooses whether to share the private drafts it contains.
 
 Signing and cryptographic verification require `cosign` and `openssl`. Verification uses the local Sigstore TrustedRoot cache when available, or Cosign's normal trust-root retrieval. Supply `--trusted-root` or `MATH_WORKSPACE_SIGSTORE_TRUSTED_ROOT` for an explicit trust file. Machine-specific paths do not enter signed records.
 
@@ -1043,24 +1071,51 @@ MCP 使用本地标准输入输出通信；它启动的 Reader 只绑定 `127.0.
 
 ## 学术留档
 
-学术留档把原稿、签名材料及版本关系保存在项目内的 `.math-archive/`。它独立于可重建的 Reader 索引，也独立于文档的“草稿 / 修订 / 稳定”标签。只有显式 `archive sign` 或 Reader 中的“认证并签署”会发起新签名；查看、转换、导入、核验和准备快照均不签署，也不修改正文、提交 Git 或发布作品。
+学术留档把原稿、签名材料及版本关系保存在项目内的 `.math-archive/`。它独立于可重建的 Reader 索引，也独立于文档的“草稿 / 修订 / 稳定”标签。日常签署采用显式分卷及总记录；只有 `archive sign` 或 Reader 中的“认证并签署”会发起新签名。查看、转换、导入、核验和准备均不签署，也不修改正文、提交 Git 或发布作品。
 
 新项目先声明稳定作品 ID、文件范围和签署身份：
 
 ```bash
-math-workspace archive init --work-id my-book --title "My Book" --path book --identity author@example.com --issuer https://accounts.google.com
+math-workspace archive init --work-id my-book --title "My Book" --path book --volume vol-i=book/vol-i --volume vol-ii=book/vol-ii --volume-title "vol-i=Volume I" --volume-title "vol-ii=Volume II" --identity author@example.com --issuer https://accounts.google.com
 math-workspace archive prepare --label "September draft"
-math-workspace archive sign --prepared <返回的完整摘要>
+math-workspace archive sign --prepared <返回的准备操作摘要> --auth-flow normal
 math-workspace archive verify
 ```
 
 `--path` 可重复，默认递归采集范围内的 `.md` 文件；`--extension`、`--depth` 和 `--exclude` 可进一步声明范围。明确指定的单个文件按原字节纳入。目录遍历跳过隐藏目录、Git、依赖及生成输出，拒绝符号链接。Lean 源码或构建材料需要明确纳入范围；签署一份构建记录不等于重新运行证明，也不表示全书已形式化。
 
-准备阶段冻结原始文件字节，记录相对路径、完整 SHA-256、范围、版本名称、签署身份及前驱。后继同时绑定前一份记录和前一份原始 bundle 的摘要；首次通用记录绑定已导入历史的索引摘要。`preparedAt` 和 Git 基础提交仅作定位信息，不替代签名时间。记录按 UTF-8 JSON 编码，键按 UTF-8 字节顺序排序，不留多余空格，末尾一个 LF，数值限于安全整数。
+分卷属于归档策略的 `volumes: [{ id, title, paths }]`，必须明确声明；不从目录名、目录层级或文件数量推断。`--volume ID=PATH` 可重复声明，`--volume-title ID=TITLE` 设置名称；卷之间不能重叠。`scope` 决定作品的全部文件范围，分卷仅划分其中的文件，卷外文件仍由总记录覆盖。没有分卷时生成仅含卷外文件的总记录。
 
-认证完成后再次检查正文集合、范围、身份、前驱及历史对象，再原子更新链头。失败时不覆盖原有有效 bundle；用同一个 `--prepared` 摘要恢复。若进程退出留下本机锁，`archive recover-lock` 仅在记录的本机进程已不存在时释放它。历史记录保持原字节；策略文件可显式编辑，但应保留仍需核验的旧签署身份。
+已有项目可通过以下任一种方式更新策略。`--policy` 指向包含作品 ID、范围、身份和分卷的完整策略 JSON；更新保留稳定作品 ID 和已接受的历史身份。
 
-Reader 工具栏的历史图标（提示为“版本记录”）打开时间线，默认显示作品快照，可加入分卷记录，查看原稿、源码、缺失引用、文件差异以及按稳定 ID 找到的历史声明。原稿阅读不套用当前工作区正文或引用目标。界面分别显示签名核验、原稿完整性与当前内容是否被链头覆盖；Lean 状态仍由原有 Lean 功能解释。某个对象在现有材料中的最早出现不是原创性或优先权裁定。
+```bash
+math-workspace archive update-policy --volume vol-i=book/vol-i --volume vol-ii=book/vol-ii --volume-title "vol-i=Volume I" --volume-title "vol-ii=Volume II"
+math-workspace archive update-policy --policy archive-policy.json
+```
+
+准备阶段冻结原始文件字节，记录相对路径、完整 SHA-256、策略、版本名称、签署身份及前驱，并列出每卷的新签或复用计划及卷外文件。`math-workspace.archive-volume/v1` 逐卷绑定精确文件集合；相同策略和文件集合下，核验有效的未变卷复用原始记录及 bundle，不重签、不改变旧签署时间。变化的卷先签署，再生成并签署 `math-workspace.archive-total/v1`：总记录绑定每卷记录及其原始 bundle 的完整摘要，同时包含全部范围内文件的精确映射，根目录正文、探索稿与复核稿等卷外材料不会因未归入卷而被遗漏。
+
+总记录后继同时绑定前一份记录和前一份原始 bundle 的摘要；首次通用记录绑定已导入历史的索引摘要。准备返回的 `prepared` 是签署操作摘要，最终总记录的载荷摘要可能不同；保存签署结果中的 `head.record`，供 `verify --expected-head` 独立检查。`preparedAt` 和 Git 基础提交仅作定位信息，不替代签名时间。签署记录按 UTF-8 JSON 编码，键按 UTF-8 字节顺序排序，不留多余空格，末尾一个 LF，数值限于安全整数。
+
+`--auth-flow normal` 是默认流程，显式使用 Cosign 的普通浏览器认证与本机 localhost 回调，适用于 Reader 后台操作；需要设备认证时可选择 `--auth-flow device`。每份新签材料可能分别需要认证，Reader 显示认证入口和签署进度，有设备码时才显示设备码。认证完成后再次检查正文集合、策略、身份、前驱及历史对象，再原子更新链头。中途失败保留已完成卷签名及有效 bundle，用同一个 `--prepared` 操作摘要重试；不把部分完成当作已发布的总记录。准备后正文或策略改变时需重新准备。若进程退出留下本机锁，`archive recover-lock` 仅在记录的本机进程已不存在时释放它。
+
+Reader 工具栏的历史图标（提示为“版本记录”）打开时间线，默认显示总记录与作品快照，可加入分卷记录，查看原稿、源码、缺失引用、文件差异以及按稳定 ID 找到的历史声明。准备区列出变化的卷、复用的原始卷证据、已完成的新签和卷外文件摘要；总记录详情展示绑定的卷证据，并可直接独立导出各卷。操作按钮通过图标、hover 提示和无障碍名称说明用途。原稿阅读不套用当前工作区正文或引用目标。界面分别显示签名核验、原稿完整性与当前内容是否被当前链头覆盖；旧材料可以签名有效而原稿有缺口，Lean 状态仍由原有 Lean 功能解释。某个对象在现有材料中的最早出现不是原创性或优先权裁定。
+
+### 日常列表与本机隐藏历史
+
+已有单快照记录继续保留原始字节。隐藏只修改本机日常列表，可在 Reader 中选择“含本机隐藏记录”查看、恢复或导出；默认 `list` 不列出隐藏记录，但核验和完整导出始终包含它们，隐藏不能跳过无效签名。
+
+```bash
+math-workspace archive list
+math-workspace archive list --include-hidden
+math-workspace archive hide --record <记录 ID>
+math-workspace archive restore --record <记录 ID>
+math-workspace archive hide --record <当前链头记录 ID> --retire-head
+math-workspace archive verify
+math-workspace archive export --out all-evidence.json
+```
+
+`--retire-head` 是明确的链头退役操作：保存原链头分支，再回退到其原前驱，没有前驱时清空活动链头；不会删除、重写或伪造签署材料。恢复可见性不重新激活已退役链头。后续签署依据活动链头准备新总记录；仅隐藏一条记录不改变前驱关系或当前内容覆盖判断。
 
 ### OET 格式转换与兼容
 
@@ -1074,7 +1129,7 @@ math-workspace archive convert --format oet --from the-operator-evolution-theory
 math-workspace archive import-oet --from the-operator-evolution-theory/.signatures --initialize
 ```
 
-`convert` 输出标准交换文件及建议的项目策略。`import-oet --initialize` 采用该作品声明的范围和身份，并执行完整验签；已有策略不同时拒绝覆盖。Reader 的导入流程先展示这些范围和身份，待用户明确执行后才写入。旧 OET 工具继续维护原格式；之后产生的新旧记录可再次转换、导入。新通用签署不依赖逐卷 MANIFEST bundle，直接签署已声明范围内的原稿快照。
+`convert` 输出标准交换文件及建议的项目策略。`import-oet --initialize` 采用该作品声明的范围和身份，并执行完整验签；已有策略不同时拒绝覆盖。Reader 的导入流程先展示这些范围和身份，待用户明确执行后才写入。旧手写分卷 MANIFEST 与根 MANIFEST 历史继续可读、可核验和可导出。之后的新签使用通用卷记录及总记录，不改写旧 MANIFEST 或替换旧 bundle。OET 的分卷策略应明确列出九个实际卷；根目录、draft 与 review 等其余范围内文件作为卷外材料进入总记录，不把这些目录误算为卷。
 
 ### 格式接口与验证材料
 
@@ -1088,6 +1143,7 @@ math-workspace archive import-oet --from the-operator-evolution-theory/.signatur
 
 ```bash
 math-workspace archive export --out evidence.json
+math-workspace archive export --record <分卷记录 ID> --out volume-evidence.json
 math-workspace archive import --from evidence.json
 math-workspace archive history --formal-id h-0123456789abcdef
 math-workspace archive show --record <记录 ID> --file book/01.md
@@ -1095,7 +1151,7 @@ math-workspace archive compare --left <记录 ID> --right <记录 ID>
 math-workspace archive verify --expected-head <独立保存的链头摘要>
 ```
 
-导出材料包含原稿和原始证据，可在另一项目副本中按所选择的信任策略独立核验。导入保留原记录及原关系，接收项目后续首次签署通过导入索引接续这些材料；不会把导入时间视为历史签署时间。只有提供独立保存的链头才能检查是否回退，单独验证一段历史不能证明它是完整的最新历史。没有对外发布动作；导出包含私人原稿，是否分享由作者决定。
+完整导出包含隐藏历史、原稿和原始证据，可在另一项目副本中按所选择的信任策略独立核验。`export --record` 为指定记录导出所需原始证据闭包；分卷可独立导出其签署载荷、原 bundle、绑定策略及精确文件原稿，再与总记录中的卷载荷和 bundle 摘要比对。仅有分卷证据不表示它属于某个未提供的总记录，也不表示整部作品已签署。导入保留原记录及原关系，接收项目后续首次签署通过导入索引接续这些材料；不会把导入时间视为历史签署时间。只有提供独立保存的链头才能检查是否回退，单独验证一段历史不能证明它是完整的最新历史。没有对外发布动作；导出包含私人原稿，是否分享由作者决定。
 
 运行签署或密码学核验需要可用的 `cosign` 与 `openssl`。默认采用本地 Sigstore TrustedRoot 缓存，或者 Cosign 自身的信任根获取流程；`--trusted-root` 或 `MATH_WORKSPACE_SIGSTORE_TRUSTED_ROOT` 可指定可信根文件。机器路径不进入签署记录。
 

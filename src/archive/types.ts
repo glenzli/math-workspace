@@ -1,7 +1,9 @@
 /** Portable evidence belongs to the writing project; views and verification are derived. */
 export interface ArchiveIdentity { identity: string; issuer: string }
-export interface ArchiveAuthentication { url: string; code: string }
+export interface ArchiveAuthentication { url: string; code?: string; flow?: 'normal' | 'device' }
+export type ArchiveAuthFlow = 'normal' | 'device';
 export interface ArchiveScope { paths: string[]; extensions: string[]; maxDepth?: number; exclude?: string[] }
+export interface ArchiveVolume { id: string; title: string; paths: string[] }
 export interface ArchivePolicy {
     schema: 'math-workspace.archive-policy/v1';
     workId: string;
@@ -9,6 +11,7 @@ export interface ArchivePolicy {
     scope: ArchiveScope;
     identities: ArchiveIdentity[];
     signingIdentity: ArchiveIdentity;
+    volumes?: ArchiveVolume[];
 }
 export interface ArchivePointer { record: string; bundle: string }
 export interface ArchiveNativeRecord {
@@ -23,6 +26,27 @@ export interface ArchiveNativeRecord {
     scope: ArchiveScope;
     files: Record<string, string>;
     sourceLocator?: { gitBaseCommit: string; meaning: string };
+}
+export interface ArchiveVolumeReceipt extends ArchivePointer { id: string }
+export interface ArchiveVolumeRecord {
+    schema: 'math-workspace.archive-volume/v1';
+    workId: string;
+    volumeId: string;
+    title: string;
+    preparedAt: string;
+    signer: ArchiveIdentity;
+    policy: string;
+    files: Record<string, string>;
+}
+export interface ArchiveTotalRecord extends Omit<ArchiveNativeRecord, 'schema'> {
+    schema: 'math-workspace.archive-total/v1';
+    policy: string;
+    volumes: ArchiveVolumeReceipt[];
+}
+/** Preparation is not evidence. Total payload bytes exist only after exact volume bundles exist. */
+export interface ArchivePlan extends Omit<ArchiveTotalRecord, 'schema' | 'volumes'> {
+    schema: 'math-workspace.archive-plan/v1';
+    volumes: Array<{ id: string; record: string; bundle: string | null }>;
 }
 /** A converter emits original bytes plus a format hint. It cannot assert verification. */
 export interface ArchiveInputRecord {
@@ -41,7 +65,7 @@ export interface ArchiveMissing { path: string; expected: string }
 export interface ArchiveProjection {
     workId: string;
     label: string;
-    kind: 'snapshot' | 'root' | 'volume';
+    kind: 'snapshot' | 'root' | 'volume' | 'total';
     files: Record<string, string>;
     missing: ArchiveMissing[];
     sequence?: number;
@@ -51,6 +75,11 @@ export interface ArchiveProjection {
     signer?: ArchiveIdentity;
     sourceLocator?: unknown;
     additionalSignatures?: Array<{ payload: string; bundle: string }>;
+    policyDigest?: string;
+    volumeId?: string;
+    volumes?: ArchiveVolumeReceipt[];
+    outside?: Record<string, string>;
+    hidden?: boolean;
 }
 export interface ArchiveFormatContext {
     input: ArchiveInputRecord;
