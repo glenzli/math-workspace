@@ -14,10 +14,15 @@ import {
     Eye,
     EyeOff,
     File,
+    FileCode2,
+    FileWarning,
+    FoldVertical,
     GitCompareArrows,
     History,
     ListTree,
     ListOrdered,
+    ListChecks,
+    ListPlus,
     Link2,
     Link2Off,
     LocateFixed,
@@ -29,16 +34,22 @@ import {
     PanelLeftClose,
     PanelLeftOpen,
     Plus,
+    Play,
     RefreshCw,
+    RotateCcw,
+    Save,
     ScanSearch,
+    ScanText,
     Search,
     Sigma,
     ShieldCheck,
     Star,
+    Square,
     TextCursor,
     TextSelect,
     Trash2,
     TriangleAlert,
+    UnfoldVertical,
     Workflow,
     X,
     type IconNode
@@ -81,6 +92,17 @@ export type ReaderIconName =
     | 'expand'
     | 'search'
     | 'verify'
+    | 'save'
+    | 'reset'
+    | 'play'
+    | 'stop'
+    | 'fold'
+    | 'unfold'
+    | 'list-plus'
+    | 'assumptions'
+    | 'proof-scope'
+    | 'issue'
+    | 'locate-lean'
     | 'stage-draft'
     | 'stage-revising'
     | 'stage-stable'
@@ -141,6 +163,17 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     expand: Maximize,
     search: Search,
     verify: ShieldCheck,
+    save: Save,
+    reset: RotateCcw,
+    play: Play,
+    stop: Square,
+    fold: FoldVertical,
+    unfold: UnfoldVertical,
+    'list-plus': ListPlus,
+    assumptions: ListChecks,
+    'proof-scope': ScanText,
+    issue: FileWarning,
+    'locate-lean': FileCode2,
     'stage-draft': documentStageIcon(),
     'stage-revising': documentStageIcon([
         ['path', { d: 'm8 18 .8-3.2 5.4-5.4 2.4 2.4-5.4 5.4L8 18Z' }]
@@ -171,4 +204,22 @@ export function readerIcon(name: ReaderIconName, size = 16): SVGSVGElement {
 
 export function replaceReaderButtonIcon(button: HTMLElement, name: ReaderIconName, size = 16): void {
     button.replaceChildren(readerIcon(name, size));
+}
+
+/** Update accessible state without replacing the action's glyph. */
+export function describeReaderIconAction(button: HTMLButtonElement, label: string, reason = ''): void {
+    const description = reason ? `${label} · ${reason}` : label;
+    button.dataset.readerActionLabel = label;
+    button.setAttribute('title', description);
+    button.setAttribute('aria-label', description);
+    if (button.dataset.tooltip !== undefined) button.dataset.tooltip = description;
+    else button.dataset.readerTooltip = description;
+}
+
+export function readerIconAction(icon: ReaderIconName, label: string, tooltip: 'viewport' | 'local' = 'viewport'): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'reader-icon-action';
+    if (tooltip === 'local') button.dataset.tooltip = '';
+    replaceReaderButtonIcon(button, icon); describeReaderIconAction(button, label);
+    return button;
 }

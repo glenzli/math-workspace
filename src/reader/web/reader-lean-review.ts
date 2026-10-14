@@ -9,6 +9,7 @@ import { ReaderLeanSource, leanSourceSnapshot, type LeanSourceTarget } from './r
 import { leanReviewDiffEntries, renderLeanSourceDiff } from './reader-lean-source-diff';
 import { ReaderLeanAudit, type LeanAuditSelection } from './reader-lean-audit';
 import { ReaderLeanAssistance } from './reader-lean-assistance';
+import { describeReaderIconAction, readerIconAction, type ReaderIconName } from './reader-icons';
 import type { LeanAssistanceCandidate, LeanAssistanceBinding } from '../../lean/lean-assistance';
 
 type Language = 'zh' | 'en';
@@ -88,6 +89,7 @@ const copy = {
         queue: '本页／本章审阅队列', queuePending: '未审阅或已变化', queueAll: '全部对象', queueUnanchored: '无 Lean 锚点',
         queueEmpty: '此筛选下没有对象。', queueFailed: '本页队列未能读取。', previousObject: '上一项', nextObject: '下一项',
         queueRefreshing: '正在更新队列…',
+        firstObject: '已是队列第一项', lastObject: '已是队列最后一项', busyAction: '请等待当前操作完成',
         queueNoObjects: '本页或本章尚无可审阅的正式对象。',
         unanchored: '无锚点', queueSummary: (pending: number, stale: number, unanchored: number) => `未审 ${pending} · 已变化 ${stale} · 无锚点 ${unanchored}`,
         reviewTitle: '人工审阅记录', reviewHint: '手动列出需要核对的子主张，并关联一个或多个 Lean 声明；未关联不自动表示缺少证明。',
@@ -154,6 +156,7 @@ const copy = {
         queue: 'Page / chapter review queue', queuePending: 'Unreviewed or changed', queueAll: 'All objects', queueUnanchored: 'Without Lean anchors',
         queueEmpty: 'No objects match this filter.', queueFailed: 'Could not read this page’s queue.', previousObject: 'Previous object', nextObject: 'Next object',
         queueRefreshing: 'Updating the queue…',
+        firstObject: 'Already at the first queue item', lastObject: 'Already at the last queue item', busyAction: 'Wait for the current operation to finish',
         queueNoObjects: 'This page or chapter has no formal objects to review.',
         unanchored: 'No anchor', queueSummary: (pending: number, stale: number, unanchored: number) => `${pending} unreviewed · ${stale} changed · ${unanchored} without anchors`,
         reviewTitle: 'Human review record', reviewHint: 'Write subclaims manually and link each to one or more Lean declarations. An unlinked declaration does not automatically imply a missing proof.',
@@ -187,8 +190,15 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', class
     if (className) result.className = className;
     return result;
 }
-function button(text: string, action: () => void, key = ''): HTMLButtonElement {
-    const result = element('button', text, 'reader-lean-review-button');
+const actionIcons: Record<string, ReaderIconName> = {
+    close: 'x', retry: 'reload', refresh: 'reload', cancel: 'stop', 'previous-object': 'chevron-left', 'next-object': 'chevron-right',
+    'locate-prose': 'locate', 'full-source': 'locate-lean', 'definition-back': 'arrow-left', expand: 'definition',
+    acknowledge: 'reset', reload: 'reload', restore: 'history', 'add-claim': 'plus', save: 'save',
+    'unmap-missing': 'integration-unmanaged', 'remove-claim': 'trash', assist: 'quote', 'copy-assist': 'copy'
+};
+function button(text: string, action: () => void, key = '', icon = actionIcons[key]): HTMLButtonElement {
+    const result = icon ? readerIconAction(icon, text) : element('button', text);
+    result.classList.add('reader-lean-review-button');
     result.type = 'button';
     if (key) result.dataset.leanAction = key;
     result.addEventListener('click', action);
@@ -608,7 +618,12 @@ export class ReaderLeanReview {
             this.draftStatus.textContent = this.draftOutdated(draft) ? w.outdatedDraft : draft.dirty ? w.unsaved : this.payload?.review.record ? w.saved : w.unreviewed;
             this.draftStatus.classList.toggle('is-warning', this.draftOutdated(draft) || draft.dirty);
         }
-        if (this.saveButton) { this.saveButton.disabled = this.busy || this.draftOutdated(draft); this.saveButton.textContent = this.saving ? w.saving : w.save; }
+        if (this.saveButton) {
+            this.saveButton.disabled = this.busy || this.draftOutdated(draft);
+            this.saveButton.setAttribute('aria-busy', String(this.saving));
+            describeReaderIconAction(this.saveButton, this.saving ? w.saving : w.save,
+                this.draftOutdated(draft) ? w.outdatedDraft : this.busy && !this.saving ? w.busyAction : '');
+        }
         const summary = this.slots.get('review')?.querySelector('summary');
         if (summary) summary.textContent = w.reviewRecords + ' · ' + (this.draftOutdated(draft) ? w.outdatedDraft : draft.dirty ? w.unsaved : this.payload?.review.record ? w.saved : w.unreviewed);
     }
@@ -766,7 +781,8 @@ export class ReaderLeanReview {
         machine.append(element('h3', w.machine), element('p', ({ current: w.evidenceCurrent, stale: w.evidenceStale, unavailable: w.evidenceUnavailable, partial: w.evidencePartial })[payload.evidence.state], 'reader-lean-review-state is-' + payload.evidence.state));
         const actions = element('div', '', 'reader-lean-review-actions');
         const refresh = button(w.refresh, () => { void this.startJob('refresh'); }, 'refresh');
-        refresh.title = w.refreshHint; refresh.disabled = this.busy || ['queued', 'running'].includes(this.job?.status || '');
+        refresh.disabled = this.busy || ['queued', 'running'].includes(this.job?.status || '');
+        describeReaderIconAction(refresh, w.refresh, refresh.disabled ? w.busyAction + ' · ' + w.refreshHint : w.refreshHint);
         actions.append(refresh);
         if (this.job && ['queued', 'running'].includes(this.job.status)) actions.append(button(w.cancel, () => { void this.cancelJob(); }, 'cancel'));
         if (this.job) actions.append(element('span', this.jobText(this.job), 'reader-lean-review-job'));
@@ -794,6 +810,8 @@ export class ReaderLeanReview {
         const index = items.findIndex(item => item.id === this.active!.id), navigation = element('div', '', 'reader-lean-review-actions');
         const previous = button(w.previousObject, () => { if (index > 0) void this.openQueueItem(items[index - 1]); }, 'previous-object'); previous.disabled = index <= 0;
         const next = button(w.nextObject, () => { const nextItem = items[index + 1]; if (nextItem) void this.openQueueItem(nextItem); }, 'next-object'); next.disabled = index >= items.length - 1;
+        if (previous.disabled) describeReaderIconAction(previous, w.previousObject, w.firstObject);
+        if (next.disabled) describeReaderIconAction(next, w.nextObject, w.lastObject);
         navigation.append(select, previous, next); queue.append(navigation);
         if (this.queueError) queue.append(element('p', w.queueFailed));
         else if (!items.length) queue.append(element('p', w.queueEmpty));
@@ -850,7 +868,7 @@ export class ReaderLeanReview {
     }
     private proseSnippet(source: SourceSnippet, title: string): HTMLElement {
         const w = this.words(), section = element('section', '', 'reader-lean-review-source-card');
-        const header = element('header'); header.append(element('strong', title), button(w.locate, () => this.host.locate(source)));
+        const header = element('header'); header.append(element('strong', title), button(w.locate, () => this.host.locate(source), 'locate-prose'));
         section.append(header, element('p', sourceLabel(source), 'reader-lean-review-location'));
         const content = element('div', '', 'reader-article reader-lean-review-prose'); content.innerHTML = this.host.renderProse(source);
         content.querySelectorAll('[data-reader-lean-anchor], [data-reader-dependency]').forEach(marker => marker.remove());
@@ -892,6 +910,7 @@ export class ReaderLeanReview {
             range: declaration.source ? { start: { line: declaration.source.startLine - 1, character: 0 }, end: { line: declaration.source.endLine, character: 0 } } : undefined,
             fallback: declaration.source }); }, 'full-source');
         fullSource.disabled = !declaration.source?.filePath && !declaration.compiledSource?.filePath;
+        if (fullSource.disabled) describeReaderIconAction(fullSource, w.fullSource, w.sourceUnavailable);
         fullSource.dataset.leanSourceDeclaration = declaration.key; source.append(fullSource);
         if (declaration.source?.truncated) source.append(element('p', w.truncated, 'reader-lean-review-warning'));
         if (declaration.source?.rangeKind === 'context') source.append(element('p', w.sourceContextWarning, 'reader-lean-review-warning'));
@@ -958,7 +977,8 @@ export class ReaderLeanReview {
             else {
                 content.append(element('p', w.definitionUnavailable));
                 const selected = this.selectedDefinition;
-                const read = button(w.readDefinition, () => { void this.startJob('expand', selected); }, 'expand'); read.disabled = this.busy || ['queued', 'running'].includes(this.job?.status || ''); content.append(read);
+                const read = button(w.readDefinition, () => { void this.startJob('expand', selected); }, 'expand'); read.disabled = this.busy || ['queued', 'running'].includes(this.job?.status || '');
+                if (read.disabled) describeReaderIconAction(read, w.readDefinition, w.busyAction); content.append(read);
             }
             if (this.definition?.diagnostic) content.append(this.diagnostics([this.definition.diagnostic])); section.append(content);
         }
@@ -1013,6 +1033,7 @@ export class ReaderLeanReview {
         if (this.draftOutdated(draft)) {
             const actions = element('div', '', 'reader-lean-review-actions');
             const acknowledge = button(w.acknowledge, () => this.acknowledge(), 'acknowledge'); acknowledge.disabled = draft.needsReload;
+            if (acknowledge.disabled) describeReaderIconAction(acknowledge, w.acknowledge, w.conflict);
             actions.append(button(w.retry, () => { void this.load(this.active!); }, 'reload'), acknowledge);
             if (this.payload!.review.record) actions.append(button(w.restore, () => { this.drafts.set(draftKey(this.active!.projectId, this.active!.id), this.newDraft(this.payload!)); this.selectedClaim = this.currentDraft()!.subclaims[0]?.id || ''; this.render(); }, 'restore'));
             section.append(actions);
@@ -1038,7 +1059,7 @@ export class ReaderLeanReview {
             const claim: ReviewSubclaim = { id: 'claim-' + crypto.randomUUID(), text: '', note: '', verdict: 'undecided', declarationKeys: [] };
             draft.subclaims.push(claim); this.selectedClaim = claim.id; this.changed(); this.render();
             this.section.querySelector<HTMLElement>('[data-lean-focus="claim-text"]')?.focus();
-        }, 'add-claim'); addClaim.disabled = draft.subclaims.length >= 80; addClaim.title = w.maximumClaims; navigation.append(addClaim);
+        }, 'add-claim'); addClaim.disabled = draft.subclaims.length >= 80; describeReaderIconAction(addClaim, w.addClaim, addClaim.disabled ? w.maximumClaims : ''); navigation.append(addClaim);
         claims.append(navigation);
         const claim = draft.subclaims.find(item => item.id === this.selectedClaim);
         if (claim) claims.append(this.renderClaim(claim));
@@ -1191,7 +1212,7 @@ export class ReaderLeanReview {
         });
         if (context.truncated) preview.append(element('p', w.boundedContext, 'reader-lean-review-warning'));
         section.append(element('p', w.assistHint, 'reader-lean-review-hint'), preview,
-            button(this.host.canAssist() ? w.assist : w.copyAssist, () => { void this.assist(); }, 'assist'));
+            button(this.host.canAssist() ? w.assist : w.copyAssist, () => { void this.assist(); }, 'assist', this.host.canAssist() ? 'quote' : 'copy'));
         if (this.host.canAssist()) section.append(button(w.copyAssist, () => { void this.assist(true); }, 'copy-assist'));
         return section;
     }

@@ -2,6 +2,7 @@ import type { LeanReviewResponse, ReviewVerdict } from '../../lean/lean-review';
 import type { AuditAnchorInput, AuditCategory, AuditCorrespondence, AuditIssue, AuditIssueStatus, AuditLink,
     AuditRange, AuditSource, LeanAuditOverview, LeanAuditResponse, LeanAuditReport } from '../../lean/lean-audit';
 import { copyReaderText } from './reader-clipboard';
+import { describeReaderIconAction, readerIconAction, type ReaderIconName } from './reader-icons';
 import './reader-lean-audit.css';
 
 export interface LeanAuditSelection {
@@ -45,8 +46,15 @@ const statusZh = { open: '未解决', resolved: '已解决', dismissed: '已撤�
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = ''): HTMLElementTagNameMap[K] {
     const value = document.createElement(tag); value.textContent = text; if (className) value.className = className; return value;
 }
-function action(text: string, name: string, run: () => void): HTMLButtonElement {
-    const button = el('button', text); button.type = 'button'; button.dataset.leanAuditAction = name; button.addEventListener('click', run); return button;
+const actionIcons: Record<string, ReaderIconName> = {
+    reload: 'reload', overview: 'contents', export: 'download', assist: 'quote', 'capture-lean': 'copy-line',
+    'remove-pair': 'trash', 'add-pair': 'plus', 'save-link': 'save', 'cancel-link': 'x',
+    'jump-prose': 'locate', 'jump-lean': 'locate-lean', 'recheck-link': 'scan', 'edit-link': 'marker-pen',
+    'create-issue': 'issue', 'edit-issue': 'marker-pen', 'recheck-issue': 'scan', 'save-issue': 'save', 'cancel-issue': 'x'
+};
+function action(text: string, name: string, run: () => void, icon = actionIcons[name]): HTMLButtonElement {
+    const button = icon ? readerIconAction(icon, text) : el('button', text);
+    button.type = 'button'; button.dataset.leanAuditAction = name; button.addEventListener('click', run); return button;
 }
 function newDraft(): LinkDraft { return { mode: 'create', reviewer: '', note: '', verdict: 'undecided', correspondences: [] }; }
 function position(content: string, offset: number, startLine: number): { line: number; character: number } {
@@ -228,6 +236,7 @@ export class ReaderLeanAudit {
             action(this.t('项目总览', 'Project overview'), 'overview', () => {
                 this.showOverview = !this.showOverview; this.render(); if (this.showOverview && this.active) void this.loadOverview(this.active);
             }), action(this.t('导出审阅报告', 'Export review report'), 'export', () => { void this.exportReport(); }));
+        head.querySelector('[data-lean-audit-action="overview"]')?.setAttribute('aria-pressed', String(this.showOverview));
         this.section.append(head, el('p', this.t('人工选择两侧原文，记录对应范围、假设/符号及问题。关联结论与整对象结论分别显示；构建或 AI 建议不会更新人工结论。',
             'Select exact text on both sides and record scope, assumptions/symbols and issues. Link verdicts and object verdicts are independent; builds or AI suggestions never update a human decision.'), 'reader-lean-audit-hint'));
         if (this.error) { const error = el('p', this.error, 'reader-lean-audit-warning'); error.setAttribute('role', 'alert'); this.section.append(error); }
@@ -239,9 +248,13 @@ export class ReaderLeanAudit {
         if (this.issueDraft) this.section.append(this.renderIssueEditor());
         this.section.append(this.renderHistory());
         const assist = el('div', '', 'reader-lean-audit-actions');
-        assist.append(action(this.host.canAssist?.() ? this.t('引用位置审阅到会话', 'Quote source audit in conversation') : this.t('复制审阅材料', 'Copy audit context'), 'assist', () => { void this.assist(); }));
+        assist.append(action(this.host.canAssist?.() ? this.t('引用位置审阅到会话', 'Quote source audit in conversation') : this.t('复制审阅材料', 'Copy audit context'), 'assist', () => { void this.assist(); }, this.host.canAssist?.() ? 'quote' : 'copy'));
         this.section.append(assist);
         if (this.showOverview) this.section.append(this.renderOverview());
+    }
+    private describeActionState(button: HTMLButtonElement, reason: string): void {
+        describeReaderIconAction(button, button.dataset.readerActionLabel!, button.disabled
+            ? this.busy ? this.t('请等待当前操作完成', 'Wait for the current operation to finish') : reason : '');
     }
     private renderSourcePicker(side: 'prose' | 'lean'): HTMLElement {
         const section = el('div', '', 'reader-lean-audit-source-picker'), sources = side === 'prose' ? this.payload!.proseSources : this.payload!.leanSources;
@@ -275,6 +288,7 @@ export class ReaderLeanAudit {
                     this.capture('lean', { ...source, fileHash: this.selected.sourceHash! }, this.selected.range!);
                 });
                 use.disabled = this.busy || !this.sourceSelectionValid(source);
+                this.describeActionState(use, this.t('请在源码查看器中选择此声明的非空范围', 'Select a nonempty range for this declaration in the source viewer'));
                 section.append(use);
             }
         } else section.append(el('p', this.t('当前对象没有可选择的来源。', 'This object has no selectable source.')));
@@ -295,7 +309,12 @@ export class ReaderLeanAudit {
         picker?.querySelector('.reader-lean-audit-capture')?.remove();
         const preview = el('div', '', 'reader-lean-audit-capture'); preview.append(el('strong', this.t('已选择：', 'Selected: ') + rangeLabel(anchor)), el('pre', quote || this.t('保存时核对当前选区原文。', 'Current selection is checked on save.'))); picker?.append(preview);
         const save = this.section.querySelector<HTMLButtonElement>('[data-lean-audit-action="save-link"]');
-        if (save) save.disabled = this.busy || this.outdated || !this.draftCurrent(this.draft) || !this.selectionReady();
+        if (save) {
+            save.disabled = this.busy || this.outdated || !this.draftCurrent(this.draft) || !this.selectionReady();
+            this.describeActionState(save, this.outdated || !this.draftCurrent(this.draft)
+                ? this.t('草稿依据的材料或审阅版本已变化，请重新读取并核对', 'Draft material or review revisions changed. Reload and recheck')
+                : this.t('请先选择当前两侧原文', 'Select both current source ranges first'));
+        }
     }
     private renderLinkEditor(): HTMLElement {
         const editor = el('section', '', 'reader-lean-audit-link-editor');
@@ -317,7 +336,8 @@ export class ReaderLeanAudit {
         const add = action(this.t('添加假设 / 符号', 'Add assumption / symbol'), 'add-pair', () => {
             this.touchLinkDraft();
             this.draft.correspondences.push({ kind: 'assumption', prose: '', lean: '', note: '' }); this.render();
-        }); add.disabled = this.busy || this.draft.correspondences.length >= 40; pairs.append(add); editor.append(pairs);
+        }); add.disabled = this.busy || this.draft.correspondences.length >= 40;
+        this.describeActionState(add, this.t('最多记录 40 项假设或符号对应', 'At most 40 assumption or symbol correspondences')); pairs.append(add); editor.append(pairs);
         const actions = el('div', '', 'reader-lean-audit-actions'), save = action(this.t('保存此位置关联', 'Save this source association'), 'save-link', () => {
             const draft = this.draft;
             void this.save({ action: draft.mode === 'create' ? 'create-link' : draft.mode === 'edit' ? 'edit-link' : 'recheck-link',
@@ -325,6 +345,9 @@ export class ReaderLeanAudit {
                 correspondences: draft.correspondences, expectedRevision: draft.baseRevision, evidenceFingerprint: draft.evidenceFingerprint });
         });
         save.disabled = this.busy || this.outdated || !this.draftCurrent(this.draft) || (this.draft.mode !== 'edit' && !this.selectionReady()); actions.append(save);
+        this.describeActionState(save, this.outdated || !this.draftCurrent(this.draft)
+            ? this.t('草稿依据的材料或审阅版本已变化，请重新读取并核对', 'Draft material or review revisions changed. Reload and recheck')
+            : this.t('请先选择当前两侧原文', 'Select both current source ranges first'));
         if (!this.draftCurrent(this.draft)) editor.append(el('p', this.t('此草稿基于旧审阅版本，已保留供参考。取消后重新打开当前记录或重新选择，才能再次保存。', 'This draft uses an older audit revision and is retained for reference. Cancel and reopen the current record or reselect before saving.'), 'reader-lean-audit-warning'));
         if (this.draft.mode !== 'edit' && (this.draft.prose || this.draft.lean) && !this.selectionReady()) editor.append(el('p', this.t('请在当前证据和人工分项版本下重新选择两侧原文。', 'Select both ranges under the current evidence and human subclaim version.'), 'reader-lean-audit-hint'));
         if (this.draft.mode !== 'create' || this.draft.baseRevision !== undefined) actions.append(action(this.t('取消当前草稿', 'Cancel current draft'), 'cancel-link', () => { this.draft = newDraft(); this.render(); }));
@@ -348,11 +371,13 @@ export class ReaderLeanAudit {
                 action(this.t('定位 Lean', 'Locate Lean'), 'jump-lean', () => { void this.jumpLean(link, projection.freshness === 'stale'); }),
                 action(this.t('重新核对', 'Recheck'), 'recheck-link', () => this.editLink(link, true)));
             const edit = action(this.t('修改说明', 'Edit notes'), 'edit-link', () => this.editLink(link, false)); edit.disabled = projection.freshness === 'stale' || this.busy; buttons.append(edit);
+            this.describeActionState(edit, this.t('来源或记录已变化，请先重新核对', 'Source or records changed. Recheck first'));
             const issue = action(this.t('记录问题', 'Record issue'), 'create-issue', () => {
                 this.issueDraft = { mode: 'create', linkId: link.id, category: 'assumption', title: '', note: '', status: 'open', resolution: '', reviewer: link.reviewer,
                     baseRevision: this.payload!.expectedRevision, evidenceFingerprint: this.payload!.evidenceFingerprint }; this.render();
                 this.section.querySelector<HTMLElement>('[data-lean-audit-field="issue-title"]')?.focus();
             }); issue.disabled = projection.freshness === 'stale' || this.busy; buttons.append(issue); entry.append(buttons); section.append(entry);
+            this.describeActionState(issue, this.t('来源或记录已变化，请先重新核对', 'Source or records changed. Recheck first'));
         }
         return section;
     }
@@ -387,6 +412,7 @@ export class ReaderLeanAudit {
             if (projection.reasons.length) entry.append(el('p', projection.reasons.join('; '), 'reader-lean-audit-warning'));
             const buttons = el('div', '', 'reader-lean-audit-actions');
             const edit = action(this.t('修改 / 处理', 'Edit / resolve'), 'edit-issue', () => this.editIssue(issue, false)); edit.disabled = projection.freshness === 'stale' || this.busy;
+            this.describeActionState(edit, this.t('来源或记录已变化，请先明确复核', 'Source or records changed. Explicitly recheck first'));
             buttons.append(edit, action(this.t('明确复核', 'Explicit recheck'), 'recheck-issue', () => this.editIssue(issue, true))); entry.append(buttons); section.append(entry);
         }
         return section;
@@ -408,6 +434,7 @@ export class ReaderLeanAudit {
         const save = action(this.t('保存问题决定', 'Save issue decision'), 'save-issue', () => {
             void this.save({ ...draft, expectedRevision: draft.baseRevision, action: draft.mode === 'create' ? 'create-issue' : draft.mode === 'recheck' ? 'recheck-issue' : 'update-issue' });
         }); save.disabled = this.busy || this.outdated || !this.draftCurrent(draft);
+        this.describeActionState(save, this.t('问题草稿依据的材料或审阅版本已变化，请重新读取并核对', 'Issue draft material or review revisions changed. Reload and recheck'));
         if (!this.draftCurrent(draft)) editor.append(el('p', this.t('此问题草稿基于旧审阅版本，已保留。取消后重新打开当前问题再核对。', 'This issue draft uses an older audit revision and is retained. Cancel and reopen the current issue before checking it again.'), 'reader-lean-audit-warning'));
         editor.append(save, action(this.t('取消', 'Cancel'), 'cancel-issue', () => { this.issueDraft = undefined; if (this.active) this.issueDrafts.delete(this.key(this.active)); this.render(); })); return editor;
     }

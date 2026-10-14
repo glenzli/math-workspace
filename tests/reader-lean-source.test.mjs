@@ -108,9 +108,11 @@ class Element {
     get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
     set textContent(value) { this._text = String(value); this.children = []; }
     append(...values) { values.forEach(value => { value.parent = this; this.children.push(value); }); }
+    appendChild(child) { this.append(child); return child; }
     replaceChildren(...values) { this.children = []; this._text = ''; this.append(...values); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); }
     setAttribute(key, value) { this.attributes[key] = value; }
+    getAttribute(key) { return this.attributes[key] ?? null; }
     addEventListener(key, handler) { this.listeners[key] = handler; }
     scrollIntoView() {}
     querySelectorAll(selector) { const result = []; for (const child of this.children) { if (child.className.split(' ').includes(selector.slice(1))) result.push(child); result.push(...child.querySelectorAll(selector)); } return result; }
@@ -136,7 +138,7 @@ async function sourceControllerModule(directory) {
 }
 
 async function testFullSourceLifecycle(directory) {
-    const savedDocument = globalThis.document; globalThis.document = { createElement: tag => new Element(tag) };
+    const savedDocument = globalThis.document; globalThis.document = { createElement: tag => new Element(tag), createElementNS: (_namespace, tag) => new Element(tag) };
     try {
         const { ReaderLeanSource } = await sourceControllerModule(directory), context = { projectId: 'project-a', token: 'token', language: 'en', revision: 1 };
         let source = completeSource(), delayed; const selected = [], requests = [];
@@ -148,6 +150,13 @@ async function testFullSourceLifecycle(directory) {
         const viewer = new ReaderLeanSource(host); viewer.bindObject('formal-1');
         const target = { projectKey: 'formal', filePath: source.filePath, range: { start: { line: 5, character: 0 }, end: { line: 8, character: 19 } } };
         await viewer.open(target); const editor = viewer.editor; assert.ok(editor); assert.equal(editor.content, source.content);
+        const findAction = name => { const find = node => node.dataset.leanSourceAction === name ? node : node.children.map(find).find(Boolean); const button = find(viewer.mount()); assert.ok(button, name); return button; };
+        const assertAction = (name, expected) => { const button = findAction(name), description = button.getAttribute('aria-label'); assert.equal(button.textContent, '');
+            assert.equal(button.children.length, 1); assert.equal(button.children[0].tagName, 'SVG'); assert.match(description, expected);
+            assert.equal(button.getAttribute('title'), description); assert.equal(button.dataset.readerTooltip, description); return button; };
+        for (const name of ['close', 'find', 'fold', 'unfold', 'focus', 'copy', 'copy-range', 'reload', 'semantics']) assertAction(name, /./);
+        const glyph = name => findAction(name).children[0].children.map(node => [node.tagName, node.attributes]);
+        assert.notDeepEqual(glyph('fold'), glyph('unfold')); assert.notDeepEqual(glyph('copy'), glyph('copy-range'));
         assert.equal(requests.filter(request => request.options.method === 'POST').length, 0, 'Full file reading never starts Lean automatically.');
         const sourceReads = () => requests.filter(request => request.route.startsWith('/api/lean-language/source')).length;
         const firstReads = sourceReads(), alternate = { ...target, range: { start: { line: 6, character: 0 }, end: { line: 7, character: 9 } } };
@@ -163,6 +172,7 @@ async function testFullSourceLifecycle(directory) {
         const focusCount = editor.focusCount; context.revision++; viewer.contextChanged(); await settle();
         assert.equal(viewer.editor, editor); assert.equal(editor.focusCount, focusCount); assert.equal(editor.scrollTop, 123); assert.deepEqual(viewer.currentSelection().range, proofRange);
         delayed = deferred(); context.revision++; viewer.contextChanged(); const refreshingReads = sourceReads();
+        assert.equal(findAction('reload').disabled, true); assertAction('reload', /Reading the complete file/);
         const selecting = viewer.open(alternate); assert.equal(sourceReads(), refreshingReads + 1, 'An unfinished revision refresh cannot make old source reusable.');
         delayed.resolve(json(source)); await selecting; delayed = undefined;
         await viewer.semantic.open(); assert.equal(viewer.semantic.state.state, 'unavailable'); assert.equal(viewer.editor.content, source.content); assert.match(viewer.mount().textContent, /Complete source remains readable/);

@@ -1,4 +1,5 @@
 import { closestReaderElement, positionReaderPopover } from './reader-popover';
+import { readerIconAction } from './reader-icons';
 
 export interface ReaderLeanAnchorPayload {
     id: string;
@@ -150,11 +151,9 @@ export class ReaderLeanPopover {
         const header = document.createElement('header');
         const title = document.createElement('h2');
         title.textContent = titleText;
-        const review = document.createElement('button');
-        review.type = 'button';
-        review.className = 'reader-lean-open-review';
+        const review = readerIconAction('lean-compare', reviewText, 'local');
+        review.classList.add('reader-lean-open-review');
         review.dataset.readerLeanReview = id;
-        review.textContent = reviewText;
         review.addEventListener('click', () => {
             this.dismiss();
             this.host.openReview(id, marker);

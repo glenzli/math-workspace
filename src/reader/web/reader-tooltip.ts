@@ -6,9 +6,12 @@ export class ReaderTooltip {
     private readonly element = document.createElement('div');
     private active: HTMLElement | undefined;
     private root: HTMLElement | undefined;
+    private observer: MutationObserver | undefined;
+    private observed: HTMLElement[] = [];
     private readonly onPointerOver = (event: PointerEvent) => {
         const trigger = this.findTrigger(event.target);
         if (trigger) this.show(trigger);
+        else this.hide();
     };
     private readonly onPointerOut = (event: PointerEvent) => {
         const trigger = this.findTrigger(event.target);
@@ -19,6 +22,7 @@ export class ReaderTooltip {
     private readonly onFocusIn = (event: FocusEvent) => {
         const trigger = this.findTrigger(event.target);
         if (trigger) this.show(trigger);
+        else this.hide();
     };
     private readonly onFocusOut = (event: FocusEvent) => {
         const trigger = this.findTrigger(event.target);
@@ -44,6 +48,7 @@ export class ReaderTooltip {
     }
 
     dispose(): void {
+        this.hide();
         this.root?.removeEventListener('pointerover', this.onPointerOver);
         this.root?.removeEventListener('pointerout', this.onPointerOut);
         this.root?.removeEventListener('focusin', this.onFocusIn);
@@ -61,7 +66,7 @@ export class ReaderTooltip {
 
     private show(trigger: HTMLElement): void {
         const text = trigger.dataset.readerTooltip;
-        if (!text) return;
+        if (!text || !this.visible(trigger)) { this.hide(); return; }
         this.active = trigger;
         this.element.textContent = text;
         this.element.hidden = false;
@@ -69,15 +74,46 @@ export class ReaderTooltip {
         this.reposition();
     }
 
-    private hide(trigger: HTMLElement): void {
+    private hide(trigger = this.active): void {
         if (this.active !== trigger) return;
         this.active = undefined;
+        this.observer?.disconnect(); this.observed = [];
         this.element.classList.remove('is-visible');
         this.element.hidden = true;
     }
 
+    private visible(trigger: HTMLElement): boolean {
+        if (!trigger.isConnected || !this.root?.contains(trigger)) return false;
+        for (let ancestor: HTMLElement | null = trigger; ancestor; ancestor = ancestor.parentElement) {
+            if (ancestor.hidden || ancestor.style.display === 'none') return false;
+            if (ancestor === this.root) break;
+        }
+        const style = typeof window.getComputedStyle === 'function' ? window.getComputedStyle(trigger) : trigger.style;
+        if (style.visibility === 'hidden' || style.visibility === 'collapse' || style.display === 'none') return false;
+        return typeof trigger.getClientRects !== 'function' || trigger.getClientRects().length > 0;
+    }
+
+    /** Watch only the active branch; editor token changes below sibling nodes are irrelevant. */
+    private observeActive(): void {
+        if (!this.active || typeof MutationObserver === 'undefined') return;
+        const ancestors: HTMLElement[] = [];
+        for (let ancestor: HTMLElement | null = this.active; ancestor; ancestor = ancestor.parentElement) {
+            ancestors.push(ancestor); if (ancestor === this.root) break;
+        }
+        if (ancestors.length === this.observed.length && ancestors.every((ancestor, index) => ancestor === this.observed[index])) return;
+        this.observer ??= new MutationObserver(() => this.reposition());
+        this.observer.disconnect(); this.observed = ancestors;
+        for (const ancestor of ancestors) this.observer.observe(ancestor, {
+            childList: true, attributes: true, subtree: false, attributeFilter: ['hidden', 'class', 'style', 'data-reader-tooltip']
+        });
+    }
+
     private reposition(): void {
         if (!this.active || this.element.hidden) return;
+        const text = this.active.dataset.readerTooltip;
+        if (!text || !this.visible(this.active)) { this.hide(); return; }
+        if (this.element.textContent !== text) this.element.textContent = text;
+        this.observeActive();
         const trigger = this.active.getBoundingClientRect();
         const tooltip = this.element.getBoundingClientRect();
         const padding = 12;

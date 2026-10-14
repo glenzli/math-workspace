@@ -20,10 +20,10 @@ class Element {
     replaceChildren(...children) { this.children.forEach(child => { child.parent = undefined; }); this.children = []; this._text = ''; this.append(...children); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = undefined; }
     set textContent(text) { this.replaceChildren(); this._text = String(text); } get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
-    get childNodes() { return this.children; } get isConnected() { return this.tagName === 'body' || Boolean(this.parent?.isConnected); }
+    get childNodes() { return this.children; } get parentElement() { return this.parent; } get isConnected() { return this.tagName === 'body' || Boolean(this.parent?.isConnected); }
     setAttribute(name, value) { this.attributes[name] = String(value); if (name === 'class') this.className = String(value); if (name === 'id') this.id = String(value); }
     getAttribute(name) { if (name === 'class') return this.className; return this.attributes[name] ?? null; } removeAttribute(name) { delete this.attributes[name]; }
-    addEventListener(name, callback) { (this.listeners[name] ||= []).push(callback); } removeEventListener() {}
+    addEventListener(name, callback) { (this.listeners[name] ||= []).push(callback); } removeEventListener(name, callback) { this.listeners[name] = (this.listeners[name] || []).filter(value => value !== callback); }
     async emit(name, value = {}) { for (const callback of this.listeners[name] || []) await callback({ target: this, ...value }); }
     contains(other) { return other === this || this.children.some(child => child.contains(other)); }
     matches(selector) {
@@ -37,6 +37,7 @@ class Element {
     }
     querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); }
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+    closest(selector) { for (let element = this; element; element = element.parent) if (element.matches(selector)) return element; return null; }
     getBoundingClientRect() { return { x: 12, y: 12, left: 12, top: 12, right: 132, bottom: 44, width: 120, height: 32 }; }
 }
 
@@ -44,23 +45,38 @@ async function harness() {
     const document = { createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag), createTextNode: value => { const node = new Element('#text'); node.textContent = value; return node; },
         addEventListener() {}, removeEventListener() {}, body: new Element('body') };
     const modules = { lucide: require('lucide'), './reader-clipboard': { copyReaderText: async value => { copied.push(value); return true; } } }, copied = [];
-    const window = { innerWidth: 320, innerHeight: 700, getSelection: () => undefined, addEventListener() {}, removeEventListener() {}, setTimeout: () => 1, clearTimeout() {} };
+    const window = { innerWidth: 320, innerHeight: 700, listeners: {}, getSelection: () => undefined,
+        getComputedStyle: element => element.style, addEventListener(name, callback) { (this.listeners[name] ||= []).push(callback); },
+        removeEventListener(name, callback) { this.listeners[name] = (this.listeners[name] || []).filter(value => value !== callback); },
+        emit(name) { for (const callback of this.listeners[name] || []) callback(); }, setTimeout: () => 1, clearTimeout() {} };
+    const observers = [];
+    class MutationObserver {
+        constructor(callback) { this.callback = callback; this.targets = new Map(); observers.push(this); }
+        observe(target, options) { this.targets.set(target, options); }
+        disconnect() { this.targets.clear(); }
+    }
+    const notifyMutation = (target, type, attributeName) => { for (const observer of observers) {
+        const options = observer.targets.get(target);
+        if (options && (type === 'childList' ? options.childList : options.attributes && options.attributeFilter.includes(attributeName))) observer.callback([{ target, type, attributeName }], observer);
+    } };
+    Element.ELEMENT_NODE = 1;
     async function load(file, name, expose = '') {
         let source = await fs.readFile(path.join(root, file), 'utf8');
         // Expose existing owners for isolated tests without starting the application or altering production exports.
         if (file.endsWith('/main.ts')) source = source.replace(/\nstartReader\(\);\s*$/, '\n');
         const output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-        const exports = {}; vm.runInNewContext(output + expose, { exports, document, window, Element, Node: { ELEMENT_NODE: 1 }, console,
+        const exports = {}; vm.runInNewContext(output + expose, { exports, document, window, Element, Node: Element, MutationObserver, console,
             require: value => modules[value] || {}, setTimeout: () => 1, clearTimeout() {} }); modules[name] = exports; return exports;
     }
     const icons = await load('src/reader/web/reader-icons.ts', './reader-icons');
+    const { ReaderTooltip } = await load('src/reader/web/reader-tooltip.ts', './reader-tooltip');
     await load('src/reader/web/reader-popover.ts', './reader-popover');
     const { ReaderSourceActions } = await load('src/reader/web/source-actions.ts', './source-actions');
     const { ReaderApplication, words } = await load('src/reader/web/main.ts', './main', '\nexports.ReaderApplication = ReaderApplication; exports.words = words;');
     const { renderLeanAnchorBadge } = await load('src/reader/web/formal-renderer.ts', './formal-renderer', '\nexports.renderLeanAnchorBadge = renderLeanAnchorBadge;');
     const { ReaderPropositionReview } = await load('src/reader/web/reader-proposition-review.ts', './reader-proposition-review');
     const { archiveAction } = await load('src/reader/web/reader-archive.ts', './reader-archive', '\nexports.archiveAction = iconButton;');
-    return { document, window, copied, icons, ReaderSourceActions, ReaderApplication, words, renderLeanAnchorBadge, ReaderPropositionReview, archiveAction };
+    return { document, window, copied, icons, ReaderTooltip, observers, notifyMutation, ReaderSourceActions, ReaderApplication, words, renderLeanAnchorBadge, ReaderPropositionReview, archiveAction };
 }
 
 function assertIconOnly(button, label, tooltip = 'tooltip') {
@@ -152,10 +168,49 @@ async function anchorSemantics(h) {
     assert.equal(badge.getAttribute('aria-hidden'), 'true'); assert.match(container.querySelector('.reader-proposition-map-node').getAttribute('aria-label'), /Lean anchor with 1 declaration/);
 }
 
+async function tooltipLifecycle(h) {
+    const root = new Element('main'), branch = new Element('section'), otherBranch = new Element('section'), editor = new Element('div'), token = new Element('span'), plain = new Element('input');
+    h.document.body.append(root); root.append(branch, otherBranch, plain); branch.append(editor); editor.append(token);
+    const trigger = h.icons.readerIconAction('save', 'Save review'); branch.append(trigger);
+    const tooltip = new h.ReaderTooltip(); tooltip.bind(root);
+    const hint = h.document.body.querySelector('.reader-global-tooltip'), glyph = trigger.children[0];
+    await root.emit('pointerover', { target: glyph }); assert.equal(hint.hidden, false); assert.equal(hint.textContent, 'Save review');
+    const observer = h.observers.at(-1);
+    assert.equal(observer.targets.has(trigger), true); assert.equal(observer.targets.has(branch), true); assert.equal(observer.targets.has(root), true);
+    assert.equal(observer.targets.has(editor), false); assert.equal(observer.targets.has(token), false);
+    for (const options of observer.targets.values()) assert.equal(options.subtree, false, 'Active ancestor observation never follows editor token subtrees.');
+    h.icons.describeReaderIconAction(trigger, 'Saving…'); h.notifyMutation(trigger, 'attributes', 'data-reader-tooltip'); assert.equal(hint.textContent, 'Saving…');
+    await root.emit('pointerout', { target: trigger, relatedTarget: glyph }); assert.equal(hint.hidden, false, 'Moving within the SVG action retains its tooltip.');
+    await root.emit('pointerout', { target: glyph, relatedTarget: plain }); assert.equal(hint.hidden, true); assert.equal(observer.targets.size, 0);
+    await root.emit('focusin', { target: trigger }); assert.equal(hint.hidden, false);
+    branch.hidden = true; h.notifyMutation(branch, 'attributes', 'hidden'); assert.equal(hint.hidden, true); assert.equal(observer.targets.size, 0);
+    branch.hidden = false; await root.emit('focusin', { target: trigger });
+    trigger.style.visibility = 'hidden'; h.notifyMutation(trigger, 'attributes', 'style'); assert.equal(hint.hidden, true);
+    trigger.style.visibility = ''; await root.emit('focusin', { target: trigger });
+    trigger.remove(); h.notifyMutation(branch, 'childList'); assert.equal(hint.hidden, true); assert.equal(observer.targets.size, 0, 'Removing the active action releases all observation.');
+    branch.append(trigger); await root.emit('pointerover', { target: glyph }); trigger.remove();
+    await root.emit('focusin', { target: plain }); h.window.emit('scroll'); assert.equal(hint.hidden, true, 'The detached-trigger, nontrigger-focus, scroll sequence cannot retain a tooltip.');
+    branch.append(trigger); await root.emit('focusin', { target: glyph });
+    otherBranch.append(trigger); h.notifyMutation(branch, 'childList'); assert.equal(hint.hidden, false); assert.equal(observer.targets.has(otherBranch), true); assert.equal(observer.targets.has(branch), false);
+    otherBranch.style.display = 'none'; h.notifyMutation(otherBranch, 'attributes', 'style'); assert.equal(hint.hidden, true);
+    otherBranch.style.display = ''; await root.emit('focusin', { target: trigger });
+    trigger.dataset.readerTooltip = ''; h.notifyMutation(trigger, 'attributes', 'data-reader-tooltip'); assert.equal(hint.hidden, true);
+    h.icons.describeReaderIconAction(trigger, 'Save review'); await root.emit('focusin', { target: trigger });
+    await root.emit('pointerover', { target: plain }); assert.equal(hint.hidden, true); assert.equal(observer.targets.size, 0);
+    await root.emit('focusin', { target: trigger }); await root.emit('focusout', { target: trigger }); assert.equal(hint.hidden, true);
+    await root.emit('focusin', { target: trigger }); tooltip.dispose(); assert.equal(hint.isConnected, false); assert.equal(observer.targets.size, 0);
+    for (const name of ['pointerover', 'pointerout', 'focusin', 'focusout']) assert.equal(root.listeners[name].length, 0);
+    assert.equal(h.window.listeners.scroll.length, 0); assert.equal(h.window.listeners.resize.length, 0); root.remove();
+}
+
 export async function testReaderIconClarity() {
     const h = await harness(), previous = globalThis.document; globalThis.document = h.document;
     try {
         await toolbarAndIconContract(h); await sourceAndArchiveActions(h); await anchorSemantics(h);
+        await tooltipLifecycle(h);
+        const shape = icon => h.icons.readerIcon(icon).children.map(node => [node.tagName, node.attributes]);
+        assert.notDeepEqual(shape('reset'), shape('verify'), 'Resetting verdicts cannot look like verified evidence.');
+        assert.notDeepEqual(shape('list-plus'), shape('verify'), 'Adding an undecided draft cannot look like approval.');
         const css = await fs.readFile(path.join(root, 'src/reader/web/styles.css'), 'utf8');
         assert.doesNotMatch(css, /is-source-copy|is-line-copy|has-action-label|reader-action-label/);
         assert.match(css, /\.reader-panel-close, \.reader-panel-action, \.reader-source-action \{[^}]*width: 28px;[^}]*height: 28px;/);

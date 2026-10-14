@@ -2,7 +2,8 @@
 .reader-lean-assistance[hidden] { display: none; }
 .reader-lean-assistance h3 { margin: 0 0 8px; }
 .reader-lean-assistance-actions { display: flex; flex-wrap: wrap; gap: 7px; }
-.reader-lean-assistance-actions button { padding: 6px 10px; cursor: pointer; }
+.reader-lean-assistance-actions button { cursor: pointer; }
+.reader-lean-assistance-actions button:not(.reader-icon-action) { padding: 6px 10px; }
 .reader-lean-assistance-actions button:disabled { cursor: default; opacity: .55; }
 .reader-lean-assistance-hint { color: var(--reader-muted, #656a73); font-size: .9em; overflow-wrap: anywhere; }
 .reader-lean-assistance-warning { color: var(--reader-warning, #a35d08); overflow-wrap: anywhere; }

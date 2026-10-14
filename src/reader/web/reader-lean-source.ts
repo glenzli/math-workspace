@@ -5,6 +5,7 @@ import { ReaderLeanSemantic, leanHoverText, type LeanSemanticState } from './rea
 import { leanRangeText, normalizeLeanSource } from './reader-lean-source-model';
 import { LeanSourceEditor } from './reader-lean-source-editor';
 import { tokenizeLeanSource, tokenizeLeanSourceAsync } from './reader-lean-source-highlighter';
+import { describeReaderIconAction, readerIconAction, type ReaderIconName } from './reader-icons';
 
 export interface LeanSourceTarget {
     projectKey: string;
@@ -53,8 +54,13 @@ const labels = {
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = ''): HTMLElementTagNameMap[K] {
     const value = document.createElement(tag); value.textContent = text; if (className) value.className = className; return value;
 }
-function control(text: string, action: () => void, key: string): HTMLButtonElement {
-    const value = node('button', text, 'reader-lean-review-button'); value.type = 'button'; value.dataset.leanSourceAction = key; value.addEventListener('click', action); return value;
+const actionIcons: Record<string, ReaderIconName> = {
+    back: 'arrow-left', close: 'chevron-up', find: 'search', fold: 'fold', unfold: 'unfold', focus: 'locate',
+    copy: 'copy', 'copy-range': 'copy-line', reload: 'reload', semantics: 'play', 'stop-semantics': 'stop', definition: 'definition'
+};
+function control(text: string, action: () => void, key: string, icon = actionIcons[key]): HTMLButtonElement {
+    const value = icon ? readerIconAction(icon, text) : node('button', text);
+    value.classList.add('reader-lean-review-button'); value.type = 'button'; value.dataset.leanSourceAction = key; value.addEventListener('click', action); return value;
 }
 
 /** Persisted review evidence is displayed by the review owner; this owner reads current complete files. */
@@ -221,7 +227,8 @@ export class ReaderLeanSource {
             ] as const) this.toolbar.append(control(label, action, key));
             const metadata = node('details', '', 'reader-lean-source-metadata'); metadata.append(node('summary', w.fingerprint), node('code', source.sourceHash)); this.toolbar.append(metadata);
         }
-        const reload = control(w.reload, () => { if (this.target) void this.open(this.target, false, false, { force: true }); }, 'reload'); reload.disabled = this.loading; this.toolbar.append(reload);
+        const reload = control(w.reload, () => { if (this.target) void this.open(this.target, false, false, { force: true }); }, 'reload'); reload.disabled = this.loading;
+        if (reload.disabled) describeReaderIconAction(reload, w.reload, w.loading); this.toolbar.append(reload);
     }
     private async copy(value: string): Promise<void> { this.host.report(await copyReaderText(value) ? this.words().copied : this.words().copyFailed); }
 
@@ -232,8 +239,9 @@ export class ReaderLeanSource {
             this.semanticEnabled = true;
             if (state.state !== 'available' && this.position) this.semantic.select(this.position);
             void this.semantic.open();
-        }, 'semantics');
-        start.disabled = !this.source || state.state === 'opening'; header.append(start);
+        }, 'semantics', state.state === 'available' ? 'reload' : 'play');
+        start.disabled = !this.source || state.state === 'opening';
+        if (start.disabled) describeReaderIconAction(start, state.state === 'available' ? w.refresh : w.start, state.state === 'opening' ? w.opening : w.unavailable); header.append(start);
         if (state.state === 'available' || state.state === 'opening') header.append(control(w.stop, () => { this.semanticEnabled = false; this.semantic.close(); }, 'stop-semantics'));
         const status = node('p', state.state === 'opening' ? w.opening : state.state === 'available' ? (state.complete ? w.available : w.processing) : state.state === 'unavailable' ? w.semanticUnavailable : w.idle);
         status.setAttribute('role', 'status');

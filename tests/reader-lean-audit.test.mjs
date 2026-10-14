@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+const require = createRequire(import.meta.url);
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const A = 'h-aaaaaaaaaaaaaaaa', B = 'h-bbbbbbbbbbbbbbbb', project = 'a'.repeat(64), fingerprint = 'f'.repeat(64);
@@ -22,11 +24,13 @@ function payload(id = A) {
 }
 function review(value) { return { id: value.id, projectToken: value.projectToken, evidence: { fingerprint: value.evidenceFingerprint }, review: { expectedRevision: value.manualReview.history.at(-1)?.revision || 0 } }; }
 class Element {
-    constructor(tag, document) { this.tagName = tag.toUpperCase(); this.ownerDocument = document; this.children = []; this.listeners = new Map(); this.attributes = new Map(); this.dataset = {}; this.className = ''; this.value = ''; this._text = ''; this.hidden = false; this.selectionStart = 0; this.selectionEnd = 0; }
+    constructor(tag, document) { this.tagName = tag.toUpperCase(); this.ownerDocument = document; this.children = []; this.listeners = new Map(); this.attributes = new Map(); this.dataset = {}; this.className = ''; this.value = ''; this._text = ''; this.hidden = false; this.selectionStart = 0; this.selectionEnd = 0;
+        this.classList = { add: (...names) => { this.className = [this.className, ...names].filter(Boolean).join(' '); } }; }
     get parentElement() { return this.parent; }
     get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
     set textContent(value) { this.replaceChildren(); this._text = String(value); }
     append(...children) { for (const child of children) { child.remove?.(); child.parent = this; this.children.push(child); } }
+    appendChild(child) { this.append(child); return child; }
     replaceChildren(...children) { for (const child of this.children) child.parent = undefined; this.children = []; this._text = ''; this.append(...children); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = undefined; }
     setAttribute(name, value) { this.attributes.set(name, String(value)); }
@@ -46,7 +50,7 @@ class Element {
     setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
 }
 async function harness() {
-    const document = { createElement(tag) { return new Element(tag, this); } }; document.body = new Element('body', document);
+    const document = { createElement(tag) { return new Element(tag, this); }, createElementNS(_namespace, tag) { return this.createElement(tag); } }; document.body = new Element('body', document);
     const context = { projectId: project, requestToken: 'local-token', language: 'zh', revision: 1 };
     const stores = new Map([[A, payload(A)], [B, payload(B)]]), requests = [], reports = [], opened = [], proseJumps = [], codeJumps = [], assists = [], downloads = [], copied = [];
     let override, count = 0;
@@ -83,9 +87,13 @@ async function harness() {
         stores.set(body.id, next); return response(next);
     };
     const exports = {};
+    const lucide = {}; vm.runInNewContext('(function(exports) {\n' + await fs.readFile(require.resolve('lucide'), 'utf8') + '\n})(exports);', { exports: lucide, document });
+    const icons = {}, iconSource = await fs.readFile(path.join(repoRoot, 'src/reader/web/reader-icons.ts'), 'utf8');
+    vm.runInNewContext(ts.transpileModule(iconSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText,
+        { exports: icons, document, require: () => lucide });
     const source = await fs.readFile(path.join(repoRoot, 'src/reader/web/reader-lean-audit.ts'), 'utf8');
     const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-    vm.runInNewContext(compiled, { exports, document, URL, Blob, setTimeout, require: name => name.endsWith('.css') ? {} : { copyReaderText: async text => { copied.push(text); return true; } } });
+    vm.runInNewContext(compiled, { exports, document, URL, Blob, setTimeout, require: name => name === './reader-icons' ? icons : name.endsWith('.css') ? {} : { copyReaderText: async text => { copied.push(text); return true; } } });
     const panel = new exports.ReaderLeanAudit({ context: () => context, request, report: (text, warning) => reports.push({ text, warning }),
         openReview: id => opened.push(id), locateProse: source => proseJumps.push(source), openSource: source => codeJumps.push(source),
         canAssist: () => true, assist: async content => assists.push(content), download: (name, content) => downloads.push({ name, content }) });
@@ -99,16 +107,22 @@ async function harness() {
 export async function testReaderLeanAudit() {
     const h = await harness(); h.panel.update(review(h.stores.get(A)), { subclaimId: 'construction', declarationKey: 'formal:Book.certificate_input' }); await settle();
     assert.match(h.region.textContent, /整对象人工结论：部分对应/); assert.equal(h.find('save-link').disabled, true);
+    const iconAction = (name, expected) => { const button = h.find(name), description = button.getAttribute('aria-label'); assert.equal(button.textContent, '');
+        assert.equal(button.children[0].tagName, 'SVG'); assert.match(description, expected); assert.equal(button.getAttribute('title'), description); assert.equal(button.dataset.readerTooltip, description); return button; };
+    iconAction('save-link', /请先选择当前两侧原文/); iconAction('capture-lean', /非空范围/); iconAction('reload', /重新读取/);
     h.select('prose', 'certificate can be constructed'); h.select('lean', 'certificate.proof');
     h.field('link-reviewer', '作者'); h.field('link-verdict', 'difference'); h.field('link-note', '仅使用输入证书，未构造证书。');
     h.find('add-pair').click(); h.field('pair-prose-0', '构造证书'); h.field('pair-lean-0', 'certificate : Certificate n');
     assert.equal(h.find('save-link').disabled, false); h.find('save-link').click(); await settle();
+    iconAction('save-link', /保存此位置关联/);
     const sent = JSON.parse(h.requests.find(request => request.options.method === 'POST').options.body);
     assert.equal(sent.expectedRevision, 0); assert.equal(sent.prose.subclaimId, 'construction'); assert.equal(sent.prose.range.start.line, 2);
     assert.equal(sent.prose.range.start.character, h.stores.get(A).proseSources[0].source.content.indexOf('certificate'), 'Character offsets retain UTF-16 emoji width.');
     assert.equal(sent.lean.quote, 'certificate.proof'); assert.equal(sent.correspondences[0].prose, '构造证书');
     assert.match(h.region.textContent, /仅使用输入证书/); assert.match(h.region.textContent, /create-link/);
     h.find('jump-prose').click(); h.find('jump-lean').click(); await settle();
+    const glyph = name => h.find(name).children[0].children.map(node => [node.tagName, [...node.attributes]]);
+    assert.notDeepEqual(glyph('jump-prose'), glyph('jump-lean'), 'Adjacent prose and Lean location actions use different glyphs.');
     assert.equal(h.proseJumps[0].startLine, 3); assert.equal(h.codeJumps[0].sourceHash, '2'.repeat(64));
     h.find('create-issue').click(); h.field('issue-title', '构造要求变为输入假设'); h.field('issue-note', '须由人工确认范围'); h.field('issue-category', 'assumption');
     h.find('save-issue').click(); await settle(); assert.match(h.region.textContent, /构造要求变为输入假设/);

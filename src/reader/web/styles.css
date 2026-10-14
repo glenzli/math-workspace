@@ -1225,6 +1225,7 @@ button { cursor: pointer; }
 .reader-lean-review-button { min-height: 30px; border: 1px solid var(--lean-border); border-radius: 4px; background: var(--lean-surface); color: inherit; padding: 5px 9px; font: inherit; font-size: 12px; line-height: 1.4; text-align: left; }
 .reader-lean-review-button:hover:not(:disabled), .reader-lean-review-button[aria-pressed="true"], .reader-lean-review-button[aria-current="true"] { border-color: #aab8da; background: #edf1fb; color: var(--lean-accent); }
 .reader-lean-review-button:disabled { opacity: .5; cursor: default; }
+button.reader-icon-action { display: inline-flex; align-items: center; justify-content: center; width: 32px; min-width: 32px; max-width: 32px; height: 32px; min-height: 32px; padding: 0; flex: 0 0 32px; justify-self: start; }
 .reader-lean-review :is(button, select, input, textarea, summary):focus-visible, .reader-lean-open-review:focus-visible { outline: 2px solid #6478b7; outline-offset: 2px; }
 .reader-lean-review-live { padding: 8px 11px; border: 1px solid var(--lean-border); border-radius: 4px; background: var(--lean-subtle); color: var(--lean-ink); }
 .reader-lean-review-live:empty { display: none; }
@@ -1371,7 +1372,7 @@ button { cursor: pointer; }
 .reader-lean-review-form-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
 .reader-lean-review-subclaims { display: grid; grid-template-columns: minmax(150px, .7fr) minmax(0, 1.6fr); gap: 18px; margin: 18px 0; }
 .reader-lean-review-claim-list { display: grid; align-content: start; gap: 6px; }
-.reader-lean-review-claim-list > button { width: 100%; overflow-wrap: anywhere; }
+.reader-lean-review-claim-list > button:not(.reader-icon-action) { width: 100%; overflow-wrap: anywhere; }
 .reader-lean-review-claim-editor { min-width: 0; border: 1px solid var(--lean-border); border-radius: 6px; padding: 0 14px 14px; background: var(--lean-surface); }
 .reader-lean-review-mapping { min-width: 0; margin: 14px 0; border: 1px solid var(--lean-border); border-radius: 4px; padding: 9px 10px; }
 .reader-lean-review-mapping legend { padding: 0 3px; font-size: 11px; color: var(--lean-muted); }

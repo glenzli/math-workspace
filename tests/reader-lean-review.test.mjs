@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+const require = createRequire(import.meta.url);
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const idA = 'h-aaaaaaaaaaaaaaaa', idB = 'h-bbbbbbbbbbbbbbbb', idUnanchored = 'h-cccccccccccccccc';
@@ -53,6 +55,7 @@ class Element {
     get innerHTML() { return this._html; }
     set innerHTML(value) { this.replaceChildren(); this._html = value; }
     append(...children) { for (const child of children) { child.remove?.(); child.parent = this; this.children.push(child); } }
+    appendChild(child) { this.append(child); return child; }
     insertBefore(child, sibling) { child.remove(); child.parent = this; const index = this.children.indexOf(sibling); this.children.splice(index < 0 ? this.children.length : index, 0, child); }
     replaceChildren(...children) { for (const child of this.children) child.parent = undefined; this.children = []; this._text = ''; this._html = ''; this.append(...children); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = undefined; }
@@ -88,7 +91,7 @@ class Element {
 }
 
 async function harness() {
-    const document = { createElement(tag) { return new Element(tag, this); } };
+    const document = { createElement(tag) { return new Element(tag, this); }, createElementNS(_namespace, tag) { return this.createElement(tag); } };
     document.body = new Element('body', document); document.activeElement = document.body;
     const documentEvents = new Element('document', document), windowEvents = new Element('window', document);
     document.addEventListener = documentEvents.addEventListener.bind(documentEvents); document.removeEventListener = documentEvents.removeEventListener.bind(documentEvents);
@@ -99,7 +102,7 @@ async function harness() {
     let override, navigate, currentJob;
     const modules = {}, globals = { document, window: { innerWidth: 1280, innerHeight: 900,
         addEventListener: windowEvents.addEventListener.bind(windowEvents), removeEventListener: windowEvents.removeEventListener.bind(windowEvents) },
-        Node: { ELEMENT_NODE: 1 }, AbortController, crypto: { randomUUID: () => 'test-' + (timerId++) },
+        Element, Node: { ELEMENT_NODE: 1 }, AbortController, crypto: { randomUUID: () => 'test-' + (timerId++) },
         setTimeout: callback => { const id = ++timerId; timers.set(id, callback); return id; }, clearTimeout: id => timers.delete(id),
         require: name => { if (name === './reader-clipboard') return { copyReaderText: async text => { copied.push(text); return true; } }; return modules[name]; } };
     const assistanceInstances = [];
@@ -119,6 +122,9 @@ async function harness() {
         const compiled = ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
         vm.runInNewContext(compiled, { ...globals, exports }); modules[name] = exports; return exports;
     }
+    const lucide = {}; vm.runInNewContext('(function(exports) {\n' + await fs.readFile(require.resolve('lucide'), 'utf8') + '\n})(exports);', { exports: lucide, document }); modules.lucide = lucide;
+    await load('src/reader/web/reader-icons.ts', './reader-icons');
+    const { ReaderTooltip } = await load('src/reader/web/reader-tooltip.ts', './reader-tooltip');
     await load('src/reader/web/reader-popover.ts', './reader-popover');
     const { ReaderLeanPopover } = await load('src/reader/web/reader-lean-popover.ts', './reader-lean-popover');
     await load('src/reader/web/reader-lean-source-model.ts', './reader-lean-source-model');
@@ -170,7 +176,7 @@ async function harness() {
         navigatePage: async filePath => { if (navigate) return navigate(filePath); panel.navigationStarted(filePath); context.filePath = filePath; panel.contextChanged(); },
         canAssist: () => true, assist: async content => { assists.push(content); }, report: message => reports.push(message) };
     const panel = new exports.ReaderLeanReview(main, host), region = main.querySelector('.reader-lean-review');
-    return { ...exports, ReaderLeanPopover, document, context, main, article, panel, region, requests, reports, assists, copied, snapshots, host, store, assistanceInstances,
+    return { ...exports, ReaderLeanPopover, ReaderTooltip, document, context, main, article, panel, region, requests, reports, assists, copied, snapshots, host, store, assistanceInstances,
         setOverride: fn => { override = fn; }, setNavigate: fn => { navigate = fn; }, setJob: value => { currentJob = value; },
         async runTimers() { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach(callback => callback()); await settle(); },
         get timerCount() { return timers.size; },
@@ -180,6 +186,14 @@ async function harness() {
         async dispose() { panel.dispose(); } };
 }
 
+function assertIconAction(button, label, tooltip = 'readerTooltip') {
+    assert.equal(button.textContent, '', 'A short action keeps its glyph during state updates.');
+    assert.equal(button.children.length, 1); assert.equal(button.children[0].tagName, 'SVG');
+    const description = button.getAttribute('aria-label'); assert.match(description, label);
+    assert.equal(button.getAttribute('title'), description); assert.equal(button.dataset[tooltip], description);
+    assert.equal(button.children[0].getAttribute('aria-hidden'), 'true'); assert.equal(button.children[0].getAttribute('focusable'), 'false');
+}
+
 async function testEntryAndManualReview() {
     const h = await harness(); h.store(payload()); h.store(payload(idB));
     try {
@@ -187,8 +201,18 @@ async function testEntryAndManualReview() {
         const popover = new h.ReaderLeanPopover({ fetchAnchor: async id => ({ id }), openReview: (id, marker) => { void h.panel.open(id, marker); },
             labels: () => ({ title: 'Lean 对齐', openReview: 'Lean 对照', loading: '加载', unavailable: '不可用', contract: '绑定', build: '构建', dependencies: '依赖', declarations: '声明', markdownOnly: '正文', leanOnly: 'Lean', none: '无', status: () => '未读' }) });
         popover.bind(h.article); marker.emit('focusin'); await settle();
-        h.document.body.querySelector(`[data-reader-lean-review="${idA}"]`).click(); await settle();
+        const entry = h.document.body.querySelector(`[data-reader-lean-review="${idA}"]`); assertIconAction(entry, /Lean 对照/, 'tooltip'); entry.click(); await settle();
         assert.equal(h.region.hidden, false); assert.match(h.region.textContent, /Proof: take the default element/);
+        for (const key of ['close', 'refresh', 'previous-object', 'next-object', 'locate-prose', 'add-claim', 'save', 'assist', 'copy-assist']) assertIconAction(h.find(`[data-lean-action="${key}"]`), /./);
+        assert.match(h.find('[data-lean-action="view-both"]').textContent, /并排对照/);
+        assert.match(h.find('[data-lean-action="lean-source"]').textContent, /当前源码/);
+        assert.match(h.find('[data-lean-object]').textContent, /Theorem/);
+        assert.match(h.find('[data-lean-action="previous-object"]').getAttribute('aria-label'), /第一项/);
+        const tooltip = new h.ReaderTooltip(); tooltip.bind(h.main);
+        const refresh = h.find('[data-lean-action="refresh"]'); refresh.focus(); refresh.emit('focusin');
+        const hint = h.document.body.querySelector('.reader-global-tooltip'); assert.equal(hint.hidden, false); assert.equal(hint.textContent, refresh.getAttribute('aria-label'));
+        refresh.emit('focusout'); assert.equal(hint.hidden, true);
+        refresh.children[0].emit('pointerover'); assert.equal(hint.textContent, refresh.getAttribute('aria-label')); tooltip.dispose();
         assert.match(h.region.textContent, /\{α : Type\} → \[inst : Inhabited α\]/); assert.match(h.region.textContent, /尚未判断|未审阅/);
         assert.equal(h.requests.some(request => request.options.method === 'POST'), false, 'Entering review never starts tooling or saves.');
         h.document.dispatchEvent({ type: 'scroll', target: h.main }); h.document.dispatchEvent({ type: 'pointerdown', target: h.document.body });
@@ -207,7 +231,9 @@ async function testEntryAndManualReview() {
         h.find('[data-lean-definition="Nonempty"]').click(); await settle(); assert.match(h.region.textContent, /fun α => ∃ _ : α, True/);
         h.find('[data-lean-related-definition="Inhabited"]').click(); await settle(); assert.match(h.region.textContent, /Nonempty › Inhabited/);
         h.click('definition-back'); await settle(); assert.equal(h.region.querySelector('[data-lean-action="definition-back"]'), null);
-        h.click('save'); await settle();
+        const save = h.find('[data-lean-action="save"]'), saveGlyph = save.children[0];
+        h.click('save'); assertIconAction(save, /正在保存/); assert.equal(save.children[0], saveGlyph); assert.equal(save.disabled, true); assert.equal(save.getAttribute('aria-busy'), 'true'); await settle();
+        assertIconAction(h.find('[data-lean-action="save"]'), /保存审阅/);
         const sent = h.requests.find(request => request.options.method === 'POST' && JSON.parse(request.options.body).action === 'save');
         const input = JSON.parse(sent.options.body); assert.equal(input.expectedRevision, 0); assert.equal(input.evidenceFingerprint, payload().evidence.fingerprint);
         assert.equal(input.verdict, 'partial'); assert.equal(input.subclaims.length, 2); assert.deepEqual(input.subclaims[0].declarationKeys, ['formal:Book.exists', 'formal:Book.choice']);
@@ -218,6 +244,7 @@ async function testEntryAndManualReview() {
         h.click('assist'); await settle(); assert.equal(h.assists.length, 1); assert.match(h.assists[0][0].resource.text, /Retain this unsaved edit/);
         assert.match(h.region.textContent, /发送后才会开始核对/); assert.equal(h.find('[data-lean-focus="verdict"]').value, 'partial');
         h.context.language = 'en'; h.panel.contextChanged(); assert.equal(h.region.getAttribute('aria-label'), 'Lean comparison'); assert.match(h.region.textContent, /Aligned within reviewed scope/);
+        assertIconAction(h.find('[data-lean-action="save"]'), /Save review/); assertIconAction(h.find('[data-lean-action="close"]'), /Close comparison/);
         assert.equal(h.find('[data-lean-focus="note"]').value, 'Retain this unsaved edit.');
         h.host.canAssist = () => false; h.panel.contextChanged(); h.click('assist'); await settle(); assert.equal(h.copied.length, 1); assert.match(h.region.textContent, /context copied/);
         popover.dispose();
@@ -235,6 +262,8 @@ async function testConflictAndDefinitionDrift() {
         changed.review.record = record(initial); changed.review.freshness = 'stale'; changed.review.changes = [{ kind: 'statement', key: 'statement', label: 'Statement', previous: initial.evidence.statement.content, current: changed.evidence.statement.content }]; h.store(changed);
         h.click('save'); await settle(); assert.match(h.region.textContent, /草稿已保留/); assert.equal(h.find('[data-lean-action="save"]').disabled, true);
         assert.equal(h.find('[data-lean-action="acknowledge"]').disabled, true, 'A conflict requires fresh readback before acknowledging.');
+        assertIconAction(h.find('[data-lean-action="acknowledge"]'), /保留笔记，重置结论.*重新读取/);
+        assertIconAction(h.find('[data-lean-action="save"]'), /保存前需要重新核对/);
         h.click('reload'); await settle(); assert.equal(h.find('[data-lean-focus="scope"]').value, 'Only assumptions.');
         assert.doesNotMatch(h.region.textContent, /fun α =>/); assert.match(h.region.textContent, /A revised statement/); assert.match(h.region.textContent, /原关联声明已不在/);
         h.click('acknowledge'); assert.equal(h.find('[data-lean-focus="verdict"]').value, 'undecided'); assert.equal(h.find('[data-lean-focus="claim-verdict"]').value, 'undecided');

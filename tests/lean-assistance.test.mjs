@@ -147,13 +147,16 @@ export async function testLeanAssistance() {
 }
 
 class AssistanceElement {
-    constructor(tag, ownerDocument) { this.tagName = tag.toUpperCase(); this.ownerDocument = ownerDocument; this.children = []; this.dataset = {}; this.listeners = new Map(); this.attributes = new Map(); this._text = ''; }
+    constructor(tag, ownerDocument) { this.tagName = tag.toUpperCase(); this.ownerDocument = ownerDocument; this.children = []; this.dataset = {}; this.listeners = new Map(); this.attributes = new Map(); this._text = ''; this.className = '';
+        this.classList = { add: (...names) => { this.className = [this.className, ...names].filter(Boolean).join(' '); } }; }
     get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
     set textContent(value) { this.replaceChildren(); this._text = String(value); }
     append(...children) { for (const child of children) { child.remove?.(); child.parent = this; this.children.push(child); } }
+    appendChild(child) { this.append(child); return child; }
     replaceChildren(...children) { for (const child of this.children) child.parent = undefined; this.children = []; this._text = ''; this.append(...children); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = undefined; }
     setAttribute(name, value) { this.attributes.set(name, value); }
+    getAttribute(name) { return this.attributes.get(name) ?? null; }
     addEventListener(name, callback) { this.listeners.set(name, [...(this.listeners.get(name) || []), callback]); }
     click() { if (!this.disabled) for (const callback of this.listeners.get('click') || []) callback({ target: this }); }
     find(action) { if (this.dataset.leanAssistanceAction === action) return this; for (const child of this.children) { const found = child.find(action); if (found) return found; } }
@@ -170,7 +173,7 @@ async function assistanceHarness() {
     const { default: vm } = await import('node:vm');
     const bundle = await build({ entryPoints: [path.join(repoRoot, 'src/reader/web/reader-lean-assistance.ts')], bundle: true, platform: 'browser', format: 'cjs',
         write: false, loader: { '.css': 'empty' }, logLevel: 'silent' });
-    const document = { createElement(tag) { return new AssistanceElement(tag, this); } }; document.body = document.createElement('body');
+    const document = { createElement(tag) { return new AssistanceElement(tag, this); }, createElementNS(_namespace, tag) { return this.createElement(tag); } }; document.body = document.createElement('body');
     const context = { projectId: 'a'.repeat(64), language: 'zh', requestToken: 'token', revision: 0, pagePath: 'book/01.md' };
     const module = { exports: {} }, copies = [], adopted = [], sent = [], reports = [], requests = [], draft = new Set();
     vm.runInNewContext(bundle.outputFiles[0].text, { module, exports: module.exports, document, navigator: { clipboard: { writeText: async text => copies.push(text) } }, console });
@@ -195,6 +198,12 @@ async function assistanceHarness() {
 export async function testReaderLeanAssistance() {
     const h = await assistanceHarness(); h.panel.update(h.review()); await settleAssistance();
     assert.match(h.region.textContent, /Construction may/);
+    const iconAction = (name, expected) => { const button = h.find(name), description = button.getAttribute('aria-label'); assert.equal(button.textContent, '');
+        assert.equal(button.children.length, 1); assert.equal(button.children[0].tagName, 'SVG'); assert.match(description, expected);
+        assert.equal(button.getAttribute('title'), description); assert.equal(button.dataset.readerTooltip, description); return button; };
+    const glyph = name => h.find(name).children[0].children.map(node => [node.tagName, [...node.attributes]]);
+    assert.equal(new Set(['assumptions', 'statement', 'proof', 'changes'].map(name => JSON.stringify(glyph(name)))).size, 4, 'Each review task has a distinct glyph.');
+    iconAction('assumptions', /发送后开始核对/); iconAction('adopt', /加入未决定草稿/);
     h.find('assumptions').click(); await settleAssistance();
     assert.equal(h.sent.length, 1); const handoff = h.sent[0][0].resource.text;
     assert.match(handoff, /read_lean_review_context/); assert.match(handoff, /submit_lean_review_candidates/);
@@ -204,13 +213,16 @@ export async function testReaderLeanAssistance() {
     h.find('adopt').click(); await settleAssistance(); assert.equal(h.adopted.length, 1);
     assert.equal(h.adopted[0].item.verdict, undefined, 'The AI candidate has no verdict.');
     assert.equal(h.find('adopt').disabled, true);
+    iconAction('adopt', /已加入草稿.*尚未保存人工结论/);
     h.draft.delete('candidate-1'); h.panel.update(h.review());
     assert.equal(h.find('adopt').disabled, false, 'Deleting or resetting the local draft immediately re-enables adoption.');
     h.find('adopt').click(); await settleAssistance(); assert.equal(h.adopted.length, 2);
     assert.equal(h.requests.filter(item => item.init.method === 'POST').length, 0, 'Adopting a local draft never saves a record.');
-    h.setAssist(false); h.find('proof').click(); await settleAssistance(); assert.equal(h.copies.length, 1); assert.match(h.copies[0], /"task": "proof"/);
+    h.setAssist(false); h.panel.update(h.review()); iconAction('proof', /复制核对材料到剪贴板/);
+    h.find('proof').click(); await settleAssistance(); assert.equal(h.copies.length, 1); assert.match(h.copies[0], /"task": "proof"/);
     h.find('dismiss').click(); await settleAssistance();
     assert.match(h.region.textContent, /暂无待处理候选/); assert.doesNotMatch(h.region.textContent, /审核通过|aligned|approved/);
+    h.context.language = 'en'; h.panel.update(h.review()); iconAction('refresh', /Refresh candidates/); iconAction('statement', /Compare statements.*Copy review context/);
 
     const stale = await assistanceHarness(); stale.panel.update(stale.review()); await settleAssistance();
     for (const field of ['candidateRevision', 'auditRevision', 'reviewRevision']) {

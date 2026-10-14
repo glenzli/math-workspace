@@ -3,7 +3,8 @@
 .reader-lean-audit section { margin: 18px 0; }
 .reader-lean-audit-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .reader-lean-audit-actions h3 { margin-right: auto; }
-.reader-lean-audit button { padding: 6px 10px; border: 1px solid var(--lean-border, #d7dce4); border-radius: 6px; background: var(--lean-surface, #fff); color: inherit; cursor: pointer; font: inherit; }
+.reader-lean-audit button { border: 1px solid var(--lean-border, #d7dce4); border-radius: 6px; background: var(--lean-surface, #fff); color: inherit; cursor: pointer; font: inherit; }
+.reader-lean-audit button:not(.reader-icon-action) { padding: 6px 10px; }
 .reader-lean-audit button:hover:not(:disabled) { border-color: var(--lean-accent, #3967bc); }
 .reader-lean-audit button:disabled { cursor: default; opacity: .48; }
 .reader-lean-audit-hint { font-size: .9em; opacity: .78; }

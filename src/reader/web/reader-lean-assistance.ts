@@ -1,6 +1,7 @@
 import type { LeanReviewResponse } from '../../lean/lean-review';
 import { sameLeanAssistanceSource, type LeanAssistanceBinding, type LeanAssistanceCandidate, type LeanAssistanceResponse, type LeanAssistanceTask } from '../../lean/lean-assistance';
 import { copyReaderText } from './reader-clipboard';
+import { describeReaderIconAction, readerIconAction, type ReaderIconName } from './reader-icons';
 import './reader-lean-assistance.css';
 
 export interface ReaderLeanAssistanceHost {
@@ -20,8 +21,12 @@ const taskEn = { assumptions: 'Check assumptions', statement: 'Compare statement
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = ''): HTMLElementTagNameMap[K] {
     const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; return node;
 }
+const actionIcons: Record<string, ReaderIconName> = {
+    assumptions: 'assumptions', statement: 'lean-compare', proof: 'proof-scope', changes: 'compare',
+    refresh: 'reload', adopt: 'list-plus', dismiss: 'x'
+};
 function button(label: string, action: string, run: () => void): HTMLButtonElement {
-    const node = element('button', label); node.type = 'button'; node.dataset.leanAssistanceAction = action; node.addEventListener('click', run); return node;
+    const node = readerIconAction(actionIcons[action], label); node.dataset.leanAssistanceAction = action; node.addEventListener('click', run); return node;
 }
 /** Exact project selection and binding survive fallback copy and native composer handoff. */
 export function leanAssistanceHandoff(payload: LeanAssistanceResponse, language: string): string {
@@ -143,8 +148,15 @@ export class ReaderLeanAssistance {
         this.section.append(element('h3', this.t('Codex 辅助核对', 'Review with Codex')),
             element('p', this.t('选一个任务准备材料；发送由会话输入框确认。返回的候选逐项加入未决定草稿或忽略。', 'Prepare context for a task, then confirm sending in the conversation composer. Add returned candidates to an undecided draft or ignore them.'), 'reader-lean-assistance-hint'));
         const actions = element('div', '', 'reader-lean-assistance-actions');
-        for (const task of tasks) { const action = button(this.t(taskZh[task], taskEn[task]), task, () => { void this.assist(task); }); action.disabled = this.busy; actions.append(action); }
-        const reload = button(this.t('刷新候选', 'Refresh candidates'), 'refresh', () => { void this.load(); }); reload.disabled = this.busy; actions.append(reload); this.section.append(actions);
+        const busyHint = this.t('请等待当前操作完成', 'Wait for the current operation to finish');
+        for (const task of tasks) {
+            const action = button(this.t(taskZh[task], taskEn[task]), task, () => { void this.assist(task); }); action.disabled = this.busy;
+            describeReaderIconAction(action, action.dataset.readerActionLabel!, this.busy ? busyHint : this.host.canAssist?.()
+                ? this.t('准备材料到会话输入框，发送后开始核对', 'Prepare context in the conversation input; send it to begin the review')
+                : this.t('复制核对材料到剪贴板', 'Copy review context to the clipboard')); actions.append(action);
+        }
+        const reload = button(this.t('刷新候选', 'Refresh candidates'), 'refresh', () => { void this.load(); }); reload.disabled = this.busy;
+        if (reload.disabled) describeReaderIconAction(reload, reload.dataset.readerActionLabel!, busyHint); actions.append(reload); this.section.append(actions);
         if (this.error) { const warning = element('p', this.error, 'reader-lean-assistance-warning'); warning.setAttribute('role', 'alert'); this.section.append(warning); }
         if (!this.payload) { this.section.append(element('p', this.t(this.busy ? '正在读取材料…' : '材料暂不可用。', this.busy ? 'Reading context…' : 'Context unavailable.'))); return; }
         const candidates = this.payload.candidates.filter(item => item.candidate.status === 'pending');
@@ -156,7 +168,11 @@ export class ReaderLeanAssistance {
             const actions = element('div', '', 'reader-lean-assistance-actions'), added = this.host.candidateInDraft(candidate.id);
             const adopt = button(this.t(added ? '已加入草稿' : '加入未决定草稿', added ? 'Added to draft' : 'Add to undecided draft'), 'adopt', () => { void this.act(candidate.id, 'adopt'); });
             adopt.disabled = this.busy || freshness === 'stale' || added;
+            if (adopt.disabled) describeReaderIconAction(adopt, adopt.dataset.readerActionLabel!, this.busy ? busyHint : freshness === 'stale'
+                ? this.t('材料或人工版本已变化，需重新核对', 'Source or human revisions changed; recheck this candidate')
+                : this.t('尚未保存人工结论，核对后再保存', 'No human decision has been saved; review the draft before saving'));
             const dismiss = button(this.t('忽略', 'Ignore'), 'dismiss', () => { void this.act(candidate.id, 'dismiss'); }); dismiss.disabled = this.busy;
+            if (dismiss.disabled) describeReaderIconAction(dismiss, dismiss.dataset.readerActionLabel!, busyHint);
             actions.append(adopt, dismiss); card.append(actions); this.section.append(card);
         }
         if (this.payload.dropped) this.section.append(element('p', this.t(`有界保留已移除 ${this.payload.dropped} 项旧候选。`, `${this.payload.dropped} older candidates were dropped by bounded retention.`), 'reader-lean-assistance-hint'));
