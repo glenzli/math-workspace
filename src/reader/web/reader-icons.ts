@@ -10,7 +10,6 @@ import {
     CodeXml,
     Columns2,
     Download,
-    Ellipsis,
     Eraser,
     Eye,
     EyeOff,
@@ -21,6 +20,7 @@ import {
     FoldVertical,
     GitCompareArrows,
     History,
+    Layers,
     ListTree,
     ListOrdered,
     ListChecks,
@@ -45,6 +45,7 @@ import {
     Search,
     Sigma,
     ShieldCheck,
+    SlidersHorizontal,
     Star,
     Square,
     TextCursor,
@@ -77,7 +78,10 @@ export type ReaderIconName =
     | 'contents'
     | 'history'
     | 'publication'
-    | 'more'
+    | 'reference-tools'
+    | 'review-tools'
+    | 'edition-tools'
+    | 'display-tools'
     | 'line-numbers'
     | 'eraser'
     | 'visible'
@@ -150,7 +154,10 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     contents: ListTree,
     history: History,
     publication: FileOutput,
-    more: Ellipsis,
+    'reference-tools': BookOpenText,
+    'review-tools': ListChecks,
+    'edition-tools': Layers,
+    'display-tools': SlidersHorizontal,
     'line-numbers': ListOrdered,
     eraser: Eraser,
     visible: Eye,

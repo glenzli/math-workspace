@@ -289,7 +289,7 @@ button { cursor: pointer; }
 .reader-type-control output { min-width: 34px; color: #65707a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; text-align: center; }
 .reader-toolbar-menu { position: fixed; z-index: 45; box-sizing: border-box; width: 280px; overflow-y: auto; overscroll-behavior: contain; padding: 6px; border: 1px solid #d9e1e7; border-radius: 10px; background: #fcfcfb; color: #35414a; box-shadow: 0 12px 36px #1e304826; }
 .reader-toolbar-menu[hidden] { display: none; }
-.reader-menu-group + .reader-menu-group { margin-top: 5px; padding-top: 5px; border-top: 1px solid #e5e9ec; }
+.reader-menu-group[hidden] { display: none; }
 .reader-menu-heading { padding: 4px 9px; color: #77818a; font-size: 11px; font-weight: 650; }
 .reader-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 7px 9px; border: 0; border-radius: 5px; background: transparent; color: inherit; text-align: left; font-size: 13px; }
 .reader-menu-item .reader-icon { width: 17px; height: 17px; }
@@ -944,9 +944,11 @@ button { cursor: pointer; }
     .reader-shell, .reader-shell.is-navigation-collapsed { grid-template-columns: 1fr; }
     .reader-sidebar { display: none; }
     .reader-navigation-toggle { display: none; }
-    .reader-toolbar { gap: 4px; padding: 8px 12px; overflow: clip; }
-    .reader-tools { min-width: 0; margin-left: auto; }
-    .reader-history, .reader-type-control { flex-shrink: 0; border-color: transparent; background: transparent; }
+    .reader-toolbar { gap: 4px; padding: 8px; overflow: clip; }
+    .reader-tools { min-width: 0; margin-left: auto; gap: 1px; }
+    .reader-tools .tool-button { width: 28px; min-width: 28px; height: 32px; }
+    .reader-history { gap: 0; padding: 0; border: 0; background: transparent; }
+    .reader-type-control { flex-shrink: 0; border-color: transparent; background: transparent; }
     .icon-button, .tool-button { min-width: 28px; }
     .reader-article { padding: 32px 20px 90px; }
     .reader-article.shows-source-line-numbers { padding-left: 56px; }
@@ -989,7 +991,6 @@ button { cursor: pointer; }
     .reader-article pre, .reader-article th { background: #292c2f; border-color: #44484c; }
     .reader-article th, .reader-article td { border-color: #45494d; }
     .reader-toolbar-panel, .reader-recall-popover, .reader-archive, .reader-toolbar-menu { border-color: #4a4f54; background: #26292c; color: #e5e6e7; box-shadow: 0 18px 46px rgba(0, 0, 0, .45); }
-    .reader-menu-group + .reader-menu-group { border-color: #40454a; }
     .reader-menu-heading { color: #a3adb6; }
     .reader-menu-item:hover:not(:disabled), .reader-menu-item:focus-visible { background: #31353a; color: #b6d7f3; }
     .reader-tool-check { color: #b6d7f3; }

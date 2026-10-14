@@ -85,7 +85,6 @@ const words = {
     zh: {
         contents: '目录',
         readerTools: '阅读工具',
-        moreTools: '更多工具',
         toolsReference: '查阅',
         toolsReview: '审阅',
         toolsEdition: '版本与出版',
@@ -257,7 +256,6 @@ const words = {
     en: {
         contents: 'Contents',
         readerTools: 'Reader tools',
-        moreTools: 'More tools',
         toolsReference: 'Reference',
         toolsReview: 'Review',
         toolsEdition: 'Versions & publication',
@@ -711,8 +709,12 @@ class ReaderApplication {
             '<div class="reader-tools" role="group" aria-label="Reader tools">',
             '<button id="reader-lean-review" class="tool-button" type="button" aria-label="Lean comparison"></button>',
             '<button class="tool-button" type="button" data-panel="contents" aria-label="Contents"></button>',
+            '<button id="reader-reference-tools" class="tool-button" type="button" data-tool-menu="reference" aria-label="Reference"></button>',
+            '<button id="reader-review-tools" class="tool-button" type="button" data-tool-menu="review" aria-label="Review"></button>',
+            '<button id="reader-edition-tools" class="tool-button" type="button" data-tool-menu="edition" aria-label="Versions and publication"></button>',
+            '<button id="reader-display-tools" class="tool-button" type="button" data-tool-menu="display" aria-label="Display"></button>',
             (isReaderEmbedded() ? '<button id="reader-expand" class="tool-button" type="button" aria-label="Full screen"></button>' : ''),
-            '<button id="reader-more" class="tool-button" type="button" aria-label="More tools" aria-haspopup="menu" aria-expanded="false"></button></div>',
+            '</div>',
             '<span id="reader-live" class="reader-live" aria-live="polite"></span>',
             '</header><article id="reader-article" class="reader-article"></article></main>',
             '</div>'
@@ -721,8 +723,7 @@ class ReaderApplication {
         this.article = this.root.querySelector('#reader-article') as HTMLElement;
         this.pageTitle = this.root.querySelector('#reader-page-title') as HTMLElement;
         this.liveStatus = this.root.querySelector('#reader-live') as HTMLElement;
-        this.toolbarMenu = new ReaderToolbarMenu(this.root, this.root.querySelector('#reader-more') as HTMLElement,
-            () => this.dictionary(), () => this.prepareToolbarView('menu'));
+        this.toolbarMenu = new ReaderToolbarMenu(this.root, () => this.dictionary(), () => this.prepareToolbarView('menu'));
         this.tooltip = new ReaderTooltip();
         this.tooltip.bind(this.root);
         this.installToolbarIcons();
@@ -1328,8 +1329,7 @@ class ReaderApplication {
         const icons: Array<[string, ReaderIconName]> = [
             ['#reader-back', 'chevron-left'],
             ['#reader-forward', 'chevron-right'],
-            ['[data-panel="contents"]', 'contents'],
-            ['#reader-more', 'more']
+            ['[data-panel="contents"]', 'contents']
         ];
         icons.forEach(([selector, icon]) => {
             const button = this.root.querySelector<HTMLElement>(selector);

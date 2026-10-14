@@ -93,11 +93,12 @@ function iconShape(button) {
 async function toolbarAndIconContract(h) {
     const app = Object.create(h.ReaderApplication.prototype); app.root = new Element('main'); app.state = { language: 'zh', projectId: 'project-a' }; app.currentPath = 'book/01.md'; app.sourceLineNumbersVisible = false;
     const tools = new Element('div'); tools.className = 'reader-tools'; app.root.append(tools);
-    for (const id of ['reader-back', 'reader-forward', 'reader-navigation-toggle', 'reader-expand', 'reader-lean-review', 'reader-more']) {
+    for (const id of ['reader-back', 'reader-forward', 'reader-navigation-toggle', 'reader-expand', 'reader-lean-review']) {
         const button = new Element('button'); button.id = id; (['reader-back', 'reader-forward', 'reader-navigation-toggle'].includes(id) ? app.root : tools).append(button);
     }
     const contents = new Element('button'); contents.dataset.panel = 'contents'; tools.append(contents);
-    app.toolbarMenu = new h.ReaderToolbarMenu(app.root, tools.querySelector('#reader-more'), () => app.dictionary(), () => {});
+    for (const category of ['reference', 'review', 'edition', 'display']) { const trigger = new Element('button'); trigger.dataset.toolMenu = category; trigger.id = 'reader-' + category + '-tools'; tools.append(trigger); }
+    app.toolbarMenu = new h.ReaderToolbarMenu(app.root, () => app.dictionary(), () => {});
     app.installToolbarIcons(); app.updateToolbarLabels();
     const lean = tools.querySelector('#reader-lean-review'); assertIconOnly(lean, 'Lean 对照', 'readerTooltip');
     assert.equal(lean.querySelector('path').getAttribute('d'), 'M12 3v18', 'Lean comparison uses a distinct equal-column symbol.');
@@ -107,6 +108,7 @@ async function toolbarAndIconContract(h) {
     assertSecondary('[data-panel="propositions"]', '命题审阅');
     assertSecondary('[data-panel="symbol-audit"]', '符号审计');
     assertIconOnly(tools.querySelector('#reader-expand'), '全屏阅读', 'readerTooltip');
+    for (const [category, label] of [['reference', '查阅'], ['review', '审阅'], ['edition', '版本与出版'], ['display', '显示']]) assertIconOnly(tools.querySelector('[data-tool-menu="' + category + '"]'), label, 'readerTooltip');
     for (const button of tools.children) { assert.ok(button.dataset.readerTooltip, 'Primary icons retain viewport tooltips.'); assertIconOnly(button, button.dataset.readerTooltip, 'readerTooltip'); assert.equal(button.dataset.tooltip, undefined); }
     for (const svg of tools.querySelectorAll('svg')) { assert.equal(svg.getAttribute('aria-hidden'), 'true'); assert.equal(svg.getAttribute('focusable'), 'false'); }
     app.state.language = 'en'; app.updateToolbarLabels();
@@ -115,6 +117,8 @@ async function toolbarAndIconContract(h) {
     assertSecondary('[data-panel="symbol-audit"]', 'Symbol audit');
     assertSecondary('#reader-archive', 'Version history'); assertSecondary('#reader-publication', 'PDF publication');
     assertIconOnly(tools.querySelector('#reader-expand'), 'Full screen', 'readerTooltip');
+    for (const [category, label] of [['reference', 'Reference'], ['review', 'Review'], ['edition', 'Versions & publication'], ['display', 'Display']]) assertIconOnly(tools.querySelector('[data-tool-menu="' + category + '"]'), label, 'readerTooltip');
+    assert.equal(new Set(tools.children.map(button => JSON.stringify(iconShape(button)))).size, 7, 'Frequent actions and the four categories have distinct primary glyphs.');
     app.page = { page: { documentMode: 'draft' } }; app.updateDraftToolbarAvailability();
     assert.equal(lean.disabled, true); assertIconOnly(lean, h.words.en.draftFormalToolsUnavailable, 'readerTooltip');
     app.state.language = 'zh'; app.updateToolbarLabels(); assertIconOnly(lean, h.words.zh.draftFormalToolsUnavailable, 'readerTooltip');
