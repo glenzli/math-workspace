@@ -19,8 +19,9 @@ The short version:
 ### Core Model
 
 - Stable numbering: source stores stable `#h-...` markers, new objects start as `#tmp-*`, prose references use only `@h-...`, `@h-....title`, or `@h-....full`, and reader-facing numbers are rendered by the tool.
-- Definition lookup: definitions do not get hash IDs or refs; the tool scans standard `定义（术语）：...` / `Definition (Term): ...` entries and deliberately named concept/glossary appendices. AI maintains `.math-workspace/definitions.json` only for missing lookup entries, nonstandard definitions, aliases, bilingual lookup, and unreliable boundaries.
-- Project knowledge: `.math-workspace/project-analysis.json` / `.math-workspace/project-analysis.md` are generated summaries of concept/glossary, notation, and summary pages. Math Workspace rebuilds them in memory and sends current-book sources with Codex discussion context.
+- Definition lookup: definitions do not get hash IDs or refs; the tool scans standard `定义（术语）：...` / `Definition (Term): ...` entries and uses tables and deepest entries from dedicated concept/glossary pages for supplemental lookup. AI maintains `.math-workspace/definitions.json` only for missing lookup entries, nonstandard definitions, aliases, bilingual lookup, and unreliable boundaries.
+- Project knowledge: dedicated concept/glossary, notation, and summary pages are recognized by explicit file names or main titles, regardless of appendix number. Combined concept and notation pages retain both roles. `.math-workspace/project-analysis.json` / `.math-workspace/project-analysis.md` are derived summaries that Math Workspace rebuilds in memory for narrow Codex MCP queries.
+- Summary placement: prefer the final appendix of the same book for new concept and notation summaries, following its actual appendix sequence. Reuse suitable existing pages, combine the two purposes when useful, and coordinate their order with solutions and other appendices.
 - Symbol table: `.math-workspace/symbols.json` records only project-defined special LaTeX notation with an explicit semantic change, not generic variables, complete derivations, or one-off symbols.
 - Dependency graph: explicit dependencies between theorem-like objects and proof-backed hash remarks come from `@h-...`; the canonical data is `.math-workspace/dependency-graph.json`; plain remarks have no graph node, and AI- or prover-suggested edges must be stored separately as suggested data.
 - Export: ordinary Markdown/PDF does not consume formal source directly; use `export-md` or `export-md-split` to lower markers/refs first, then run project-specific postprocessing and `render-pdf`.
@@ -78,7 +79,7 @@ $$
 Hint: Pair the first and last terms.
 ```
 
-A solution may live in the same book's final solutions appendix:
+A solution may live in a solutions appendix near the end of the same book, with its order relative to concept and notation summaries following the overall book structure:
 
 ```markdown
 Solution #tmp-sol (for @tmp-ex): Pair the terms and add the pairs.
@@ -145,7 +146,11 @@ Definition (Bounded operator): A linear map \(T:X\to Y\) is bounded if ...
 定义（有界算子）：若线性映射 \(T:X\to Y\) 满足 ...
 ```
 
-The tool also recognizes deliberately named concept or terminology appendices, such as `appendix-*-concepts.md`, glossary, terminology, or their Chinese equivalents. In those pages, `Term | Definition` / `术语 | 定义` tables and deepest concept-entry headings become supplemental lookup entries. `prepare` writes `.math-workspace/project-analysis.json` and `.math-workspace/project-analysis.md`; Math Workspace rebuilds the same structure in memory and supplies current-book sources to Codex discussions.
+The tool also recognizes dedicated concept or terminology pages by explicit file names or main titles, such as `appendix-*-concepts.md`, glossary, terminology, or their Chinese equivalents, regardless of appendix number. In those pages, `Term | Definition` / `术语 | 定义` tables and deepest concept-entry headings become supplemental lookup entries. When the file name or main title explicitly identifies both concept and notation purposes, both roles are retained.
+
+Prefer the final appendix of the same book for new concept and notation summaries, following its actual appendix sequence; they may share a page. Reuse suitable existing pages without renaming, moving, or reordering other appendices for detection.
+
+`prepare` writes `.math-workspace/project-analysis.json` and `.math-workspace/project-analysis.md`, listing detected concept, notation, and summary pages. Math Workspace rebuilds the same structure in memory for narrow Codex MCP queries.
 
 These are derived reading aids, not new writing sources. The tool does not infer terms or symbol meaning from ordinary prose.
 
@@ -185,7 +190,7 @@ Only project-specific notation whose semantics have explicitly changed belongs i
 ]
 ```
 
-Do not index generic variables, standard notation, or complete derivation formulas. A detected notation appendix appears in project knowledge context, but does not automatically produce a `pattern` or `meaning`.
+Do not index generic variables, standard notation, or complete derivation formulas. Dedicated notation pages are recognized by explicit file names or main titles and may share a page with concept summaries. Detection supplies project knowledge context without automatically producing a `pattern` or `meaning`.
 
 ### Normal Workflow
 
@@ -752,8 +757,9 @@ local engine is installed.
 ## 核心模型
 
 - 稳定编号：源码保存稳定 `#h-...`，新增对象先写 `#tmp-*`；正文引用只用 `@h-...`、`@h-....title` 或 `@h-....full`，读者编号由工具渲染。
-- 定义查询：定义不加 hash、不参与 ref；工具自动扫描标准 `定义（术语）：...` / `Definition (Term): ...`，并在发现概念/术语附录时利用其表格和末级条目建立补充索引。AI 只为查询缺失、非标准定义、别名、中英互查和不可靠边界维护 `.math-workspace/definitions.json`。
-- 项目知识：`.math-workspace/project-analysis.json` / `.math-workspace/project-analysis.md` 是工具生成的概念附录、符号附录和 summary 页面摘要；Math Workspace 在内存中按内容变化重建，供 Codex 通过窄范围 MCP 查询核对。
+- 定义查询：定义不加 hash、不参与 ref；工具自动扫描标准 `定义（术语）：...` / `Definition (Term): ...`，并在发现概念/术语专页时利用其表格和末级条目建立补充索引。AI 只为查询缺失、非标准定义、别名、中英互查和不可靠边界维护 `.math-workspace/definitions.json`。
+- 项目知识：工具按明确文件名或页面主标题识别概念/术语、符号/记号与 summary 专页，不限定附录序号；合并概念与符号的页面保留两类上下文。`.math-workspace/project-analysis.json` / `.math-workspace/project-analysis.md` 是派生摘要，Math Workspace 在内存中按内容变化重建，供 Codex 通过窄范围 MCP 查询核对。
+- 汇总布局：新建概念与符号汇总时优先放在同书最后一个附录，沿用实际序号；已有合适页直接复用，可合为一页，并与题解等其他附录按整书结构协调。
 - 符号表：`.math-workspace/symbols.json` 只记录项目明确约定且发生语义变化的特殊 LaTeX 记号，不索引通用变量、完整推导公式或一次性符号。
 - 依赖图：命题/引理/定理/推论与带 hash、可证明的补充注释之间的显式依赖来自 `@h-...`，权威数据是 `.math-workspace/dependency-graph.json`；普通 `注（...）` 不进入图。AI 或证明器推测出的边必须另存为 suggested 数据。
 - 导出：普通 Markdown/PDF 不直接消费 formal 源；先用 `export-md` 或 `export-md-split` 降级 marker/ref，项目级后处理之后再用 `render-pdf`。
@@ -811,7 +817,7 @@ $$
 提示：考虑首尾配对。
 ```
 
-可以把解答放到同一本书的最后一个题解附录，使用如下声明：
+可以把解答放到同一本书书末的题解附录，与概念、符号汇总的先后按整书结构安排，使用如下声明：
 
 ```markdown
 解答 #tmp-sol（对应 @tmp-ex）：将首尾项配对，再求和。
@@ -898,7 +904,11 @@ Table #tmp-7 (Parameter ranges):
 Definition (Bounded operator): A linear map \(T:X\to Y\) is bounded if ...
 ```
 
-工具还会识别明确命名的概念/术语附录，例如 `appendix-*-concepts.md`、glossary、terminology 或中文概念表。此类页面中，`术语 | 定义` / `Term | Definition` 表格与最末级概念条目会作为补充查询条目。`prepare` 会生成 `.math-workspace/project-analysis.json` 和 `.math-workspace/project-analysis.md`，列出被采用的概念、符号和 summary 页面；Math Workspace 在内存中同步重建这份结构，供 Codex 通过窄范围 MCP 查询核对。
+工具还会按明确的文件名或页面主标题识别概念/术语专页，例如 `appendix-*-concepts.md`、glossary、terminology 或中文概念表，不限定附录序号。此类页面中，`术语 | 定义` / `Term | Definition` 表格与最末级概念条目会作为补充查询条目；文件名或主标题同时明确概念与符号用途时，保留两类上下文。
+
+新建概念与符号汇总时，优先放在同书最后一个附录，沿用整书实际序号；可合为一页。已有合适页面时直接复用，不为识别而改名、移动或重排其他附录。
+
+`prepare` 会生成 `.math-workspace/project-analysis.json` 和 `.math-workspace/project-analysis.md`，列出被采用的概念、符号和 summary 页面；Math Workspace 在内存中同步重建这份结构，供 Codex 通过窄范围 MCP 查询核对。
 
 这些条目是派生索引，不是新的写作源，也不会由工具从普通正文猜测术语或符号含义。
 
@@ -938,7 +948,7 @@ Definition (Bounded operator): A linear map \(T:X\to Y\) is bounded if ...
 ]
 ```
 
-不要索引普通变量、通用记号或完整推导公式。检测到的符号/记号附录会出现在项目知识摘要中，但不会自动推导 `pattern` 或 `meaning`。
+不要索引普通变量、通用记号或完整推导公式。符号/记号专页按明确的文件名或页面主标题识别，可与概念汇总合页；检测结果只提供项目知识上下文，不会自动推导 `pattern` 或 `meaning`。
 
 ## 常规流程
 

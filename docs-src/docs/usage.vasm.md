@@ -73,7 +73,7 @@ $$
 提示：考虑首尾配对。
 ```
 
-可以把解答放到同一本书的最后一个题解附录，使用如下声明：
+可以把解答放到同一本书书末的题解附录，与概念、符号汇总的先后按整书结构安排，使用如下声明：
 
 ```markdown
 解答 #tmp-sol（对应 @tmp-ex）：将首尾项配对，再求和。
@@ -160,7 +160,11 @@ Table #tmp-7 (Parameter ranges):
 Definition (Bounded operator): A linear map \(T:X\to Y\) is bounded if ...
 ```
 
-工具还会识别明确命名的概念/术语附录，例如 `appendix-*-concepts.md`、glossary、terminology 或中文概念表。此类页面中，`术语 | 定义` / `Term | Definition` 表格与最末级概念条目会作为补充查询条目。`prepare` 会生成 `.math-workspace/project-analysis.json` 和 `.math-workspace/project-analysis.md`，列出被采用的概念、符号和 summary 页面；Math Workspace 在内存中同步重建这份结构，供 Codex 通过窄范围 MCP 查询核对。
+工具还会按明确的文件名或页面主标题识别概念/术语专页，例如 `appendix-*-concepts.md`、glossary、terminology 或中文概念表，不限定附录序号。此类页面中，`术语 | 定义` / `Term | Definition` 表格与最末级概念条目会作为补充查询条目；文件名或主标题同时明确概念与符号用途时，保留两类上下文。
+
+新建概念与符号汇总时，优先放在同书最后一个附录，沿用整书实际序号；可合为一页。已有合适页面时直接复用，不为识别而改名、移动或重排其他附录。
+
+`prepare` 会生成 `.math-workspace/project-analysis.json` 和 `.math-workspace/project-analysis.md`，列出被采用的概念、符号和 summary 页面；Math Workspace 在内存中同步重建这份结构，供 Codex 通过窄范围 MCP 查询核对。
 
 这些条目是派生索引，不是新的写作源，也不会由工具从普通正文猜测术语或符号含义。
 
@@ -200,7 +204,7 @@ Definition (Bounded operator): A linear map \(T:X\to Y\) is bounded if ...
 ]
 ```
 
-不要索引普通变量、通用记号或完整推导公式。检测到的符号/记号附录会出现在项目知识摘要中，但不会自动推导 `pattern` 或 `meaning`。
+不要索引普通变量、通用记号或完整推导公式。符号/记号专页按明确的文件名或页面主标题识别，可与概念汇总合页；检测结果只提供项目知识上下文，不会自动推导 `pattern` 或 `meaning`。
 
 ## 常规流程
 

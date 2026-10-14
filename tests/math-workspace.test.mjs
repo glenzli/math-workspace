@@ -508,6 +508,161 @@ async function testProjectKnowledgeAnalysis() {
     }
 }
 
+async function testProjectKnowledgeRoles() {
+    const { analyzeProjectKnowledge, renderProjectAnalysis } = formalCore();
+    const cases = [
+        ['book/99-symbols.md', '# 符号表\n', ['notation-appendix'], 'medium'],
+        ['book/99_symbols.md', '# Reference\n', ['notation-appendix'], 'medium'],
+        ['book/reference.md', '# 附录 H：符号表\n', ['notation-appendix'], 'high'],
+        ['book/appendix-q-concepts.md', '# Appendix Q: Core Concepts\n', ['concept-appendix'], 'high'],
+        ['book/appendix_z_core_concepts.md', '# Reference\n', ['concept-appendix'], 'high'],
+        ['book/overview.md', '# Concept overview\n', ['concept-appendix'], 'medium'],
+        ['book/terms.md', '# A glossary of spectral theory\n', ['glossary'], 'medium'],
+        ['book/summary.md', '# Concepts and notation\n\n| Term | Definition |\n| --- | --- |\n| Shared term | A concept described in the combined summary page. |\n', ['summary-page', 'concept-appendix', 'notation-appendix'], 'medium'],
+        ['book/notation.md', '# Reference\n', ['notation-appendix'], 'medium'],
+        ['book/appendix-iv-terminology.md', '# Appendix IV: Terminology\n', ['concept-appendix'], 'high'],
+        ['book/术语参考.md', '# Topological terminology\n', ['glossary'], 'medium'],
+        ['book/chinese-reference.md', '# 附录 丁：概念与符号\n', ['concept-appendix', 'notation-appendix'], 'high']
+    ];
+    const ordinary = [
+        { filePath: 'book/03-concepts-in-topology.md', content: '# Concepts in topology\n\n## An ordinary topic\n\nAn explanatory chapter is not a concept overview.\n\n| Term | Definition |\n| --- | --- |\n| False chapter entry | This table belongs to an ordinary chapter. |\n' },
+        { filePath: 'book/04-symbols-in-dynamics.md', content: '# Symbols in dynamics\n\nAn ordinary chapter about symbolic dynamics.\n' },
+        { filePath: 'book/05-analysis.md', content: '# Analysis\n\n## Concepts\n\nA subordinate heading does not name the whole page.\n' },
+        { filePath: 'book/code-sample.md', content: '````markdown\n# Appendix H: Concepts and notation\n```\n# Glossary\n~~~~\n# Symbols\n````\n' }
+    ];
+    const analysis = analyzeProjectKnowledge([...cases.map(([filePath, content]) => ({ filePath, content })), ...ordinary]);
+    assert.equal(analysis.project.schemaVersion, 1);
+    assert.equal(analysis.project.sources.length, cases.length);
+    for (const [filePath, , kinds, confidence] of cases) {
+        const source = analysis.project.sources.find(item => item.filePath === filePath);
+        assert.ok(source, filePath);
+        assert.equal(source.kind, kinds[0], filePath);
+        assert.deepEqual(source.kinds, kinds, filePath);
+        assert.equal(source.confidence, confidence, filePath);
+    }
+    assert.deepEqual(analysis.project.summary, { conceptSources: 8, notationSources: 6, summaryPages: 1, extractedDefinitions: 1 });
+    assert.deepEqual(analysis.definitions.map(definition => [definition.title, definition.origin]), [['Shared term', 'concept-appendix']]);
+    const legacyAnalysis = { ...analysis.project, sources: analysis.project.sources.map(({ kinds: _kinds, ...source }) => source) };
+    assert.match(renderProjectAnalysis(legacyAnalysis), /\| summary-page \| `book\/summary\.md`/);
+
+    const root = await makeWorkspace('project-knowledge-roles');
+    const mixedLines = [
+        '# Concepts and notation',
+        '',
+        '## Concepts',
+        '',
+        'Definition (Canonical term): This standard definition remains authoritative.',
+        '',
+        '### Concept table',
+        '',
+        '| Term | Definition |',
+        '| --- | --- |',
+        '| Table concept | The first structural entry for this concept is retained. |',
+        '| Table concept | A repeated entry must not replace the first entry. |',
+        '| Canonical term | A supplemental table row must not replace the standard definition. |',
+        '| Manual term | A reviewed manual meaning with an explicit lookup alias. |',
+        '',
+        '### Compactness',
+        '',
+        'Every open cover of the space admits a finite subcover.',
+        '',
+        '````markdown',
+        '| Term | Definition |',
+        '| --- | --- |',
+        '| Fenced term | This example must not become a concept entry. |',
+        '```',
+        '#### Fenced heading',
+        '',
+        'A shorter backtick fence cannot close the outer example.',
+        '~~~~',
+        '````',
+        '',
+        '### Connectedness',
+        '',
+        'The space cannot be separated into two disjoint nonempty open subsets.',
+        '',
+        '## Notation',
+        '',
+        '| Term | Definition |',
+        '| --- | --- |',
+        '| Symbol alias | This notation-only table must not become a definition. |',
+        '',
+        '### Symbol groups',
+        '',
+        '#### $X$',
+        '',
+        'The letter used for a space in the notation reference.',
+        ''
+    ];
+    const documents = [
+        { filePath: 'book1/knowledge.md', content: mixedLines.join('\n') },
+        { filePath: 'book1/99-symbols.md', content: '# 符号表\n\n| Term | Definition |\n| --- | --- |\n| Symbol only | Explicit notation semantics are maintained separately. |\n' },
+        { filePath: 'book1/reference.md', content: '# 附录 H：符号表\n\n$X$ denotes the space in this reference.\n' },
+        { filePath: 'book1/01-topology.md', content: ordinary[0].content + '\nDefinition (Ordinary definition): Standard markers are indexed in ordinary chapters.\n' }
+    ];
+    for (const document of documents) await fs.writeFile(path.join(root, document.filePath), document.content);
+    await fs.mkdir(path.join(root, '.math-workspace'), { recursive: true });
+    await fs.writeFile(path.join(root, '.math-workspace/definitions.json'), JSON.stringify([{
+        term: 'Manual term',
+        aliases: ['curated alias'],
+        source: `book1/knowledge.md:${mixedLines.findIndex(line => line.startsWith('| Manual term |')) + 1}`,
+        content: 'A reviewed manual meaning with an explicit lookup alias.'
+    }], null, 2));
+    const prepare = runCli(root, ['prepare']);
+    assert.equal(prepare.status, 0, combinedOutput(prepare));
+    const prepared = JSON.parse(await read(root, '.math-workspace/project-analysis.json'));
+    assert.deepEqual(prepared.summary, { conceptSources: 1, notationSources: 3, summaryPages: 0, extractedDefinitions: 3 });
+    assert.equal(prepared.sources.length, 3);
+    const mixedSource = prepared.sources.find(source => source.filePath === 'book1/knowledge.md');
+    assert.equal(mixedSource.kind, 'concept-appendix');
+    assert.deepEqual(mixedSource.kinds, ['concept-appendix', 'notation-appendix']);
+    const report = await read(root, '.math-workspace/project-analysis.md');
+    assert.match(report, /\| concept-appendix, notation-appendix \| `book1\/knowledge\.md`/);
+    assert.equal(report.match(/`book1\/knowledge\.md`/g)?.length, 1);
+    const index = JSON.parse(await read(root, '.math-workspace/workspace-index.json'));
+    assert.deepEqual(index.definitions.map(definition => definition.title).sort(), ['Canonical term', 'Compactness', 'Connectedness', 'Manual term', 'Ordinary definition', 'Table concept'].sort());
+    assert.match(index.definitions.find(definition => definition.title === 'Canonical term').content, /This standard definition remains authoritative\./);
+    assert.doesNotMatch(index.definitions.find(definition => definition.title === 'Canonical term').content, /supplemental table row/);
+    assert.equal(index.definitions.find(definition => definition.title === 'Table concept').content, 'The first structural entry for this concept is retained.');
+    assert.equal(index.definitions.find(definition => definition.title === 'Ordinary definition').origin, 'standard');
+    const manual = index.definitions.find(definition => definition.title === 'Manual term');
+    assert.equal(manual.origin, 'manual');
+    assert.deepEqual(manual.aliases, ['curated alias']);
+    const compactness = index.definitions.find(definition => definition.title === 'Compactness');
+    assert.equal(compactness.line, mixedLines.indexOf('### Compactness') + 1);
+    assert.equal(compactness.content, 'Every open cover of the space admits a finite subcover.');
+    assert.equal(index.symbols.length, 0, 'Notation page contents must not infer symbols.json entries.');
+    for (const document of documents) assert.equal(await read(root, document.filePath), document.content, 'Knowledge analysis must preserve source Markdown.');
+
+    const reader = await startReader(root);
+    try {
+        const state = await (await fetch(reader.url + '/api/state')).json();
+        assert.deepEqual(state.projectAnalysis.summary, prepared.summary);
+        const detail = await (await fetch(reader.url + '/api/definition?index=' + state.definitions.find(definition => definition.title === 'Compactness').index)).json();
+        assert.equal(detail.content, compactness.content);
+        const endpoint = await (await fetch(reader.url + '/api/project-analysis')).json();
+        assert.deepEqual(endpoint.sources.find(source => source.filePath === mixedSource.filePath).kinds, mixedSource.kinds);
+    } finally {
+        await stopReader(reader.child);
+    }
+    const mcp = await startMcp(root);
+    try {
+        const lookup = await mcp.request('tools/call', { name: 'lookup_knowledge', arguments: { query: 'notation-appendix' } });
+        assert.equal(lookup.isError, undefined, JSON.stringify(lookup));
+        const sources = lookup.structuredContent.result.matches.filter(match => match.kind === 'project-source');
+        assert.equal(sources.length, 3);
+        assert.equal(new Set(sources.map(source => source.filePath)).size, 3);
+        const mixed = sources.find(source => source.filePath === mixedSource.filePath);
+        assert.equal(mixed.sourceKind, 'concept-appendix');
+        assert.deepEqual(mixed.sourceKinds, mixedSource.kinds);
+        const alias = await mcp.request('tools/call', { name: 'lookup_knowledge', arguments: { query: 'curated alias' } });
+        assert.equal(alias.isError, undefined, JSON.stringify(alias));
+        assert.equal(alias.structuredContent.result.matches.find(match => match.title === 'Manual term').origin, 'manual');
+    } finally {
+        await stopReader(mcp.child);
+    }
+}
+
 async function testSymbolCache() {
     const root = await makeWorkspace('symbols');
     await fs.mkdir(path.join(root, '.math-workspace'), { recursive: true });
@@ -2683,6 +2838,7 @@ const tests = [
     ['custom dictionary text refs', testCustomDictionaryTextRefs],
     ['structured definition marker content', testStructuredDefinitionMarkerContent],
     ['project knowledge analysis', testProjectKnowledgeAnalysis],
+    ['project knowledge roles and extraction boundaries', testProjectKnowledgeRoles],
     ['symbol cache', testSymbolCache],
     ['local Reader symbol audit', testReaderSymbolAudit],
     ['warns unbalanced symbol pattern', testWarnsUnbalancedSymbolPattern],

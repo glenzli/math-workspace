@@ -276,13 +276,15 @@ export class WorkspaceQueries {
             });
         }
         for (const source of snapshot.state.projectAnalysis?.sources || []) {
-            const score = matchScore(query, [source.title, source.kind, source.filePath]);
+            const sourceKinds = source.kinds || [source.kind];
+            const score = matchScore(query, [source.title, ...sourceKinds, source.filePath]);
             if (score === undefined) continue;
             matches.push({
                 score,
                 sortKey: `source:${source.filePath}`,
                 kind: 'project-source',
                 sourceKind: source.kind,
+                sourceKinds,
                 title: source.title,
                 filePath: source.filePath,
                 confidence: source.confidence,

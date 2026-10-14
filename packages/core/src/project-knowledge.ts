@@ -2,6 +2,8 @@ export type ProjectKnowledgeSourceKind = 'concept-appendix' | 'glossary' | 'nota
 
 export interface ProjectKnowledgeSource {
     kind: ProjectKnowledgeSourceKind;
+    /** All detected roles; optional when reading analysis produced by older versions. */
+    kinds?: ProjectKnowledgeSourceKind[];
     filePath: string;
     title: string;
     confidence: 'high' | 'medium';
@@ -44,10 +46,18 @@ interface Heading {
     title: string;
 }
 
-const CONCEPT_NAME_RE = /(?:concepts?|glossary|terminology|definitions?|concept-index|概念|术语|定义)/i;
-const NOTATION_NAME_RE = /(?:symbols?|notation|conventions?|符号|记号|约定)/i;
+const GLOSSARY_NAME_RE = /(?:^|[^a-z])(?:glossary|terminology)(?:$|[^a-z])|术语/i;
 const SUMMARY_NAME_RE = /(?:^|[-_])summary(?:$|[-_])|总结|小结/i;
 const GENERIC_HEADING_RE = /^(?:附录\s*[A-Z0-9]*\s*[:：-]?\s*)?(?:概念|术语|定义|符号|记号|约定|目录|索引|说明|范围|总览|概览|引言|导言|参考文献|references?|introduction|overview|scope|notes?)$/i;
+const APPENDIX_PREFIX_RE = /^(?:appendix(?=$|[\s_:：.、–—-])|附录)[\s_:：.、–—-]*/i;
+const CONCEPT_TITLE_RE = /^(?:(?:core|key|basic|fundamental|main|common|project|mathematical)\s+)*(?:concepts?|definitions?)(?:\s+(?:index|table|list|overview|summary|reference))?$|^(?:(?:核心|基本|基础|关键|主要|常用|本书|全书|全卷|项目)\s*)*(?:概念|定义)(?:表|总表|一览表?|汇总|索引|总览|概览|速查表?|说明|清单)?$/i;
+const NOTATION_TITLE_RE = /^(?:(?:core|key|basic|fundamental|main|common|project|mathematical)\s+)*(?:symbols?|notations?|conventions?)(?:\s+(?:index|table|list|overview|summary|reference|conventions))?$|^(?:table|list|index)\s+of\s+(?:symbols?|notation|conventions?)$|^(?:(?:核心|基本|基础|关键|主要|常用|本书|全书|全卷|项目)\s*)*(?:符号|记号|约定|符号约定|记号约定)(?:表|总表|一览表?|汇总|索引|总览|概览|速查表?|说明|清单)?$/i;
+
+interface KnowledgeRoles {
+    concept: boolean;
+    glossary: boolean;
+    notation: boolean;
+}
 
 function normalizePath(value: string): string {
     return String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
@@ -69,15 +79,25 @@ function normalizeTerm(value: string): string {
         .trim();
 }
 
+function unfencedLines(content: string): string[] {
+    let fence: { marker: string; length: number } | undefined;
+    return String(content || '').split(/\r?\n/).map(line => {
+        const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+        if (fence) {
+            if (match && match[1][0] === fence.marker && match[1].length >= fence.length && !match[2].trim()) fence = undefined;
+            return '';
+        }
+        if (match) {
+            fence = { marker: match[1][0], length: match[1].length };
+            return '';
+        }
+        return line;
+    });
+}
+
 function parseHeadings(content: string): Heading[] {
     const headings: Heading[] = [];
-    let inFence = false;
-    String(content || '').split(/\r?\n/).forEach((line, index) => {
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            return;
-        }
-        if (inFence) return;
+    unfencedLines(content).forEach((line, index) => {
         const match = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*$/);
         if (!match) return;
         const title = normalizeTerm(match[2].replace(/\s+#+\s*$/, ''));
@@ -86,29 +106,60 @@ function parseHeadings(content: string): Heading[] {
     return headings;
 }
 
+function knowledgeRoles(value: string): KnowledgeRoles {
+    const name = normalizeTerm(value.replace(/_/g, ' '));
+    const appendix = APPENDIX_PREFIX_RE.test(name);
+    const descriptor = name.replace(APPENDIX_PREFIX_RE, '').replace(/[-_:：.–—]+/g, ' ').replace(/^\d+\s+/, '').trim();
+    const candidates = appendix ? [descriptor, descriptor.replace(/^[^\s、]+[\s、]+/, '')] : [descriptor];
+    const roles: KnowledgeRoles = { concept: false, glossary: false, notation: false };
+    for (const candidate of candidates) {
+        // Glossary and terminology names may include a domain, such as "Operator glossary".
+        const glossary = GLOSSARY_NAME_RE.test(candidate);
+        const parts = candidate.split(/\s+(?:and|with)\s+|[&/+,、与和及暨]/i).map(part => part.trim()).filter(Boolean);
+        const partRoles = parts.map(part => ({ concept: CONCEPT_TITLE_RE.test(part) || GLOSSARY_NAME_RE.test(part), notation: NOTATION_TITLE_RE.test(part) }));
+        const dedicated = partRoles.length > 0 && partRoles.every(part => part.concept || part.notation);
+        roles.glossary ||= glossary;
+        roles.concept ||= glossary || (dedicated && partRoles.some(part => part.concept));
+        roles.notation ||= dedicated && partRoles.some(part => part.notation);
+    }
+    return roles;
+}
+
 function sourceKind(document: ProjectDocument, headings: Heading[]): Omit<ProjectKnowledgeSource, 'extractedDefinitions'> | undefined {
     const stem = fileStem(document.filePath);
     const topTitle = headings.length > 0
         ? headings.filter(heading => heading.level === Math.min(...headings.map(item => item.level)))[0]?.title || ''
         : '';
-    const appendix = /^appendix[-_\s]?/i.test(stem) || /(?:^|\/)附录/.test(normalizePath(document.filePath));
-    const concept = CONCEPT_NAME_RE.test(stem) || CONCEPT_NAME_RE.test(topTitle);
-    const notation = NOTATION_NAME_RE.test(stem) || NOTATION_NAME_RE.test(topTitle);
+    const appendix = APPENDIX_PREFIX_RE.test(stem) || APPENDIX_PREFIX_RE.test(topTitle) || /(?:^|\/)附录/.test(normalizePath(document.filePath));
+    const names = [knowledgeRoles(stem), knowledgeRoles(topTitle)];
+    const concept = names.some(name => name.concept);
+    const glossary = names.some(name => name.glossary);
+    const notation = names.some(name => name.notation);
     const summary = SUMMARY_NAME_RE.test(stem) || SUMMARY_NAME_RE.test(topTitle);
+    const kinds: ProjectKnowledgeSourceKind[] = [];
+    // Preserve historical primary kinds while allowing the same file to supply more roles.
+    const historicalGlossary = /glossary|术语/i.test(`${stem} ${topTitle}`) || (!appendix && (glossary || /概念表|核心概念/.test(`${stem} ${topTitle}`)));
+    if (concept) kinds.push(historicalGlossary ? 'glossary' : 'concept-appendix');
+    if (notation) kinds.push('notation-appendix');
+    if (summary) kinds.push('summary-page');
+    if (!kinds.length) return undefined;
+    if (summary && !appendix && !historicalGlossary) kinds.unshift(...kinds.splice(kinds.indexOf('summary-page'), 1));
+    return { kind: kinds[0], kinds, filePath: normalizePath(document.filePath), title: topTitle || stem, confidence: appendix && (concept || notation) ? 'high' : 'medium' };
+}
 
-    if (appendix && concept) {
-        return { kind: /glossary|术语/i.test(`${stem} ${topTitle}`) ? 'glossary' : 'concept-appendix', filePath: normalizePath(document.filePath), title: topTitle || stem, confidence: 'high' };
-    }
-    if (concept && /(?:glossary|terminology|术语|概念表|核心概念)/i.test(`${stem} ${topTitle}`)) {
-        return { kind: 'glossary', filePath: normalizePath(document.filePath), title: topTitle || stem, confidence: 'medium' };
-    }
-    if (appendix && notation) {
-        return { kind: 'notation-appendix', filePath: normalizePath(document.filePath), title: topTitle || stem, confidence: 'high' };
-    }
-    if (summary) {
-        return { kind: 'summary-page', filePath: normalizePath(document.filePath), title: topTitle || stem, confidence: 'medium' };
-    }
-    return undefined;
+/** Retain concept sections and line numbers while excluding notation-only sections and code examples. */
+function conceptDocument(document: ProjectDocument): ProjectDocument {
+    const lines = unfencedLines(document.content);
+    const headings = parseHeadings(document.content);
+    const sections: Array<{ level: number; include: boolean }> = [];
+    headings.forEach((heading, index) => {
+        while (sections.length && sections[sections.length - 1].level >= heading.level) sections.pop();
+        const roles = knowledgeRoles(heading.title);
+        const include = roles.concept || (!roles.notation && (sections[sections.length - 1]?.include ?? true));
+        sections.push({ level: heading.level, include });
+        if (!include) lines.fill('', heading.line - 1, headings[index + 1] ? headings[index + 1].line - 1 : lines.length);
+    });
+    return { ...document, content: lines.join('\n') };
 }
 
 function tableCells(line: string): string[] {
@@ -162,10 +213,14 @@ function headingDefinitions(document: ProjectDocument, source: ProjectKnowledgeS
     const headings = parseHeadings(document.content);
     if (headings.length < 2) return [];
     const pageLevel = Math.min(...headings.map(heading => heading.level));
-    const itemLevel = Math.max(...headings.filter(heading => heading.level > pageLevel).map(heading => heading.level));
+    const entryHeadings = headings.filter(heading => {
+        const roles = knowledgeRoles(heading.title);
+        return heading.level > pageLevel && !GENERIC_HEADING_RE.test(heading.title) && !roles.concept && !roles.notation;
+    });
+    const itemLevel = Math.max(...entryHeadings.map(heading => heading.level));
     if (!Number.isFinite(itemLevel)) return [];
 
-    return headings
+    return entryHeadings
         .filter(heading => heading.level === itemLevel)
         .flatMap(heading => {
             const title = normalizeTerm(heading.title);
@@ -184,12 +239,12 @@ function headingDefinitions(document: ProjectDocument, source: ProjectKnowledgeS
 }
 
 function tableDefinitions(document: ProjectDocument, source: ProjectKnowledgeSource): ProjectKnowledgeDefinition[] {
-    const lines = String(document.content || '').split(/\r?\n/);
+    const lines = unfencedLines(document.content);
     const definitions: ProjectKnowledgeDefinition[] = [];
     for (let index = 0; index < lines.length - 2; index++) {
         const headers = tableCells(lines[index]);
         const divider = tableCells(lines[index + 1]);
-        if (!headers.length || headers.length !== divider.length || !isTableDivider(divider)) continue;
+        if (/^(?: {4}|\t)/.test(lines[index]) || !headers.length || headers.length !== divider.length || !isTableDivider(divider)) continue;
         const termIndex = headers.findIndex(isTermColumn);
         const definitionIndex = headers.findIndex(isDefinitionColumn);
         if (termIndex < 0 || definitionIndex < 0 || termIndex === definitionIndex) continue;
@@ -240,8 +295,9 @@ export function analyzeProjectKnowledge(documents: ProjectDocument[], existingDe
 
     const rawDefinitions = sourceDocuments.flatMap(({ document, source }) => {
         const completed = { ...source, extractedDefinitions: 0 } as ProjectKnowledgeSource;
-        if (completed.kind !== 'concept-appendix' && completed.kind !== 'glossary') return [];
-        return [...tableDefinitions(document, completed), ...headingDefinitions(document, completed)];
+        if (!(completed.kinds || [completed.kind]).some(kind => kind === 'concept-appendix' || kind === 'glossary')) return [];
+        const concepts = conceptDocument(document);
+        return [...tableDefinitions(concepts, completed), ...headingDefinitions(concepts, completed)];
     });
     const definitions = uniqueDefinitions(rawDefinitions, existingDefinitions);
     const definitionCountBySource = new Map<string, number>();
@@ -251,9 +307,9 @@ export function analyzeProjectKnowledge(documents: ProjectDocument[], existingDe
         extractedDefinitions: definitionCountBySource.get(source.filePath) || 0
     }));
     const summary = {
-        conceptSources: sources.filter(source => source.kind === 'concept-appendix' || source.kind === 'glossary').length,
-        notationSources: sources.filter(source => source.kind === 'notation-appendix').length,
-        summaryPages: sources.filter(source => source.kind === 'summary-page').length,
+        conceptSources: sources.filter(source => (source.kinds || [source.kind]).some(kind => kind === 'concept-appendix' || kind === 'glossary')).length,
+        notationSources: sources.filter(source => (source.kinds || [source.kind]).includes('notation-appendix')).length,
+        summaryPages: sources.filter(source => (source.kinds || [source.kind]).includes('summary-page')).length,
         extractedDefinitions: definitions.length
     };
     return {
