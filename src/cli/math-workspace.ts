@@ -50,6 +50,8 @@ import { buildLeanWorkspace, captureLeanContracts, writeLeanContracts } from '..
 import { collectLeanDependencies } from '../lean/lean-dependencies';
 import { runCodexFileHandler } from '../codex/file-handler';
 import { runArchiveCli } from '../archive/cli';
+import { runPublicationCli } from '../publication/cli';
+import { safePath as publicationSafePath, relativeInput as publicationRelativeInput } from '../publication/store';
 
 let ROOT = process.cwd();
 let CACHE_DIR = path.join(ROOT, '.math-workspace');
@@ -157,8 +159,8 @@ async function readDefinitions() {
     }
 }
 
-async function scanWorkspace() {
-    const config = await readConfig();
+async function scanWorkspace({ readOnly = false } = {}) {
+    const config = readOnly ? await readConfigIfExists() : await readConfig();
     const files = await collectMarkdownFiles(config);
     const documents = await readWorkspaceDocuments(files);
     const symbols = await readSymbols();
@@ -899,6 +901,9 @@ function compileFormalMarkdownContent(content, sourceFilePath, state, options: {
         if (inFence) return line;
 
         const markerCompiled = compileFormalMarkerLine(staticFigureMarkdown(line), state);
+        if (linkTargetMode !== 'preserve' && /^\s*\[[^\]]+\]:\s*/.test(markerCompiled)) {
+            return markerCompiled.replace(/^(\s*\[[^\]]+\]:\s*)(.+)$/, (_match, prefix, target) => `${prefix}${normalizeExportLinkTarget(target, sourceFilePath)}`);
+        }
         return splitProtectedInlineSegments(markerCompiled).map(part => {
             if (part.kind === 'code') return part.text;
             if (part.kind === 'link') return rewriteMarkdownLinkTargetsForExport(part.text, sourceFilePath, linkTargetMode);
@@ -977,9 +982,11 @@ function simpleTitlePageHeader(options) {
     const date = latexLine(options.date, options.dateSize);
     const version = options.showVersionOnCover ? latexLine(options.releaseVersion, options.dateSize) : '';
     const authorBlock = [author, date, version].filter(Boolean).join('\\vspace{0.8em}');
+    const image = options.coverImage ? `\\includegraphics[width=0.82\\textwidth,height=0.38\\textheight,keepaspectratio]{\\detokenize{${options.coverImage}}}\\par\\vspace{1.5em}` : '';
     return [
         '\\renewcommand{\\maketitle}{',
-        '\\begin{titlepage}\\thispagestyle{empty}\\vspace*{0.20\\textheight}\\begin{center}',
+        `\\begin{titlepage}\\thispagestyle{empty}\\vspace*{${image ? '0.04' : '0.20'}\\textheight}\\begin{center}`,
+        image,
         title,
         subtitle ? `\\vspace{1.2em}${subtitle}` : '',
         authorBlock ? `\\vfill${authorBlock}` : '',
@@ -995,25 +1002,37 @@ function normalizedMetadataUrl(value) {
 
 function publicationMetadataRows(options): Array<[string, string]> {
     const rows: Array<[string, string]> = [];
+    const chinese = String(options.lang || '').toLowerCase().startsWith('zh');
+    const labels = chinese ? {
+        author: '作者', nativeName: '本名', aliases: '别名', repository: '项目地址', license: '许可协议',
+        version: '本版版本', tag: '发布标签', commit: '提交版本', doi: '本版 DOI', workDoi: '作品 DOI',
+        doiNote: 'DOI 说明', citation: '推荐引用'
+    } : {
+        author: 'Author', nativeName: 'Native name', aliases: 'Also known as', repository: 'Repository', license: 'License',
+        version: 'Release version', tag: 'Release tag', commit: 'Commit', doi: 'DOI', workDoi: 'Work DOI',
+        doiNote: 'DOI provenance', citation: 'Preferred citation'
+    };
     const add = (label: string, value: string) => {
         const normalized = String(value || '').trim();
         if (normalized) rows.push([label, normalized]);
     };
 
-    add('Author', options.author);
-    add('Native name', options.authorNative);
-    add('Also known as', (options.authorAliases || []).join('; '));
+    add(labels.author, options.author);
+    add(labels.nativeName, options.authorNative);
+    add(labels.aliases, (options.authorAliases || []).join('; '));
     add('ORCID', normalizedMetadataUrl(options.orcid));
-    add('Repository', normalizedMetadataUrl(options.repository));
+    add(labels.repository, normalizedMetadataUrl(options.repository));
     const license = options.licenseUrl
         ? `${options.license || options.licenseUrl}${options.license ? ' ' : ''}(${normalizedMetadataUrl(options.licenseUrl)})`
         : options.license;
-    add('License', license);
-    add('Release version', options.releaseVersion);
-    add('Release tag', options.releaseTag);
-    add('Commit', options.releaseCommit);
-    add('DOI', options.doi);
-    add('Preferred citation', options.preferredCitation);
+    add(labels.license, license);
+    add(labels.version, options.releaseVersion);
+    add(labels.tag, options.releaseTag);
+    add(labels.commit, options.releaseCommit);
+    add(labels.doi, options.doi);
+    add(labels.workDoi, options.workDoi);
+    if (String(options.doi || '').trim() || String(options.workDoi || '').trim()) add(labels.doiNote, options.doiState);
+    add(labels.citation, options.preferredCitation);
     return rows;
 }
 
@@ -1023,10 +1042,19 @@ function latexMetadataText(value) {
 
 function frontMatterMarkdownWithSafeHeadings(content, includeHeadingsInToc) {
     const classes = includeHeadingsInToc ? '{.unnumbered}' : '{.unnumbered .unlisted}';
-    return String(content || '').replace(/^(#{1,6}\s+)(.+?)\s*$/gm, (_match, prefix, title) => {
-        if (/\{[^}]*\}\s*$/.test(title)) return `${prefix}${title}`;
+    let fence = false;
+    return String(content || '').split(/\r?\n/).map(line => {
+        if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return line; }
+        if (fence) return line;
+        return line.replace(/^(#{1,6}\s+)(.+?)\s*$/, (_match, prefix, title) => {
+        const attributes = /\s*\{([^}]*)\}\s*$/.exec(title);
+        if (attributes) {
+            const retained = attributes[1].split(/\s+/).filter(value => value && !['.unnumbered', '.unlisted', '-'].includes(value));
+            return `${prefix}${title.slice(0, attributes.index)} {${[...retained, '.unnumbered', ...(!includeHeadingsInToc ? ['.unlisted'] : [])].join(' ')}}`;
+        }
         return `${prefix}${title} ${classes}`;
-    });
+        });
+    }).join('\n');
 }
 
 function markdownToLatexSnippet(content, sourceLabel) {
@@ -1072,6 +1100,8 @@ async function frontMatterLatex(options) {
                 lines.push(`\\addcontentsline{toc}{section}{${latexMetadataText(entry.title)}}`);
             }
         }
+        // Starred headings do not replace the previous body chapter's running mark.
+        lines.push('\\markboth{}{}');
         if (body) lines.push(body);
         if (entry.pageBreakAfter !== false) lines.push('\\clearpage');
         pages.push(lines.join('\n'));
@@ -1087,7 +1117,8 @@ function publicationMetadataLatex(options) {
 
     return [
         '\\clearpage',
-        '\\section*{Publication Metadata}',
+        `\\section*{${String(options.lang || '').toLowerCase().startsWith('zh') ? '出版信息' : 'Publication Metadata'}}`,
+        '\\markboth{}{}',
         '\\begin{description}',
         ...rows.map(([label, value]) => `\\item[${latexMetadataText(label)}] ${latexMetadataText(value)}`),
         '\\end{description}',
@@ -1129,7 +1160,7 @@ function pdfTocTitleDefault(config) {
     return config?.language === 'en' ? 'Contents' : '目录';
 }
 
-function pdfConfigDefaults(configInput = DEFAULT_CONFIG) {
+function pdfConfigDefaults(configInput: any = DEFAULT_CONFIG) {
     const config = mergeConfig(configInput);
     const pdf = config.pdf || {};
     return {
@@ -1155,11 +1186,14 @@ function pdfConfigDefaults(configInput = DEFAULT_CONFIG) {
         releaseTag: pdf.releaseTag || '',
         releaseCommit: pdf.releaseCommit || '',
         doi: pdf.doi || '',
+        workDoi: pdf.workDoi || '',
+        doiState: pdf.doiState || '',
         showVersionOnCover: pdf.showVersionOnCover === true,
         metadataPage: pdf.metadataPage === true,
         documentClass: pdf.documentClass || '',
         titlePage: pdf.titlePage === true,
         coverStyle: pdf.coverStyle || 'simple',
+        coverImage: pdf.coverImage || '',
         titleSize: pdf.titleSize || '32pt',
         subtitleSize: pdf.subtitleSize || '18pt',
         authorSize: pdf.authorSize || '12pt',
@@ -1171,7 +1205,7 @@ function pdfConfigDefaults(configInput = DEFAULT_CONFIG) {
 }
 
 function parseExportArgs(args, defaultOutput, configInput = DEFAULT_CONFIG) {
-    const pdfDefaults = pdfConfigDefaults(configInput);
+    const pdfDefaults = pdfConfigDefaults(args.includes('--no-project-pdf-defaults') ? { language: configInput?.language } : configInput);
     const options: {
         output: string;
         mdOutput: string;
@@ -1198,11 +1232,14 @@ function parseExportArgs(args, defaultOutput, configInput = DEFAULT_CONFIG) {
         releaseTag: string;
         releaseCommit: string;
         doi: string;
+        workDoi: string;
+        doiState: string;
         showVersionOnCover: boolean;
         metadataPage: boolean;
         documentClass: string;
         titlePage: boolean;
         coverStyle: string;
+        coverImage: string;
         titleSize: string;
         subtitleSize: string;
         authorSize: string;
@@ -1238,11 +1275,14 @@ function parseExportArgs(args, defaultOutput, configInput = DEFAULT_CONFIG) {
         releaseTag: pdfDefaults.releaseTag,
         releaseCommit: pdfDefaults.releaseCommit,
         doi: pdfDefaults.doi,
+        workDoi: pdfDefaults.workDoi,
+        doiState: pdfDefaults.doiState,
         showVersionOnCover: pdfDefaults.showVersionOnCover,
         metadataPage: pdfDefaults.metadataPage,
         documentClass: pdfDefaults.documentClass,
         titlePage: pdfDefaults.titlePage,
         coverStyle: pdfDefaults.coverStyle,
+        coverImage: pdfDefaults.coverImage,
         titleSize: pdfDefaults.titleSize,
         subtitleSize: pdfDefaults.subtitleSize,
         authorSize: pdfDefaults.authorSize,
@@ -1354,6 +1394,14 @@ function parseExportArgs(args, defaultOutput, configInput = DEFAULT_CONFIG) {
             options.doi = args[++i] || options.doi;
         } else if (arg.startsWith('--doi=')) {
             options.doi = arg.slice('--doi='.length);
+        } else if (arg === '--work-doi') {
+            options.workDoi = args[++i] || '';
+        } else if (arg.startsWith('--work-doi=')) {
+            options.workDoi = arg.slice('--work-doi='.length);
+        } else if (arg === '--doi-state') {
+            options.doiState = args[++i] || '';
+        } else if (arg.startsWith('--doi-state=')) {
+            options.doiState = arg.slice('--doi-state='.length);
         } else if (arg === '--show-version-on-cover') {
             options.showVersionOnCover = true;
         } else if (arg === '--no-show-version-on-cover') {
@@ -1396,6 +1444,10 @@ function parseExportArgs(args, defaultOutput, configInput = DEFAULT_CONFIG) {
             options.coverStyle = args[++i] || options.coverStyle;
         } else if (arg.startsWith('--cover-style=')) {
             options.coverStyle = arg.slice('--cover-style='.length);
+        } else if (arg === '--cover-image') {
+            options.coverImage = args[++i] || '';
+        } else if (arg.startsWith('--cover-image=')) {
+            options.coverImage = arg.slice('--cover-image='.length);
         } else if (arg === '--title-size') {
             options.titleSize = args[++i] || options.titleSize;
         } else if (arg.startsWith('--title-size=')) {
@@ -1444,8 +1496,8 @@ async function exportMarkdown(args = []) {
         return '';
     }
 
-    const state = await scanWorkspace();
-    await writeArtifacts(state);
+    const state = await scanWorkspace({ readOnly: args.includes('--read-only') });
+    if (!args.includes('--read-only')) await writeArtifacts(state);
     const errors = state.issues.filter(issue => issue.severity === 'error');
     if (errors.length > 0) {
         printSummary('export-md', state);
@@ -1466,6 +1518,16 @@ async function exportMarkdown(args = []) {
     await fs.writeFile(outputPath, compiled, 'utf8');
     console.log(`OK export-md: ${files.length} files -> ${relativePath(outputPath)}`);
     return outputPath;
+}
+
+/** Internal frozen-input bridge used by publication; it shares the ordinary formal lowering. */
+async function compilePublicationFragment(args: string[]): Promise<void> {
+    if (args.length !== 3) throw new Error('Invalid publication fragment request.');
+    const [input, sourceContext, output] = args.map(publicationRelativeInput);
+    const state = await scanWorkspace({ readOnly: true });
+    const content = await fs.readFile(await publicationSafePath(ROOT, input), 'utf8');
+    const destination = await publicationSafePath(ROOT, output);
+    await fs.writeFile(destination, compileFormalMarkdownContent(content, sourceContext, state), 'utf8');
 }
 
 async function exportMarkdownSplit(args = []) {
@@ -1563,6 +1625,10 @@ async function renderPdfFile(inputMarkdownPath, outputPdfPath, options) {
     await fs.mkdir(path.dirname(outputPdfPath), { recursive: true });
     let preparedInclude;
     try {
+        if (options.coverImage) {
+            if (/[{}\n\r]/.test(options.coverImage)) throw new Error('Invalid cover image path.');
+            await fs.access(await publicationSafePath(ROOT, publicationRelativeInput(options.coverImage)));
+        }
         preparedInclude = await preparePdfIncludeBeforeBody(options, inputMarkdownPath);
     } catch (err: any) {
         console.error(err?.message || String(err));
@@ -2953,6 +3019,10 @@ async function main() {
         await serveReaderMcp(args);
     } else if (command === 'archive') {
         await runArchiveCli(args);
+    } else if (command === 'publication') {
+        await runPublicationCli(args, ROOT);
+    } else if (command === '_publication-fragment') {
+        await compilePublicationFragment(args);
     } else if (command === 'codex-handler') {
         await runCodexFileHandler(args, PACKAGE_ROOT, path.join(__dirname, 'math-workspace.js'));
     } else if (command === 'verify') {

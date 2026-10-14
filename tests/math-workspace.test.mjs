@@ -16,6 +16,10 @@ import { testExercises } from './exercises.test.mjs';
 import { testArchives, testArchiveReaderApi } from './archives.test.mjs';
 import { testReaderArchiveVolumes } from './reader-archive-volume.test.mjs';
 import { testArchiveVolumes } from './archive-volumes.test.mjs';
+import { testPublications } from './publications.test.mjs';
+import { testReaderPublication } from './reader-publication.test.mjs';
+import { testPublicationPdfRuntime } from './publication-pdf-runtime.test.mjs';
+import { testReaderPublicationPdf } from './reader-publication-pdf.test.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -1930,7 +1934,8 @@ async function testReaderPluginMcpConfig() {
                     'CODEX_BROWSER_USE_NODE_PATH',
                     'CODEX_ELECTRON_RESOURCES_PATH',
                     'CODEX_CLI_PATH',
-                    'XDG_CACHE_HOME'
+                    'XDG_CACHE_HOME',
+                    'ZENODO_TOKEN'
                 ]
             }
         }
@@ -2743,20 +2748,20 @@ async function testRenderPdfMetadataPage() {
     const pandocInput = await fs.readFile(inputLogPath, 'utf8');
     assert.equal(pandocInput, originalMarkdown);
     const metadataInput = await fs.readFile(includeBeforeLogPath, 'utf8');
-    assert.match(metadataInput, /\\clearpage\n\\section\*\{Publication Metadata\}/);
-    assert.match(metadataInput, /\\item\[Author\] Zhe Li/);
-    assert.match(metadataInput, /\\item\[Native name\] 李喆/);
-    assert.match(metadataInput, /\\item\[Also known as\] Glen Li \/ glenzli; G\. Li/);
+    assert.match(metadataInput, /\\clearpage\n\\section\*\{出版信息\}/);
+    assert.match(metadataInput, /\\item\[作者\] Zhe Li/);
+    assert.match(metadataInput, /\\item\[本名\] 李喆/);
+    assert.match(metadataInput, /\\item\[别名\] Glen Li \/ glenzli; G\. Li/);
     assert.match(metadataInput, /\\item\[ORCID\] https:\/\/orcid\.org\/0009-0006-6536-3453/);
-    assert.match(metadataInput, /\\item\[Repository\] https:\/\/github\.com\/glenzli\/formal-math/);
-    assert.match(metadataInput, /\\item\[License\] CC BY 4\.0 \(https:\/\/creativecommons\.org\/licenses\/by\/4\.0\/\)/);
-    assert.match(metadataInput, /\\item\[Release version\] rc\.1/);
-    assert.match(metadataInput, /\\item\[Release tag\] v0\.1\.0/);
-    assert.match(metadataInput, /\\item\[Commit\] abc123/);
-    assert.match(metadataInput, /\\item\[DOI\] 10\.1234\/formal/);
-    assert.match(metadataInput, /\\item\[Preferred citation\] Zhe Li \.\.\. licensed under CC BY 4\.0\./);
+    assert.match(metadataInput, /\\item\[项目地址\] https:\/\/github\.com\/glenzli\/formal-math/);
+    assert.match(metadataInput, /\\item\[许可协议\] CC BY 4\.0 \(https:\/\/creativecommons\.org\/licenses\/by\/4\.0\/\)/);
+    assert.match(metadataInput, /\\item\[本版版本\] rc\.1/);
+    assert.match(metadataInput, /\\item\[发布标签\] v0\.1\.0/);
+    assert.match(metadataInput, /\\item\[提交版本\] abc123/);
+    assert.match(metadataInput, /\\item\[本版 DOI\] 10\.1234\/formal/);
+    assert.match(metadataInput, /\\item\[推荐引用\] Zhe Li \.\.\. licensed under CC BY 4\.0\./);
     assert.match(metadataInput, /\\end\{description\}\n\\clearpage/);
-    assert.ok(metadataInput.indexOf('\\section*{Publication Metadata}') < metadataInput.indexOf('\\section*{AI 辅助声明}'));
+    assert.ok(metadataInput.indexOf('\\section*{出版信息}') < metadataInput.indexOf('\\section*{AI 辅助声明}'));
     assert.ok(metadataInput.indexOf('\\section*{AI 辅助声明}') < metadataInput.indexOf('\\section*{License Note}'));
     assert.ok(metadataInput.indexOf('\\section*{License Note}') < metadataInput.indexOf('\\section*{AI Assistance Statement}'));
     assert.match(metadataInput, /\\section\*\{AI 辅助声明\}/);
@@ -2769,6 +2774,22 @@ async function testRenderPdfMetadataPage() {
     assert.match(metadataInput, /AI assistance statement with \\\(A\\\)\./);
     assert.equal(await read(root, 'compiled.md'), originalMarkdown);
     await assert.rejects(() => fs.stat(path.join(root, pandocArgs[includeBeforeIndex + 1])));
+
+    const english = runCliWithEnv(root, [
+        'render-pdf', 'compiled.md', '--out', 'dist/book-en.pdf', '--metadata-page',
+        '--lang', 'en-US', '--doi', '10.1234/formal', '--work-doi', '10.1234/work',
+        '--doi-state', 'Author supplied; status follows the publication platform record'
+    ], {
+        PATH: `${bin}${path.delimiter}${process.env.PATH || ''}`,
+        PANDOC_LOG: logPath,
+        PANDOC_INCLUDE_BEFORE_LOG: includeBeforeLogPath
+    });
+    assert.equal(english.status, 0, combinedOutput(english));
+    const englishMetadata = await fs.readFile(includeBeforeLogPath, 'utf8');
+    assert.match(englishMetadata, /\\section\*\{Publication Metadata\}/);
+    assert.match(englishMetadata, /\\item\[Author\] Zhe Li/);
+    assert.match(englishMetadata, /\\item\[Work DOI\] 10\.1234\/work/);
+    assert.match(englishMetadata, /\\item\[DOI provenance\] Author supplied; status follows/);
 }
 
 async function testAuditReport() {
@@ -2830,6 +2851,10 @@ const tests = [
     ['volume signatures, total binding and recoverable history', testArchiveVolumes],
     ['academic archive Reader API', testArchiveReaderApi],
     ['volume and total signing Reader workflow', testReaderArchiveVolumes],
+    ['selected-chapter PDF publication and DOI lifecycle', testPublications],
+    ['Reader publication workflow and project boundaries', testReaderPublication],
+    ['publication PDF runtime packaging and bound transport', testPublicationPdfRuntime],
+    ['publication PDF page preview and resource lifecycle', testReaderPublicationPdf],
     ['native exercises, Reader, export and proof drift', testExercises],
     ['finalize cross-file safety', testFinalizeCrossFileSafety],
     ['finish finalizes and verifies', testFinishFinalizesAndVerifies],

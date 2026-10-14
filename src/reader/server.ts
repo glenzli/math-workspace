@@ -18,6 +18,8 @@ import { ReaderProjectRegistry } from './projects';
 import { ReaderWorkspace, type WorkspaceSnapshot } from './workspace';
 import { updateDocumentState, type DocumentLifecycleUpdate } from './document-state';
 import { ArchiveReaderApi } from '../archive/reader-api';
+import { PublicationReaderApi, PublicationReaderError } from '../publication/reader-api';
+import { readPublicationPdfRuntime, PublicationPdfRuntimeError } from '../publication/pdf-runtime';
 import { readLeanBuild } from '../lean/lean-state';
 import { readLeanDependencyArtifact } from '../lean/lean-dependencies';
 import { LeanReviewService } from '../lean/lean-review-service';
@@ -40,11 +42,12 @@ const API_CACHE_CONTROL = 'no-store';
 const READER_CONTENT_SECURITY_POLICY = [
     "default-src 'self'",
     "connect-src 'self'",
+    "frame-src 'self' blob:",
     "img-src 'self' data: https:",
     "style-src 'self'",
     // KaTeX positions scripts and extensible glyphs with generated style attributes.
     "style-src-attr 'unsafe-inline'",
-    "script-src 'self'",
+    "script-src 'self' blob:",
     "base-uri 'none'",
     "frame-ancestors 'self'"
 ].join('; ');
@@ -346,6 +349,9 @@ function resolveWorkspacePath(rootPath: string, relativePath: string): string | 
 
 async function sendStaticFile(response: any, staticRoot: string, requestPath: string): Promise<void> {
     const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
+    if (/^pdfjs(?:\/|$)/i.test(toPosix(relativePath))) {
+        sendText(response, 404, 'PDF preview assets use the authenticated publication route.'); return;
+    }
     const absolutePath = resolveWorkspacePath(staticRoot, relativePath);
     if (!absolutePath || !(await pathExists(absolutePath))) {
         sendText(response, 404, 'Math Workspace asset not found.');
@@ -402,6 +408,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
     // This token only authorizes same-origin mutations from the current Math Workspace page.
     const requestToken = randomBytes(24).toString('hex');
     const archiveApi = new ArchiveReaderApi();
+    const publicationApi = new PublicationReaderApi();
     let rootPath: string | undefined;
     let workspace: ReaderWorkspace | undefined;
     let unsubscribe = () => {};
@@ -478,12 +485,12 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
         try {
             const url = new URL(request.url || '/', 'http://127.0.0.1');
 
-            if (url.pathname.startsWith('/api/lean-')) {
-                if (projectChanging) { sendText(response, 409, 'The Reader is changing its bound Lean project. Retry after it finishes.'); return; }
+            if (url.pathname.startsWith('/api/lean-') || url.pathname === '/api/publication' || url.pathname.startsWith('/api/publication/')) {
+                if (projectChanging) { sendText(response, 409, 'The Reader is changing its bound project. Retry after it finishes.'); return; }
                 const origin = request.headers?.origin;
                 if (request.headers?.host !== new URL(serverUrl).host || (origin !== undefined && origin !== serverUrl)
                     || request.headers?.['sec-fetch-site'] === 'cross-site') {
-                    sendText(response, 403, 'Lean review requires the bound local Reader origin.'); return;
+                    sendText(response, 403, 'This action requires the bound local Reader origin.'); return;
                 }
             }
 
@@ -646,6 +653,39 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                     const result = await leanReview.action(reviewRoot, body);
                     sendJson(response, result.status, result.value);
                 } else sendText(response, 405, 'Lean review reads use GET; explicit review actions use POST.');
+                return;
+            }
+
+            if (url.pathname === '/api/publication' || url.pathname.startsWith('/api/publication/')) {
+                if (!requireRequestToken(request, response, requestToken)) return;
+                const publicationRoot = rootPath;
+                const boundProject = createHash('sha256').update(publicationRoot).digest('hex');
+                if (request.headers?.['x-math-workspace-project'] !== boundProject) {
+                    sendText(response, 409, 'The publication project changed. Refresh the Reader before retrying.'); return;
+                }
+                if (request.method === 'GET' && url.pathname === '/api/publication/pdf-runtime') {
+                    const runtime = await readPublicationPdfRuntime(staticRoot, url.searchParams.get('file') || '');
+                    if (rootPath !== publicationRoot || projectChanging) {
+                        sendText(response, 409, 'The publication project changed. Refresh the Reader before retrying.'); return;
+                    }
+                    response.writeHead(200, { 'cache-control': API_CACHE_CONTROL, 'content-type': runtime.contentType,
+                        'content-length': runtime.bytes.length, 'x-content-type-options': 'nosniff' });
+                    response.end(runtime.bytes);
+                } else if (request.method === 'GET' && url.pathname === '/api/publication/artifact') {
+                    const artifact = await publicationApi.artifact(publicationRoot, url.searchParams);
+                    response.writeHead(200, { 'cache-control': API_CACHE_CONTROL, 'content-type': artifact.contentType,
+                        'content-length': artifact.bytes.length, 'x-content-type-options': 'nosniff',
+                        'content-disposition': `attachment; filename="${artifact.fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}"` });
+                    response.end(artifact.bytes);
+                } else if (request.method === 'GET') sendJson(response, 200, await publicationApi.get(publicationRoot, url.pathname, url.searchParams));
+                else if (request.method === 'POST' && url.pathname === '/api/publication/action') {
+                    const body = await readJsonRequest(request, 512 * 1024);
+                    // Body reading can yield while another window switches the shared Reader project.
+                    if (rootPath !== publicationRoot || projectChanging) {
+                        sendText(response, 409, 'The publication project changed before this action started. Refresh the Reader.'); return;
+                    }
+                    sendJson(response, 202, publicationApi.start(publicationRoot, body));
+                } else sendText(response, 405, 'Publication reads use GET; deliberate actions use POST.');
                 return;
             }
 
@@ -831,7 +871,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
 
             await sendStaticFile(response, staticRoot, url.pathname);
         } catch (error: any) {
-            sendText(response, error instanceof LeanReviewError ? error.status : 500, error instanceof Error ? error.message : String(error));
+            sendText(response, error instanceof LeanReviewError || error instanceof PublicationReaderError || error instanceof PublicationPdfRuntimeError ? error.status : 500, error instanceof Error ? error.message : String(error));
         }
     });
 

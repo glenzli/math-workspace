@@ -1064,6 +1064,87 @@ button { cursor: pointer; }
 /* Academic archive views share Reader chrome and render archived source only. */
 .reader-archive { width: min(1160px, calc(100vw - 40px)); height: min(850px, calc(100vh - 40px)); max-width: none; max-height: none; padding: 0; }
 .reader-archive::backdrop { background: rgba(25, 35, 45, .32); }
+
+/* Publication owns its dialog and keeps its edition review separate from source archives. */
+.reader-publication { width: min(1040px, calc(100vw - 40px)); height: min(880px, calc(100dvh - 40px)); max-width: none; max-height: none; padding: 0; border: 1px solid #d5e0e7; border-radius: 10px; background: #fdfefe; color: #303840; font-size: 13px; }
+.reader-publication::backdrop { background: rgba(25, 35, 45, .36); }
+.publication-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 10px 20px; border-bottom: 1px solid #e6eaed; background: #fdfefe; position: sticky; top: 0; z-index: 3; }
+.publication-header h1 { font-size: 15px; margin: 0; font-weight: 650; }
+.publication-body { padding: 16px 24px 24px; overflow-wrap: anywhere; }
+.publication-intro { margin: 0 0 16px; line-height: 1.65; max-width: 80ch; color: #607482; }
+.publication-live { margin: 0; padding: 0 24px; white-space: pre-wrap; color: #3d6a86; font-size: 12px; }
+.publication-live:not(:empty) { padding-top: 12px; }
+.publication-live.is-error, .publication-warning { color: #995020; }
+.publication-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin-bottom: 22px; }
+.reader-publication button, .reader-publication input, .reader-publication textarea, .reader-publication select { font: inherit; color: inherit; border: 1px solid #d5e0e7; border-radius: 5px; background: #fff; }
+.reader-publication button { cursor: pointer; }
+.publication-steps button { min-height: 38px; padding: 7px 10px; background: #f4f7f9; font-size: 12px; text-align: start; }
+.publication-steps button[aria-current="step"] { background: #eaf3f9; border-color: #a3c3d8; color: #185d8c; font-weight: 650; }
+.publication-panel h2 { margin: 0 0 15px; font-size: 17px; font-weight: 650; }
+.publication-panel h3 { margin: 0 0 10px; font-size: 14px; font-weight: 650; }
+.publication-hint, .publication-field small, .publication-chapter small { color: #6c7d89; font-size: 12px; line-height: 1.6; }
+.publication-fields, .publication-review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 22px; }
+.publication-plan-row, .publication-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.publication-plan-row .publication-field { flex: 1; }
+.publication-actions { margin: 12px 0; }
+.publication-next { justify-content: flex-end; }
+.publication-field { display: grid; gap: 5px; margin: 0 0 12px; min-width: 0; font-size: 12px; }
+.publication-field > span { font-weight: 550; }
+.publication-field input, .publication-field select { min-height: 34px; padding: 6px 9px; width: 100%; box-sizing: border-box; }
+.publication-field textarea { width: 100%; min-height: 108px; box-sizing: border-box; padding: 8px 9px; line-height: 1.55; resize: vertical; }
+.publication-check { display: flex; align-items: flex-start; gap: 8px; line-height: 1.6; margin: 9px 0; cursor: pointer; }
+.publication-check input { flex: 0 0 auto; width: 15px; height: 15px; margin: 3px 0 0; accent-color: #3276a7; }
+.publication-section { margin: 18px 0; padding-top: 16px; border-top: 1px solid #e3e9ed; }
+.publication-section summary { cursor: pointer; font-weight: 600; padding-bottom: 10px; }
+.publication-chapter-group { margin: 16px 0; padding: 8px 16px; border: 1px solid #dbe4eb; border-radius: 7px; min-width: 0; }
+.publication-chapter-group legend { padding: 0 7px; font-size: 12px; font-weight: 650; }
+.publication-chapter { padding: 4px 0 7px; }
+.publication-chapter .publication-check { margin-bottom: 1px; }
+.publication-chapter small { display: block; margin-left: 23px; }
+.publication-review-grid ol { padding-left: 22px; margin: 0; }
+.publication-review-grid li { margin-bottom: 9px; line-height: 1.55; }
+.publication-review-grid li small { display: block; font-size: 11px; color: #6c7d89; }
+.publication-prose { white-space: pre-wrap; line-height: 1.7; }
+.publication-checksum { font-size: 11px; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.reader-publication .publication-icon { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; flex: 0 0 auto; background: #f5f8fa; color: #456377; position: relative; }
+.reader-publication .publication-icon.is-primary { background: #226b9c; color: #fff; border-color: #226b9c; }
+.reader-publication .publication-header .publication-icon { border-color: transparent; background: transparent; width: 28px; height: 28px; }
+.reader-publication button:hover:not(:disabled) { border-color: #8baec8; background: #eaf3f9; color: #185d8c; }
+.reader-publication .publication-icon.is-primary:hover:not(:disabled) { background: #185a87; color: #fff; }
+.reader-publication button:disabled, .reader-publication input:disabled, .reader-publication textarea:disabled, .reader-publication select:disabled { opacity: .45; cursor: default; }
+.reader-publication :is(button, input, textarea, select, summary, a):focus-visible { outline: 2px solid #4c83b4; outline-offset: 3px; }
+.publication-preview { border-top: 1px solid #e3e9ed; padding-top: 12px; margin-top: 20px; }
+.publication-preview .publication-actions { justify-content: space-between; }
+.publication-pdf-controls { display: flex; justify-content: center; align-items: center; gap: 12px; margin: 10px 0; }
+.publication-pdf-count { min-width: 100px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
+.publication-pdf-stage { width: 100%; box-sizing: border-box; min-height: 180px; padding: 12px; border: 1px solid #d5e0e7; background: #edf0f2; }
+.publication-pdf-stage canvas { display: block; width: 100%; height: auto; background: #fff; }
+.publication-pdf-stage canvas[hidden] { display: none; }
+.publication-pdf-status { font-size: 12px; line-height: 1.6; color: #607482; }
+.publication-pdf-status pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.publication-pdf-status details { margin: 8px 0; }
+@media (max-width: 650px) {
+    .reader-publication { width: calc(100vw - 16px); height: calc(100dvh - 16px); border-radius: 7px; }
+    .publication-header { padding: 10px 14px; }
+    .publication-body { padding: 14px; }
+    .publication-live { padding-inline: 14px; }
+    .publication-fields, .publication-review-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .publication-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-color-scheme: dark) {
+    .reader-publication, .publication-header { background: #25292d; color: #e0e5e8; border-color: #414c55; }
+    .publication-intro, .publication-hint, .publication-field small, .publication-chapter small, .publication-review-grid li small { color: #a1b3c0; }
+    .publication-live { color: #a8cbe1; }
+    .publication-live.is-error, .publication-warning { color: #efb57e; }
+    .reader-publication input, .reader-publication textarea, .reader-publication select { background: #202428; border-color: #46545f; color: #e0e5e8; }
+    .publication-steps button, .reader-publication .publication-icon { background: #30373d; border-color: #46545f; color: #c0d0dc; }
+    .publication-steps button[aria-current="step"] { background: #263f51; border-color: #4b7d9d; color: #c1e2f9; }
+    .publication-section, .publication-chapter-group, .publication-preview { border-color: #414c55; }
+    .reader-publication button:hover:not(:disabled) { background: #344b5a; border-color: #7399b3; color: #d7edfc; }
+    .reader-publication .publication-icon.is-primary { background: #276f9f; border-color: #4b8bb6; color: #fff; }
+    .publication-pdf-stage { background: #202428; border-color: #46545f; }
+    .publication-pdf-status { color: #a1b3c0; }
+}
 .archive-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 12px 18px; border-bottom: 1px solid #e6eaed; position: sticky; top: 0; z-index: 2; background: #fdfefe; }
 .reader-archive button, .reader-archive select, .reader-archive input { min-height: 32px; max-width: 100%; font: inherit; font-size: 12px; border: 1px solid #d5e0e7; border-radius: 5px; padding: 6px 9px; background: #f8fafb; color: #3d5d72; }
 .reader-archive button { font-weight: 600; }

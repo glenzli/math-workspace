@@ -16,6 +16,7 @@
 - Release inclusion of `docs-src/`, `skills-src/`, `.vasmc/`, or VASMC build-state files.
 - Plugin releases that depend on a globally installed `math-workspace` command or omit their bundled CLI/Reader runtime.
 - Changes that damage math, LaTeX, Markdown, or PDF export fidelity for formal writing content.
+- Remote publication without an explicit reviewed artifact and destination, or treating a reserved/manual DOI as registered publication evidence.
 - Changes that make enhanced preview affect workspaces without formal configuration.
 - Changes that make definitions or symbols participate in theorem-like numbering by default.
 - Skill or documentation changes that ask target projects to auto-install or auto-update unreviewed remote instructions.

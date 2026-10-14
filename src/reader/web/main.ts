@@ -7,6 +7,7 @@ import { mountReaderAssets } from './reader-assets';
 import { mountReaderEmbeddedView, readerViewStateChanged } from './reader-embed';
 import { mountReaderFigures } from './reader-figures';
 import { ReaderArchive } from './reader-archive';
+import { ReaderPublication } from './reader-publication';
 import {
     createFormalRenderer,
     renderFormalDocument,
@@ -639,6 +640,7 @@ class ReaderApplication {
     private tooltip!: ReaderTooltip;
     private propositionReview!: ReaderPropositionReview;
     private archive!: ReaderArchive;
+    private publication!: ReaderPublication;
     private symbolAudit!: ReaderSymbolAudit;
     private symbolAuditReport!: ReaderSymbolAuditReportView;
     private symbolAuditReportOpen = false;
@@ -692,6 +694,7 @@ class ReaderApplication {
             '<button id="reader-lean-review" class="tool-button" type="button" aria-label="Lean comparison"></button>',
             '<button class="tool-button" data-panel="contents" aria-label="Contents"></button><button class="tool-button" data-panel="definitions" aria-label="Definitions"></button><button class="tool-button" data-panel="symbols" aria-label="Symbols"></button><button class="tool-button" data-panel="propositions" aria-label="Proposition review"></button><button class="tool-button" data-panel="symbol-audit" aria-label="Symbol audit"></button>',
             '<button id="reader-archive" class="tool-button" type="button" aria-label="Version history" aria-haspopup="dialog"></button>',
+            '<button id="reader-publication" class="tool-button" type="button" aria-label="PDF publication" aria-haspopup="dialog"></button>',
             (isReaderEmbedded() ? '<button id="reader-expand" class="tool-button" type="button" aria-label="Full screen"></button>' : ''),
             '<button id="reader-line-numbers" class="tool-button" type="button" aria-label="Show source line numbers" aria-pressed="false"></button></div>',
             '<div class="reader-type-control"><button type="button" class="type-size-button" data-font-size="-1" aria-label="Decrease text size">A−</button><output id="reader-font-size" aria-live="polite">' + this.fontSize + 'px</output><button type="button" class="type-size-button" data-font-size="1" aria-label="Increase text size">A+</button></div>',
@@ -815,6 +818,8 @@ class ReaderApplication {
         });
         this.archive = new ReaderArchive(() => ({ language: this.state?.language || 'zh', currentPath: this.currentPath, token: this.state?.requestToken || '', project: this.state?.projectId || '' }));
         this.root.querySelector('#reader-archive')?.addEventListener('click', () => void this.archive.open());
+        this.publication = new ReaderPublication(() => ({ language: this.state?.language || 'zh', token: this.state?.requestToken || '', project: this.state?.projectId || '' }));
+        this.root.querySelector('#reader-publication')?.addEventListener('click', () => { this.toolbarPanel.close(); void this.publication.open(); });
         this.toolbarPanel = new ReaderToolbarPanel(() => ({ close: this.dictionary().close }));
         this.propositionReview = new ReaderPropositionReview({
             labels: () => {
@@ -890,6 +895,7 @@ class ReaderApplication {
     private applyState(state: ReaderState): void {
         this.state = state;
         this.archive?.contextChanged();
+        this.publication?.contextChanged();
         this.leanReview?.contextChanged();
         const dictionary = this.dictionary();
         (this.root.querySelector('#reader-page-filter') as HTMLInputElement).placeholder = dictionary.search;
@@ -1003,6 +1009,14 @@ class ReaderApplication {
             replaceReaderButtonIcon(archiveButton, 'history');
             archiveButton.setAttribute('aria-label', label);
             archiveButton.dataset.readerTooltip = label;
+        }
+        const publicationButton = this.root.querySelector<HTMLButtonElement>('#reader-publication');
+        if (publicationButton) {
+            const label = this.state?.language === 'en' ? 'PDF publication' : 'PDF 出版';
+            replaceReaderButtonIcon(publicationButton, 'publication');
+            publicationButton.setAttribute('aria-label', label);
+            publicationButton.dataset.readerTooltip = label;
+            publicationButton.disabled = !this.state?.projectId;
         }
     }
 

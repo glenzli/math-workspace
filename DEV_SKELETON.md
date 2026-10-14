@@ -19,6 +19,7 @@
 - `packages/core/src/**`: shared formal scanner, numbering, references, lookup, dependency analysis, and conservative project-knowledge discovery.
 - `src/cli/**`, `src/reader/**`: primary CLI and localhost Reader implementation.
 - `src/archive/**`: project-owned academic evidence, immutable snapshots, Sigstore verification, format conversion, and archive publication; Reader and MCP projections use this owner.
+- `src/publication/**`: explicit chapter-selection profiles, frozen PDF builds, publication artifacts, and manual or Zenodo DOI/version lifecycle; source-archive signatures remain independent.
 - `src/lean/**`: deterministic anchors/build facts, explicit elaborated evidence, read-only local Lean language sessions, and atomic per-object human review/audit artifacts. Codex assistance writes only separately bound candidate metadata; human verdicts remain explicit. Source/evidence freshness, candidates and human verdicts are independent; snapshots and decision history stay bounded.
 - `src/mcp/reader-app*.ts`：MCP Reader UI 资源、侧边栏与会话入口，以及独立视图的本地传输和生命周期；正文渲染仍由 Reader 负责。
 - `src/codex/**`: explicit Codex Desktop file-handler setup and source-location handoff into the Reader.
@@ -44,6 +45,7 @@
 - Codex Desktop integration is user-installed and may change only its clearly delimited block in the user configuration. File-location handoff must remain local, token-protected, and limited to prepared Markdown projects.
 - Release bundles ship runtime artifacts, a self-contained Codex plugin, public docs, generated AI artifacts under `skills/`, and VASMC catalog exports for lockable reuse. npm packages ship the CLI/Reader runtime, public docs, generated AI artifacts, and catalog exports; the public plugin is distributed as a copied marketplace snapshot.
 - Built Reader and CLI runtimes should remain dependency-free after bundling.
+- Publication reads and builds never reserve, upload, or publish remotely. Explicit provider actions bind the project, work/version, and reviewed artifact; published editions remain immutable and credentials stay in the server process.
 - Dependency changes require caution and explicit verification because supply-chain risk matters for editor tooling.
 - Entry hints should stay at file or artifact-category level, not function level.
 - For no-side-effect VASMC checks, run `npm run content:build -- --dry-run` or the alias `npm run content:build -- --plan`, optionally with `--report-out /tmp/report.yaml`; use `vasmc expand <source> --target-lang <lang>` for single-source import expansion without workspace routing, build-state, or default report writes.

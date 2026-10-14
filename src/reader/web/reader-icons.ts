@@ -15,6 +15,7 @@ import {
     EyeOff,
     File,
     FileCode2,
+    FileOutput,
     FileWarning,
     FoldVertical,
     GitCompareArrows,
@@ -74,6 +75,7 @@ export type ReaderIconName =
     | 'propositions'
     | 'contents'
     | 'history'
+    | 'publication'
     | 'line-numbers'
     | 'eraser'
     | 'visible'
@@ -145,6 +147,7 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     propositions: Workflow,
     contents: ListTree,
     history: History,
+    publication: FileOutput,
     'line-numbers': ListOrdered,
     eraser: Eraser,
     visible: Eye,

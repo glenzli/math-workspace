@@ -659,7 +659,123 @@ Cross-book references and lookup require explicit dependencies in `lookup.bookDe
 
 Lean `root` and `sourceRoots` paths are relative to the Math Workspace project root. `target` is the optional `lake build` target; `module` is imported for dependency inspection and defaults to `target`. `anchorPrefix` must match the prefix used in Lean docstrings; `coverageTypes` changes the report queue, not anchor parsing.
 
-### PDF Export
+### Publish Selected Chapters as PDF
+
+For successive releases of the same book, open **PDF publication** in the Reader toolbar and create or resume a profile. Select this edition's volumes and chapters, enter its title, authors, version and DOI, and configure the cover, preface, contents and conclusion. Review included and omitted pages and references outside the edition before building, previewing and downloading the actual PDF. Zenodo draft upload and public publication are separate later actions.
+
+Profiles save selections and metadata without rewriting the manuscript. Chapters and formal objects retain the book's original numbering: selecting chapters 3 and 5 does not turn them into chapters 1 and 2. The output order is cover, publication information, front matter, generated contents, selected chapters, back matter, and a default **To be continued** notice for partial editions. Contents and the notice can be disabled. References outside the edition are shown for review without automatically adding other chapters.
+
+#### Minimal Profile and Local Build
+
+Run from the project root containing `.math-workspace/config.json`. Put actual chapter paths in `publication.json`; one author and at least one chapter are enough for this example. Front and back matter are optional:
+
+```json
+{
+  "id": "book",
+  "workId": "my-book",
+  "title": "My Book",
+  "subtitle": "Volume I",
+  "version": "0.1.0",
+  "authors": [{ "name": "Author Name" }],
+  "language": "zh-CN",
+  "chapters": ["book/vol-i/01.md", "book/vol-i/02.md"],
+  "frontMatter": [
+    { "title": "Preface", "file": "book/preface.md", "includeInToc": false }
+  ],
+  "backMatter": [
+    { "title": "Conclusion", "content": "This edition includes the first two chapters.", "includeInToc": true }
+  ]
+}
+```
+
+`id` resumes the same profile, `workId` identifies the work across editions, and `version` identifies this edition. Continue editing the same profile as chapters or volumes are added. Save against its current revision to retain previous builds and provider bindings.
+
+```bash
+math-workspace publication inspect
+math-workspace publication save publication.json --expected-revision new
+math-workspace publication plan book
+math-workspace publication build book --fingerprint <fingerprint-returned-by-plan>
+math-workspace publication status book
+```
+
+These commands return JSON. Use `--expected-revision new` for the first save and the `profile.revision` returned by `status` for later saves. `plan` and `build` also accept a profile JSON path. Build with the fingerprint of the plan just reviewed; changes to source, metadata or resources require a fresh plan and review. Omitted source can still affect whole-book numbering and remains part of the bound build inputs.
+
+Optional fields use project-relative local paths:
+
+| Field | Purpose |
+| --- | --- |
+| `scope.books`, `scope.volumes`, `scope.paths` | Define the work boundary using book/volume keys from `inspect` or directory paths. Their union determines omitted pages. Without an explicit scope, selected books define the work; unbooked selections use the project scope. |
+| `cover.image`, `cover.showVersion` | Optional cover image and version display. |
+| `frontMatter`, `backMatter` | Arrays whose entries provide `file` or `content`; `title` and `includeInToc` control headings and contents entries. |
+| `toc.enabled`, `toc.depth`, `toc.title` | Contents switch, depth and title. |
+| `continued.enabled`, `continued.title`, `continued.text` | Partial-edition notice switch, title and text. |
+| `pdf.engine`, `pdf.paper`, `pdf.margin`, `pdf.documentClass` | Local PDF engine and layout. |
+
+Building requires local Pandoc and a LaTeX engine, with `xelatex` as the default. `inspect` reports tool availability. Profiles can be saved and reviewed before the tools are installed.
+
+Each build is retained under `.math-workspace/publications/builds/<id>/<build-id>/`, containing `publication.pdf`, `compiled.md`, `manifest.json`, `citation.json`, `checksums.sha256` and `build.json`. The Reader previews and downloads the PDF and exposes its manifest and citation data. The manifest records selected and omitted pages, source input digests, DOI state and artifact checksums; the build record also retains the PDF's SHA-256. Review the actual cover, front and back matter, contents, numbering, images, outside references and DOI. The PDF's DOI provenance note is not live registration status; check the corresponding platform record. A manifest binds sources and artifacts without certifying mathematical correctness, Lean coverage or source signatures. Academic source evidence remains in the separate `archive` workflow.
+
+#### Manually Entered DOI
+
+Local publication does not require a provider connection. Enter an existing DOI in the Reader or add it to the profile:
+
+```json
+{
+  "doi": {
+    "versionDoi": "10.1234/example-version",
+    "conceptDoi": "10.1234/example-work",
+    "provenance": "DOI provider and location of its registration or reservation record"
+  }
+}
+```
+
+These numbers are format examples only. `versionDoi` identifies this edition; `conceptDoi` represents the work and its version collection. Manually supplied values alone remain `unverified`: typing a number does not request, register or verify it. Keep a work DOI distinct from an edition DOI.
+
+#### Zenodo Reservation and Publication
+
+Set `zenodo.environment` to `sandbox` or `production`, optionally set `zenodo.tokenEnv` (default `ZENODO_TOKEN`), and save the profile normally. Put the token only in the environment of the CLI or Reader server process. The profile stores its environment variable name; the Reader reports whether credentials are configured without collecting a token. Local planning, building and downloads work without credentials; external actions require them. Sandbox and production use separate accounts and tokens. See [Zenodo API authentication](https://developers.zenodo.org/#authentication): draft writes need `deposit:write`, while publication and related actions need `deposit:actions`.
+
+The plugin forwards the default `ZENODO_TOKEN` from its host process environment. Configure it before starting Codex, then reopen the Reader. A custom `zenodo.tokenEnv` also needs explicit forwarding by the host; alternatively, launch the Reader with the CLI and that variable configured in its process environment. Keep token values out of project files and the browser.
+
+Before uploading, save at least one author and a `description`. Use `YYYY-MM-DD` for an optional `publicationDate`. `license` uses a Zenodo-supported identifier and defaults to `cc-by-4.0`. Upload review lists current draft files and checksums. Unowned files block upload and remain preserved; only old PDFs with a recorded name and checksum can be replaced after review. Previously published editions remain intact.
+
+Reserving a DOI allows it to be embedded in the final PDF before upload. Reservation and registration are separate; registration occurs on publication, as explained in [Zenodo's DOI guide](https://help.zenodo.org/docs/deposit/describe-records/reserve-doi/).
+
+1. Explicitly reserve a DOI, creating or reusing the profile's bound draft.
+2. Plan again, build the final PDF containing the reserved DOI, and review it.
+3. Explicitly read the upload difference and inspect draft files, old PDFs to replace, the target file and checksums.
+4. Upload the same build with the reviewed upload fingerprint.
+5. Separately confirm public publication against the current draft ID and revision.
+
+```bash
+math-workspace publication reserve-doi book --expected-revision <profile.revision>
+math-workspace publication plan book
+math-workspace publication build book --fingerprint <fresh-plan-fingerprint>
+math-workspace publication status book
+math-workspace publication review-upload book --build <build-id> --pdf-sha256 <reviewed-PDF-SHA256> --remote-revision <remote.revision>
+math-workspace publication upload book --build <build-id> --pdf-sha256 <same-PDF-SHA256> --remote-revision <remote.revision> --upload-fingerprint <reviewed-upload-fingerprint>
+math-workspace publication status book
+math-workspace publication publish book --build <build-id> --pdf-sha256 <same-PDF-SHA256> --remote-revision <fresh-remote.revision> --record-id <draft-id>
+```
+
+Reservation, upload and publication contact an external service and each require authorization for that action. Inspection, planning and local builds do not trigger them. `status` reads locally saved bindings; `review-upload` explicitly reads the remote draft and returns the proposed upload difference. Use fresh revisions after actions. If inputs, the profile, draft or build change, review again rather than reusing approval of an older file or upload difference.
+
+Explicitly attach an existing draft or published record to continue it:
+
+```bash
+math-workspace publication attach-zenodo book --expected-revision <profile.revision> --kind draft --record-id <draft-id>
+math-workspace publication attach-zenodo book --expected-revision <profile.revision> --kind record --record-id <published-record-id>
+```
+
+Choose the one command matching the existing record's state. Continue using the same draft while unpublished. To add chapters or change files after publication, retain `id`, `workId` and the work DOI, update edition metadata, and explicitly create a new version of the same work before repeating the build, review, upload and publication steps:
+
+```bash
+math-workspace publication reserve-doi book --expected-revision <profile.revision> --new-version --record-id <published-record-id>
+```
+
+The new draft provides a new edition DOI; do not carry the previous edition DOI into its manual edition field. Earlier files and DOIs remain retained. Zenodo's Concept DOI represents the version collection and resolves to the latest version; cite a version DOI to identify exact files. See [DOI versioning](https://zenodo.org/help/versioning) and [version management](https://help.zenodo.org/docs/deposit/manage-versions/). If local state reports an unknown remote outcome, inspect Zenodo and attach the correct existing draft or record instead of creating a disconnected work to retry.
+
+### Markdown and One-off PDF Export
 
 Export formal source to ordinary Markdown before using other publication tools:
 
@@ -1422,7 +1538,123 @@ multi-volume-book/
 
 Lean 项目的 `root` 与 `sourceRoots` 都相对于 Math Workspace 项目根；`target` 是 `lake build` 的可选目标，`module` 是依赖查询时导入的模块（未设置时使用 `target`）；`anchorPrefix` 必须与 Lean docstring 中使用的前缀一致。`coverageTypes` 控制报告中的候选正文类型，不改变锚点解析。
 
-## PDF 导出
+## 按章节发布 PDF
+
+需要逐步发布同一部书时，在 Reader 工具栏打开“PDF 出版”，新建或继续已有方案。选择本版的卷和章节，填写书名、作者、版本与 DOI，配置封面、写在前面/导言、目录和结语。先审阅收录范围、未收录页与跨范围引用，再生成、预览和下载实际 PDF；Zenodo 的草稿上传与正式发布是之后分别启动的动作。
+
+发布方案保存选择与元数据，不改写原稿。正文保留整书原有的章号与对象编号；选取第 3、5 章不会改成第 1、2 章。成品顺序为封面、出版信息、前文、目录、所选正文、后文，以及部分发布默认附上的“未完待续 / To be continued”声明；目录和声明可按方案关闭。范围外引用会列入审阅，不会因此自动加入其他章节。
+
+### 最小方案与本地构建
+
+从拥有 `.math-workspace/config.json` 的项目根运行。将实际章节路径填入 `publication.json`；只需一个作者和至少一章即可建立方案，前后文为可选项：
+
+```json
+{
+  "id": "book",
+  "workId": "my-book",
+  "title": "My Book",
+  "subtitle": "Volume I",
+  "version": "0.1.0",
+  "authors": [{ "name": "Author Name" }],
+  "language": "zh-CN",
+  "chapters": ["book/vol-i/01.md", "book/vol-i/02.md"],
+  "frontMatter": [
+    { "title": "写在前面", "file": "book/preface.md", "includeInToc": false }
+  ],
+  "backMatter": [
+    { "title": "本版结语", "content": "本版收录前两章。", "includeInToc": true }
+  ]
+}
+```
+
+`id` 用来恢复同一个发布方案；`workId` 是跨版保持不变的作品标识，`version` 表示本版。后续增补章节或卷时继续编辑同一方案，保存时使用当前修订号，保留旧构建与服务绑定。
+
+```bash
+math-workspace publication inspect
+math-workspace publication save publication.json --expected-revision new
+math-workspace publication plan book
+math-workspace publication build book --fingerprint <plan 返回的 fingerprint>
+math-workspace publication status book
+```
+
+这些命令返回 JSON。首次保存用 `--expected-revision new`；更新已有方案时改用 `status` 中的 `profile.revision`。`plan` 与 `build` 也接受方案 JSON 路径。构建前使用刚审阅计划的 `fingerprint`，原稿、元数据或资源变化后重新规划并审阅；未收录的原稿也可能参与整书编号，仍属于构建绑定的输入。
+
+可选配置如下；路径相对于项目根，使用项目内文件：
+
+| 字段 | 用途 |
+| --- | --- |
+| `scope.books`、`scope.volumes`、`scope.paths` | 用 `inspect` 中的 book/volume 标识或目录路径明确作品范围，三者取并集，用于判断尚未收录的页面；不指定时采用所选章节所属 book，无归属 book 时采用项目范围。 |
+| `cover.image`、`cover.showVersion` | 可选封面图片及版本显示。 |
+| `frontMatter`、`backMatter` | 前后文数组，每项用 `file` 或 `content` 提供内容，`title` 和 `includeInToc` 控制标题与目录项。 |
+| `toc.enabled`、`toc.depth`、`toc.title` | 目录开关、深度与标题。 |
+| `continued.enabled`、`continued.title`、`continued.text` | 部分发布声明的开关、标题与文字。 |
+| `pdf.engine`、`pdf.paper`、`pdf.margin`、`pdf.documentClass` | 本地 PDF 引擎与版式。 |
+
+构建依赖本机 Pandoc 与 LaTeX 引擎，默认使用 `xelatex`；`inspect` 显示工具是否可用。工具缺失时可先保存和审阅方案，安装完成后再生成 PDF。
+
+每次构建保存在 `.math-workspace/publications/builds/<id>/<build-id>/`，包含 `publication.pdf`、`compiled.md`、`manifest.json`、`citation.json`、`checksums.sha256` 和构建记录 `build.json`。Reader 可预览、下载 PDF，并取得本版清单和引用信息。清单记录收录与未收录范围、源输入摘要、DOI 状态和产物校验值；构建记录还保留 PDF 的 SHA-256。预览时核对封面、前后文、目录、编号、图片、范围外引用和 DOI，确认的是这份构建的实际文件。PDF 的 DOI 来源说明不是实时登记状态，请到对应平台记录核对。清单建立来源绑定，不是原稿签名、数学正确性或 Lean 证明覆盖的认证；学术留档仍使用独立的 `archive` 流程。
+
+### 手填 DOI
+
+没有连接发布服务也可以本地出版。已有 DOI 时，在 Reader 中填写，或在方案中加入：
+
+```json
+{
+  "doi": {
+    "versionDoi": "10.1234/example-version",
+    "conceptDoi": "10.1234/example-work",
+    "provenance": "DOI 提供方及其登记或预留记录的位置"
+  }
+}
+```
+
+这里的号码仅为格式示例。`versionDoi` 指向本版，`conceptDoi` 表示整个作品及其版本集合；单独手填的值标为 `unverified`，填写文字不会申请、登记或验证 DOI。只有作品 DOI 时不要把它冒充为本版 DOI。
+
+### Zenodo 预留与正式发布
+
+如需由 Zenodo 提供 DOI，在方案中设置 `zenodo.environment`（`sandbox` 或 `production`）和可选的 `zenodo.tokenEnv`（默认 `ZENODO_TOKEN`），并通过正常保存流程更新方案。令牌只放在启动 CLI 或 Reader 服务的进程环境中；配置只存环境变量名，Reader 只显示是否配置，不收集令牌。未配置令牌时，本地规划、构建和下载仍可使用，外部动作不可用。sandbox 与 production 使用各自的账户和令牌。令牌权限见 [Zenodo API 文档](https://developers.zenodo.org/#authentication)：草稿写入需要 `deposit:write`，正式发布等动作需要 `deposit:actions`。
+
+通过 Codex 插件打开 Reader 时，插件会转发 Codex 宿主进程环境中的默认 `ZENODO_TOKEN`。先在 Codex 的启动环境中配置该变量，再打开或重新打开 Reader。使用自定义 `zenodo.tokenEnv` 时，还需明确配置宿主转发该变量，或在含有该变量的环境中单独启动 Reader。不要将令牌值填入方案、浏览器或受版本管理的配置文件。
+
+上传前还需在已保存方案中提供至少一位作者及 `description` 作品介绍；若填写 `publicationDate`，使用 `YYYY-MM-DD`。`license` 使用 Zenodo 支持的许可标识，未指定时使用 `cc-by-4.0`。上传差异列出草稿当前文件及校验值；有未经本流程归属的文件时阻止上传，保留这些材料。只有已记录文件名与校验值的旧 PDF 可在审阅后替换，已正式发布的旧版仍保留。
+
+预留 DOI 可让最终 PDF 在上传前就写入正确号码；预留与正式登记分开，登记在正式发布时发生，见 [Zenodo DOI 说明](https://help.zenodo.org/docs/deposit/describe-records/reserve-doi/)。流程为：
+
+1. 显式预留 DOI，创建或复用该方案已绑定的草稿。
+2. 重新规划，生成包含预留 DOI 的最终 PDF，并审阅成品。
+3. 显式读取上传差异，核对草稿文件、将替换的旧 PDF、目标文件与摘要。
+4. 使用已审阅差异的指纹，显式上传同一构建到草稿。
+5. 单独确认正式发布，使用当前草稿 ID 与修订号。
+
+```bash
+math-workspace publication reserve-doi book --expected-revision <profile.revision>
+math-workspace publication plan book
+math-workspace publication build book --fingerprint <新的 fingerprint>
+math-workspace publication status book
+math-workspace publication review-upload book --build <build-id> --pdf-sha256 <已审阅 PDF 的 SHA-256> --remote-revision <remote.revision>
+math-workspace publication upload book --build <build-id> --pdf-sha256 <同一 PDF 的 SHA-256> --remote-revision <remote.revision> --upload-fingerprint <上传差异的 fingerprint>
+math-workspace publication status book
+math-workspace publication publish book --build <build-id> --pdf-sha256 <同一 PDF 的 SHA-256> --remote-revision <新的 remote.revision> --record-id <draft-id>
+```
+
+上述预留、上传和发布命令会访问外部服务，应分别在相应操作已获授权时执行；查看、规划和本地构建不会自动执行它们。`status` 显示本地保存的绑定状态，`review-upload` 显式读取远端草稿并返回上传差异。每次动作后取新的修订号；源输入、方案、草稿或构建改变时，重新核对，不能沿用旧成品或旧上传差异的确认。
+
+已有 Zenodo 草稿或已发布记录时，先显式接入，避免另建一条无关联记录：
+
+```bash
+math-workspace publication attach-zenodo book --expected-revision <profile.revision> --kind draft --record-id <draft-id>
+math-workspace publication attach-zenodo book --expected-revision <profile.revision> --kind record --record-id <published-record-id>
+```
+
+两行分别用于草稿和已发布记录，按实际情况执行一行。编辑未发布版时继续同一草稿；正式发布后增补章节或修改 PDF 时，保留 `id`、`workId` 和作品 DOI，更新本版元数据，显式创建同一作品的新版本，再重复预留后构建、审阅、上传和发布：
+
+```bash
+math-workspace publication reserve-doi book --expected-revision <profile.revision> --new-version --record-id <published-record-id>
+```
+
+新草稿提供新的本版 DOI；不要把上一版 DOI 继续填作新版 DOI。本流程保留此前版本的文件与 DOI。Zenodo 的作品 DOI（Concept DOI）表示版本集合并解析到最新版；引用精确文件时使用该版 DOI，见 [DOI 版本说明](https://zenodo.org/help/versioning)和[版本管理](https://help.zenodo.org/docs/deposit/manage-versions/)。本地状态若提示远端结果未知，先核对 Zenodo 现状，再接回正确草稿或记录，不为重试另建一部作品。
+
+## Markdown 与单次 PDF 导出
 
 先把 formal 源导出为普通 Markdown，再交给其他发布流程处理：
 

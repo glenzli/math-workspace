@@ -1,0 +1,265 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url), repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const api = () => require(process.env.MATH_PUBLICATION_TEST_API || path.join(repo, 'out/cli/publication.js'));
+const cli = () => process.env.MATH_PUBLICATION_TEST_CLI || path.join(repo, 'out/cli/math-workspace.js');
+const exists = file => fs.access(file).then(() => true, () => false);
+const hash = (bytes, algorithm = 'sha256') => createHash(algorithm).update(bytes).digest('hex');
+const clone = value => JSON.parse(JSON.stringify(value));
+
+class MockZenodo {
+    records = new Map(); calls = []; next = 101; unknownCreate = false; unknownUpload = false; maliciousBucket = false; publicationAckChange;
+    expectedToken = 'TEST_ONLY_SECRET'; createStatus; getStatus; malformedCreate = false;
+    async fetch(input, options = {}) {
+        const url = new URL(input), method = options.method || 'GET';
+        assert.equal(url.origin, 'https://sandbox.zenodo.org'); assert.equal(options.redirect, 'error');
+        assert.equal(options.headers.Authorization, `Bearer ${this.expectedToken}`);
+        this.calls.push({ path: url.pathname, method });
+        const result = (value, status = 200) => ({ ok: true, status, json: async () => clone(value) });
+        if (url.pathname === '/api/deposit/depositions' && method === 'POST') {
+            if (this.createStatus) { const status = this.createStatus; this.createStatus = undefined; return { ok: false, status, json: async () => { throw new Error('A rejected response body must not be read.'); } }; }
+            const id = String(this.next++), record = { id, submitted: false, state: 'unsubmitted', conceptdoi: '10.5072/zenodo.100', conceptrecid: '100', metadata: {}, files: [], links: { bucket: `https://sandbox.zenodo.org/api/files/bucket-${id}` } };
+            this.records.set(id, record); if (this.unknownCreate) { this.unknownCreate = false; throw new Error('TEST_ONLY_SECRET must never escape'); }
+            if (this.malformedCreate) { this.malformedCreate = false; return { ok: true, status: 201, json: async () => { throw new Error('Malformed JSON'); } }; } return result(record, 201);
+        }
+        const bucket = /^\/api\/files\/bucket-(\d+)\/(.+)$/.exec(url.pathname);
+        if (bucket && method === 'PUT') {
+            const record = this.records.get(bucket[1]), bytes = Buffer.from(options.body), checksum = `md5:${hash(bytes, 'md5')}`;
+            record.files = [{ id: `file-${bucket[1]}`, filename: decodeURIComponent(bucket[2]), checksum, filesize: bytes.length }];
+            if (this.unknownUpload) { this.unknownUpload = false; throw new Error('Lost upload acknowledgement'); } return result({ checksum, size: bytes.length });
+        }
+        const match = /^\/api\/deposit\/depositions\/(\d+)(?:\/(.*))?$/.exec(url.pathname);
+        if (!match || !this.records.has(match[1])) throw new Error('Unexpected mock Zenodo request.');
+        const record = this.records.get(match[1]), suffix = match[2];
+        if (method === 'GET') {
+            if (this.getStatus) { const status = this.getStatus; this.getStatus = undefined; return { ok: false, status, json: async () => { throw new Error('A rejected response body must not be read.'); } }; }
+            const copy = clone(record); if (this.maliciousBucket) copy.links.bucket = 'https://untrusted.invalid/api/files/stolen'; return result(copy);
+        }
+        if (suffix === 'actions/newversion' && method === 'POST') {
+            assert.equal(record.submitted, true); const id = String(this.next++), next = clone(record); next.id = id; next.submitted = false; next.state = 'unsubmitted'; delete next.doi; delete next.metadata.doi; delete next.metadata.prereserve_doi;
+            next.links.bucket = `https://sandbox.zenodo.org/api/files/bucket-${id}`; next.files = next.files.map(file => ({ ...file, id: `inherited-${id}` })); this.records.set(id, next);
+            return result({ links: { latest_draft: `https://sandbox.zenodo.org/api/deposit/depositions/${id}` } }, 201);
+        }
+        if (suffix === 'actions/publish' && method === 'POST') {
+            record.submitted = true; record.state = 'done'; record.doi = record.metadata.prereserve_doi?.doi || record.metadata.doi;
+            if (this.publicationAckChange === 'file') record.files[0].checksum = `md5:${hash('Changed final PDF', 'md5')}`;
+            if (this.publicationAckChange === 'metadata') record.metadata.title = 'Changed final metadata';
+            if (this.publicationAckChange === 'doi') record.doi = '10.5072/zenodo.999';
+            return result(this.publicationAckChange === 'id' ? { ...record, id: '999' } : record);
+        }
+        if (suffix?.startsWith('files/') && method === 'DELETE') { record.files = record.files.filter(file => file.id !== suffix.slice(6)); return result(null, 204); }
+        if (!suffix && method === 'PUT') {
+            assert.equal(record.submitted, false); record.metadata = JSON.parse(options.body).metadata;
+            if (record.metadata.language) assert.match(record.metadata.language, /^[a-z]{3}$/);
+            if (record.metadata.prereserve_doi === true) record.metadata.prereserve_doi = { doi: `10.5072/zenodo.${record.id}`, recid: record.id };
+            return result(record);
+        }
+        throw new Error('Unexpected mock Zenodo mutation.');
+    }
+}
+async function fixture(options = {}) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'math-publication-'));
+    const put = async (name, bytes) => { await fs.mkdir(path.dirname(path.join(root, name)), { recursive: true }); await fs.writeFile(path.join(root, name), bytes); };
+    await put('.math-workspace/config.json', JSON.stringify({ language: 'en' }));
+    await put('book1/01-one.md', '# #h-1111111111111111 First\n\nTheorem #h-aaaaaaaaaaaaaaaa (One): $x^2+y^2=z^2$.\n\nSee @h-cccccccccccccccc and @chapter:./03-three.md.\n\n![Plot](images/plot.png)\n');
+    await put('book1/02-two.md', '# #h-2222222222222222 Second\n\nTheorem #h-bbbbbbbbbbbbbbbb (Two): Intermediate.\n');
+    await put('book1/03-three.md', '# #h-3333333333333333 Third\n\nTheorem #h-cccccccccccccccc (Three): $$\\int_0^1 x^2\\,dx=\\frac13$$\n\nSee @h-bbbbbbbbbbbbbbbb.\n');
+    await put('book2/01-other.md', '# #h-4444444444444444 Other book\n');
+    await put('book1/images/plot.png', Buffer.from('TEST PNG BYTES')); await put('cover.png', Buffer.from('TEST COVER BYTES'));
+    const profile = { id: 'book', workId: 'stable-work', title: 'A continuing work', version: '0.1.0', authors: [{ name: 'Test Author' }], language: 'en-US', description: 'An explicit partial edition for tests.', license: 'cc-by-4.0', publicationDate: '2026-10-15', chapters: ['book1/03-three.md', 'book1/01-one.md'], cover: { image: 'cover.png' }, frontMatter: [{ title: 'Preface', content: '# Existing heading {#preface}\n\nSee @h-cccccccccccccccc.', includeInToc: false }], backMatter: [{ title: 'Conclusion', content: 'See @h-aaaaaaaaaaaaaaaa.\n\n# Existing conclusion {#conclusion}', includeInToc: true }], zenodo: { environment: 'sandbox', tokenEnv: 'ZENODO_TOKEN' } };
+    const rendered = [], remote = new MockZenodo();
+    const runCli = async (args, runtime) => {
+        if (args[0] === 'render-pdf') {
+            rendered.push({ args, markdown: await fs.readFile(path.resolve(runtime.cwd, args[1]), 'utf8'), front: await fs.readFile(path.join(runtime.cwd, '.math-workspace/publication-front-0.md'), 'utf8') });
+            if (options.failRender) throw new Error('Test renderer failed');
+            if (options.mutateOnRender) await put('book1/01-one.md', 'Changed while rendering\n');
+            await fs.writeFile(path.resolve(runtime.cwd, args.find(arg => arg.startsWith('--out=')).slice(6)), '%PDF-1.7\nTEST PUBLICATION\n%%EOF\n');
+            return { stdout: '', stderr: '' };
+        }
+        const result = spawnSync(process.execPath, [cli(), ...args], { cwd: runtime.cwd, encoding: 'utf8' });
+        assert.equal(result.status, 0, result.stderr || result.stdout); return result;
+    };
+    const environment = { ZENODO_TOKEN: 'TEST_ONLY_SECRET' };
+    const service = new (api().PublicationService)(root, { runCli, toolProbe: command => ({ available: true, identity: `${command} TEST` }), fetch: remote.fetch.bind(remote), environment, ...options.serviceOptions });
+    return { root, put, profile, service, remote, rendered, environment, store: path.join(root, '.math-workspace/publications') };
+}
+async function build(f) { const plan = await f.service.plan(f.profile); return f.service.build(f.profile, plan.fingerprint); }
+async function reserve(f) { const saved = await f.service.save(f.profile, null); return f.service.reserveDoi(f.profile.id, saved.revision); }
+async function upload(f, release, remote) { const review = { pdfSha256: release.pdfSha256, remoteRevision: remote.revision }, preview = await f.service.reviewUpload(f.profile.id, release.id, review); return f.service.upload(f.profile.id, release.id, { ...review, uploadFingerprint: preview.fingerprint }); }
+
+export async function testPublications() {
+    let passed = 0;
+    const check = async (name, body, options) => {
+        const f = await fixture(options);
+        try { await body(f); passed++; } catch (error) { error.message = `${name}: ${error.message}`; throw error; }
+        finally { await fs.rm(f.root, { recursive: true, force: true }); }
+    };
+    await check('inspection and planning stay passive', async f => {
+        const before = await fs.readFile(path.join(f.root, '.math-workspace/config.json'));
+        const inspection = await f.service.inspect(), plan = await f.service.plan(f.profile);
+        assert(inspection.pages.some(page => page.book === 'book1')); assert.equal(inspection.profiles.length, 0); assert.equal(await exists(f.store), false); assert.equal(f.remote.calls.length, 0); assert.deepEqual(await fs.readFile(path.join(f.root, '.math-workspace/config.json')), before);
+        assert.deepEqual(plan.selected.map(page => page.path), ['book1/01-one.md', 'book1/03-three.md']); assert.deepEqual(plan.omitted.map(page => page.path), ['book1/02-two.md']); assert.equal(plan.continuedNotice.enabled, true); assert(plan.externalReferences.some(ref => ref.target === 'book1/02-two.md'));
+    });
+    await check('full selected book is not partial because of another book', async f => {
+        f.profile.chapters = ['book1/01-one.md', 'book1/02-two.md', 'book1/03-three.md']; const plan = await f.service.plan(f.profile); assert.equal(plan.partial, false); assert.equal(plan.continuedNotice.enabled, false);
+    });
+    await check('CAS keeps work identity and concurrent edits bounded', async f => {
+        const one = await f.service.save(f.profile, null); await assert.rejects(f.service.save(f.profile, null), /changed/); await assert.rejects(f.service.save({ ...f.profile, workId: 'different' }, one.revision), /stable work/); const two = await f.service.save({ ...f.profile, version: '0.2.0' }, one.revision); assert.equal(two.revision, 2);
+    });
+    await check('profile save and provider binding share one environment lock', async f => {
+        const saved = await f.service.save(f.profile, null), originalRemote = f.service.store.remote.bind(f.service.store);
+        let observed, release; const seen = new Promise(resolve => { observed = resolve; }), barrier = new Promise(resolve => { release = resolve; }); let delay = true;
+        f.service.store.remote = async id => { const value = await originalRemote(id); if (delay) { delay = false; observed(); await barrier; } return value; };
+        const saving = f.service.save({ ...f.profile, zenodo: { environment: 'production' } }, saved.revision);
+        await seen;
+        try { await assert.rejects(f.service.reserveDoi('book', saved.revision), /active operation/); } finally { release(); }
+        const changed = await saving; assert.equal(changed.profile.zenodo.environment, 'production'); assert.equal(await originalRemote('book'), null);
+        const restored = await f.service.save(f.profile, changed.revision), bound = await f.service.reserveDoi('book', restored.revision); assert.equal(bound.environment, 'sandbox');
+        await assert.rejects(f.service.save({ ...f.profile, zenodo: { environment: 'production' } }, restored.revision), /bound to another Zenodo environment/); assert.equal((await f.service.status('book')).profile.profile.zenodo.environment, bound.environment);
+    });
+    await check('frozen build shares formal compilation and preserves math', async f => {
+        const original = await fs.readFile(path.join(f.root, 'book1/01-one.md')), result = await build(f), rendered = f.rendered[0];
+        assert.match(rendered.markdown, /Chapter 1 First/); assert.match(rendered.markdown, /Chapter 3 Third/); assert.doesNotMatch(rendered.markdown, /#h-|@h-|@chapter:/); assert.match(rendered.markdown, /Theorem 2\.1/); assert.match(rendered.markdown, /\$x\^2\+y\^2=z\^2\$/); assert.match(rendered.markdown, /\\int_0\^1 x\^2\\,dx=\\frac13/);
+        assert(rendered.markdown.indexOf('Conclusion') > rendered.markdown.indexOf('Chapter 3')); assert(rendered.markdown.indexOf('To be continued') > rendered.markdown.indexOf('Conclusion')); assert.match(rendered.front, /Existing heading \{#preface \.unnumbered \.unlisted\}/); assert.doesNotMatch(rendered.front, /@h-/); assert(rendered.args.includes('--toc')); assert(rendered.args.includes('--cover-image=cover.png'));
+        assert.match(rendered.markdown, /\\clearpage\n\\markboth\{\}\{\}\n\n# Conclusion/); assert.match(rendered.markdown, /\\clearpage\n\\markboth\{\}\{\}\n\n# To be continued/); assert.equal(rendered.args.some(arg => arg.startsWith('--doi-state=')), false);
+        assert.deepEqual(await fs.readFile(path.join(f.root, 'book1/01-one.md')), original); assert.equal(await exists(path.join(f.root, '.math-workspace/workspace-index.json')), false);
+        const artifact = await f.service.readArtifact('book', result.id, 'publication.pdf'); assert.equal(hash(artifact.bytes), result.pdfSha256); const second = await build(f); assert.notEqual(second.id, result.id); assert.equal((await f.service.readArtifact('book', result.id, 'publication.pdf')).bytes.toString(), artifact.bytes.toString());
+    });
+    await check('source, cover, and front matter changes invalidate reviewed plan', async f => {
+        const plan = await f.service.plan(f.profile); await f.put('cover.png', 'Changed cover'); await assert.rejects(f.service.build(f.profile, plan.fingerprint), /plan changed/);
+        const fresh = await f.service.plan(f.profile); await assert.rejects(f.service.build({ ...f.profile, frontMatter: [{ content: 'Changed front' }] }, fresh.fingerprint), /plan changed/);
+    });
+    await check('source drift during rendering saves no successful build', async f => { await assert.rejects(build(f), /changed during/); assert.equal(await exists(path.join(f.store, 'builds/book')), false); }, { mutateOnRender: true });
+    await check('render failures preserve prior immutable releases', async f => {
+        const plan = await f.service.plan(f.profile); await assert.rejects(f.service.build(f.profile, plan.fingerprint), /Test renderer failed/); assert.equal(await exists(path.join(f.store, 'builds/book')), false);
+    }, { failRender: true });
+    await check('path traversal, symlink resources, and artifact reads are bounded', async f => {
+        await assert.rejects(f.service.plan({ ...f.profile, chapters: ['../outside.md'] }), /paths/);
+        await fs.symlink('/etc/hosts', path.join(f.root, 'linked.png')); await assert.rejects(f.service.plan({ ...f.profile, cover: { image: 'linked.png' } }), /symbolic/);
+        const release = await build(f); await assert.rejects(f.service.readArtifact('book', release.id, '../config.json'), /Unknown publication artifact/); await fs.writeFile(path.join(f.store, `builds/book/${release.id}/publication.pdf`), 'changed'); await assert.rejects(f.service.readArtifact('book', release.id, 'publication.pdf'), /immutable/);
+    });
+    await check('manual DOI retains unverified provenance without provider requests', async f => {
+        f.profile.doi = { versionDoi: 'https://doi.org/10.1234/manual-v1', conceptDoi: '10.1234/manual-work', provenance: 'Author supplied' }; const plan = await f.service.plan(f.profile); assert.equal(plan.doi.source, 'manual'); assert.equal(plan.doi.state, 'unverified'); assert.equal(plan.doi.versionDoi, '10.1234/manual-v1'); assert.equal(f.remote.calls.length, 0);
+        await build(f); assert.match(f.rendered[0].args.find(arg => arg.startsWith('--doi-state=')), /supplied by the author/); assert.doesNotMatch(f.rendered[0].args.find(arg => arg.startsWith('--doi-state=')), /unpublished|reserved|draft/i);
+        f.profile.language = 'zh-CN'; await build(f); assert.match(f.rendered[1].args.find(arg => arg.startsWith('--doi-state=')), /作者提供/); assert.equal(f.remote.calls.length, 0);
+    });
+    await check('manual work DOI cannot create a disconnected new Zenodo work', async f => {
+        f.profile.doi = { conceptDoi: '10.5072/zenodo.999' }; const saved = await f.service.save(f.profile, null);
+        await assert.rejects(f.service.reserveDoi('book', saved.revision), /Attach its existing Zenodo record/); assert.equal(f.remote.calls.length, 0); assert.equal((await f.service.status('book')).remote, null);
+    });
+    await check('all remote image forms are rejected before rendering', async f => {
+        for (const content of ['![Remote](https://example.invalid/image.png)', '![Remote][poster]\n\n[poster]: https://example.invalid/image.png', '![poster][]\n\n[poster]: https://example.invalid/image.png', '<img src="https://example.invalid/image.png">']) {
+            await assert.rejects(f.service.plan({ ...f.profile, frontMatter: [{ content }] }), /local frozen resources/);
+        }
+        const plan = await f.service.plan({ ...f.profile, frontMatter: [{ content: '```markdown\n![Example](https://example.invalid/image.png)\n```\n\n`![Example](https://example.invalid/image.png)`' }] }); assert(plan.fingerprint);
+    });
+    await check('matter references receive omission review and unknown refs reject', async f => {
+        const plan = await f.service.plan({ ...f.profile, frontMatter: [{ content: 'See @h-bbbbbbbbbbbbbbbb.' }] }); assert(plan.externalReferences.some(reference => reference.source === 'front-matter-1.md' && reference.target === 'book1/02-two.md'));
+        await assert.rejects(f.service.plan({ ...f.profile, backMatter: [{ content: 'See @h-eeeeeeeeeeeeeeee.' }] }), /Unresolved publication reference/);
+    });
+    await check('nested LaTeX resources are frozen and affect fingerprint', async f => {
+        await f.put('preamble.tex', '\\input{nested/macros.tex}\n'); await f.put('nested/macros.tex', '\\newcommand{\\proofmark}{QED}\n'); await f.put('book1/03-three.md', `${await fs.readFile(path.join(f.root, 'book1/03-three.md'), 'utf8')}\n\\input{preamble.tex}\n`);
+        const plan = await f.service.plan(f.profile); assert(plan.inputs.some(input => input.path === 'nested/macros.tex')); await f.put('nested/macros.tex', '\\newcommand{\\proofmark}{Done}\n'); assert.notEqual((await f.service.plan(f.profile)).fingerprint, plan.fingerprint);
+    });
+    await check('reserve reuses existing draft and keeps concept/version DOI separate', async f => {
+        const first = await reserve(f), again = await f.service.reserveDoi('book', 1); assert.equal(first.draftId, again.draftId); assert.equal(f.remote.calls.filter(call => call.path === '/api/deposit/depositions' && call.method === 'POST').length, 1); assert.notEqual(again.conceptDoi, again.versionDoi); assert.equal((await f.service.plan(f.profile)).doi.state, 'reserved'); assert.equal((await fs.readFile(path.join(f.store, 'remote/book.json'), 'utf8')).includes('TEST_ONLY_SECRET'), false);
+    });
+    await check('unknown create cannot duplicate and explicit attach reconciles', async f => {
+        await f.service.save(f.profile, null); f.remote.unknownCreate = true; await assert.rejects(f.service.reserveDoi('book', 1), error => !error.message.includes('TEST_ONLY_SECRET') && /unknown/.test(error.message)); await assert.rejects(f.service.reserveDoi('book', 1), /unresolved/); const attached = await f.service.attachZenodo('book', 1, { id: '101', kind: 'draft' }); assert.equal(attached.status, 'draft'); const reserved = await f.service.reserveDoi('book', 1); assert(reserved.versionDoi); assert.equal(f.remote.next, 102);
+    });
+    for (const status of [401, 403]) await check(`initial create HTTP ${status} permits corrected credential retry`, async f => {
+        const saved = await f.service.save(f.profile, null); f.environment.ZENODO_TOKEN = 'BAD_TEST_TOKEN'; f.remote.expectedToken = 'BAD_TEST_TOKEN'; f.remote.createStatus = status;
+        await assert.rejects(f.service.reserveDoi('book', saved.revision), error => error.status === status && !error.message.includes('BAD_TEST_TOKEN'));
+        assert.equal((await f.service.status('book')).remote, null); assert.equal(f.remote.records.size, 0);
+        f.environment.ZENODO_TOKEN = 'CORRECTED_TEST_TOKEN'; f.remote.expectedToken = 'CORRECTED_TEST_TOKEN'; const remote = await f.service.reserveDoi('book', saved.revision);
+        assert.equal(remote.status, 'draft'); assert.equal(f.remote.records.size, 1); assert.equal(f.remote.calls.filter(call => call.path === '/api/deposit/depositions' && call.method === 'POST').length, 2);
+    });
+    for (const status of [400, 404, 409, 422, 429, 500, 503]) await check(`initial create HTTP ${status} keeps unknown-result duplicate protection`, async f => {
+        const saved = await f.service.save(f.profile, null); f.remote.createStatus = status; await assert.rejects(f.service.reserveDoi('book', saved.revision), error => error.status === status);
+        const unknown = (await f.service.status('book')).remote; assert.equal(unknown.status, 'unknown'); assert.equal(unknown.pending.action, 'create'); assert.equal(unknown.draftId, undefined);
+        await assert.rejects(f.service.reserveDoi('book', saved.revision), /unresolved/); assert.equal(f.remote.calls.length, 1);
+    });
+    await check('malformed creation acknowledgement remains unknown and cannot create twice', async f => {
+        const saved = await f.service.save(f.profile, null); f.remote.malformedCreate = true; await assert.rejects(f.service.reserveDoi('book', saved.revision), /invalid JSON acknowledgement/);
+        assert.equal((await f.service.status('book')).remote.pending.action, 'create'); await assert.rejects(f.service.reserveDoi('book', saved.revision), /unresolved/); assert.equal(f.remote.records.size, 1); assert.equal(f.remote.calls.length, 1);
+    });
+    for (const status of [401, 403]) await check(`HTTP ${status} after an acknowledged draft retains its identity`, async f => {
+        const saved = await f.service.save(f.profile, null); f.remote.getStatus = status; await assert.rejects(f.service.reserveDoi('book', saved.revision), error => error.status === status);
+        const retained = (await f.service.status('book')).remote; assert.equal(retained.draftId, '101'); const retried = await f.service.reserveDoi('book', saved.revision); assert.equal(retried.draftId, retained.draftId); assert.equal(f.remote.records.size, 1);
+    });
+    await check('same work cannot silently create a second provider record', async f => {
+        await reserve(f); const other = { ...f.profile, id: 'duplicate-profile' }; const saved = await f.service.save(other, null); const creates = f.remote.calls.filter(call => call.path === '/api/deposit/depositions' && call.method === 'POST').length;
+        await assert.rejects(f.service.reserveDoi(other.id, saved.revision), /already has a Zenodo binding/); assert.equal(f.remote.calls.filter(call => call.path === '/api/deposit/depositions' && call.method === 'POST').length, creates);
+    });
+    await check('internal provider guard cannot collide with a valid profile identity', async f => { f.profile.id = 'zenodo-work-bindings'; const remote = await reserve(f); assert.equal(remote.status, 'draft'); });
+    await check('exact upload and explicit publication preserve old version', async f => {
+        const remote = await reserve(f), release = await build(f); await assert.rejects(f.service.publish('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: remote.revision, recordId: remote.draftId }), /exact uploaded/);
+        const uploaded = await upload(f, release, remote); await assert.rejects(f.service.publish('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: uploaded.revision, recordId: '999' }), /record identity/);
+        const published = await f.service.publish('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: uploaded.revision, recordId: uploaded.draftId }); assert.equal(published.status, 'published'); await assert.rejects(f.service.reserveDoi('book', 1), /immutable/);
+        const previous = clone(f.remote.records.get(published.recordId)); f.profile.version = '0.2.0'; f.profile.doi = { versionDoi: published.versionDoi, conceptDoi: published.conceptDoi }; await f.service.save(f.profile, 1); const effects = f.remote.calls.length; await assert.rejects(f.service.reserveDoi('book', 2, { mode: 'new-version', expectedRecordId: published.recordId }), /manually entered version DOI/); assert.equal(f.remote.calls.length, effects);
+        f.profile.doi = { conceptDoi: published.conceptDoi }; const saved = await f.service.save(f.profile, 2); const next = await f.service.reserveDoi('book', saved.revision, { mode: 'new-version', expectedRecordId: published.recordId }); assert.notEqual(next.draftId, published.recordId); assert.equal(next.conceptDoi, published.conceptDoi); assert.notEqual(next.versionDoi, published.versionDoi); assert.deepEqual(f.remote.records.get(published.recordId), previous);
+        const newer = await build(f), review = await f.service.reviewUpload('book', newer.id, { pdfSha256: newer.pdfSha256, remoteRevision: next.revision }); assert.deepEqual(review.remove, ['book-0.1.0.pdf']); assert.equal(review.blocked.length, 0); await f.service.upload('book', newer.id, { pdfSha256: newer.pdfSha256, remoteRevision: next.revision, uploadFingerprint: review.fingerprint }); assert.deepEqual(f.remote.records.get(published.recordId), previous);
+    });
+    await check('unowned draft files block without any deletion', async f => {
+        const remote = await reserve(f), release = await build(f); f.remote.records.get(remote.draftId).files.push({ id: 'foreign', filename: 'other-material.pdf', checksum: 'md5:unknown' });
+        const preview = await f.service.reviewUpload('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: remote.revision }); assert.deepEqual(preview.blocked, ['other-material.pdf']); await assert.rejects(f.service.upload('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: remote.revision, uploadFingerprint: preview.fingerprint }), /not owned/); assert.equal(f.remote.calls.some(call => call.method === 'DELETE'), false);
+    });
+    await check('lost upload acknowledgement recovers only file ownership until exact reupload', async f => {
+        const remote = await reserve(f), release = await build(f); f.remote.unknownUpload = true;
+        await assert.rejects(upload(f, release, remote), /unknown/); assert.equal((await f.service.status('book')).remote.pending.action, 'upload');
+        const attached = await f.service.attachZenodo('book', 1, { id: remote.draftId, kind: 'draft' }); assert.equal(attached.upload, undefined); assert.equal(attached.pending, undefined); assert.equal(attached.draftFiles[0].owned, true); assert.equal(attached.ownedFiles[0].pdfSha256, release.pdfSha256);
+        const review = { pdfSha256: release.pdfSha256, remoteRevision: attached.revision }, preview = await f.service.reviewUpload('book', release.id, review); assert.deepEqual(preview.blocked, []); assert.deepEqual(preview.replace, ['book-0.1.0.pdf']);
+        await assert.rejects(f.service.publish('book', release.id, { ...review, recordId: attached.draftId }), /exact uploaded/);
+        const uploaded = await f.service.upload('book', release.id, { ...review, uploadFingerprint: preview.fingerprint }); assert.equal(uploaded.upload.buildId, release.id);
+    });
+    await check('lost upload reconciliation never owns a checksum mismatch', async f => {
+        const remote = await reserve(f), release = await build(f); f.remote.unknownUpload = true; await assert.rejects(upload(f, release, remote), /unknown/); f.remote.records.get(remote.draftId).files[0].checksum = 'md5:not-the-built-PDF';
+        const attached = await f.service.attachZenodo('book', 1, { id: remote.draftId, kind: 'draft' }), preview = await f.service.reviewUpload('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: attached.revision }); assert.equal(attached.upload, undefined); assert.equal(attached.draftFiles[0].owned, false); assert.deepEqual(preview.blocked, ['book-0.1.0.pdf']);
+    });
+    await check('remote file changes and stale sources block reviewed upload', async f => {
+        const remote = await reserve(f), release = await build(f), review = { pdfSha256: release.pdfSha256, remoteRevision: remote.revision }, preview = await f.service.reviewUpload('book', release.id, review);
+        f.remote.records.get(remote.draftId).files.push({ id: 'new', filename: 'added.pdf', checksum: 'md5:new' }); await assert.rejects(f.service.upload('book', release.id, { ...review, uploadFingerprint: preview.fingerprint }), /file plan changed/);
+        f.remote.records.get(remote.draftId).files = []; await f.put('book1/02-two.md', '# Changed omitted chapter\n'); await assert.rejects(f.service.reviewUpload('book', release.id, review), /sources, profile, or DOI/);
+    });
+    await check('publish rejects draft file and metadata drift', async f => {
+        const remote = await reserve(f), release = await build(f), uploaded = await upload(f, release, remote), record = f.remote.records.get(uploaded.draftId), review = { pdfSha256: release.pdfSha256, remoteRevision: uploaded.revision, recordId: uploaded.draftId };
+        record.metadata.title = 'Changed title'; await assert.rejects(f.service.publish('book', release.id, review), /metadata changed/); record.metadata.title = f.profile.title; record.files.push({ id: 'extra', filename: 'extra.pdf', checksum: 'md5:extra' }); await assert.rejects(f.service.publish('book', release.id, review), /draft changed/); assert.equal(f.remote.calls.some(call => call.path.endsWith('/actions/publish')), false);
+    });
+    for (const change of ['file', 'metadata', 'doi', 'id']) await check(`final publication acknowledgement validates ${change}`, async f => {
+        const remote = await reserve(f), release = await build(f), uploaded = await upload(f, release, remote); f.remote.publicationAckChange = change;
+        await assert.rejects(f.service.publish('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: uploaded.revision, recordId: uploaded.draftId }), /requires reconciliation/);
+        const uncertain = (await f.service.status('book')).remote; assert.equal(uncertain.status, 'unknown'); assert.equal(uncertain.pending.action, 'publish');
+        if (change === 'file') { const attached = await f.service.attachZenodo('book', 1, { id: uploaded.draftId, kind: 'record' }); assert.equal(attached.status, 'published'); assert.equal(attached.upload, undefined); assert.equal(attached.draftFiles[0].owned, false); }
+    });
+    await check('untrusted upload URLs never receive credentials', async f => {
+        const remote = await reserve(f), release = await build(f), preview = await f.service.reviewUpload('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: remote.revision }); f.remote.maliciousBucket = true;
+        await assert.rejects(f.service.upload('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: remote.revision, uploadFingerprint: preview.fingerprint }), /untrusted API URL/); assert.equal(f.remote.calls.some(call => call.path.includes('stolen')), false);
+    });
+    await check('dead owner lock recovers while active owner lock remains held', async f => {
+        await fs.mkdir(path.join(f.store, 'locks/profile/book'), { recursive: true }); await fs.writeFile(path.join(f.store, 'locks/profile/book/owner.json'), JSON.stringify({ pid: 2147483647 })); await f.service.save(f.profile, null);
+        await fs.mkdir(path.join(f.store, 'locks/profile/book')); await fs.writeFile(path.join(f.store, 'locks/profile/book/owner.json'), JSON.stringify({ pid: process.pid })); await assert.rejects(f.service.save(f.profile, 1), /active operation/); await fs.rm(path.join(f.store, 'locks/profile/book'), { recursive: true });
+    });
+    await check('default PDF subprocess excludes both default and custom credential variables', async f => {
+        const wrapper = path.join(f.root, 'credential-boundary.cjs'), oldDefault = process.env.ZENODO_TOKEN, oldCustom = process.env.PUBLICATION_TEST_TOKEN;
+        await fs.writeFile(wrapper, `const fs=require('node:fs'); const path=require('node:path'); const cp=require('node:child_process'); if(process.env.ZENODO_TOKEN||process.env.PUBLICATION_TEST_TOKEN) process.exit(31); const args=process.argv.slice(2); if(args[0]==='render-pdf'){fs.writeFileSync(path.resolve(process.cwd(),args.find(x=>x.startsWith('--out=')).slice(6)),'%PDF-1.7\\nTEST\\n%%EOF\\n');}else{const r=cp.spawnSync(process.execPath,[${JSON.stringify(cli())},...args],{stdio:'inherit',env:process.env});process.exit(r.status||0);}`);
+        process.env.ZENODO_TOKEN = 'TEST_DEFAULT_ONLY'; process.env.PUBLICATION_TEST_TOKEN = 'TEST_CUSTOM_ONLY';
+        try {
+            f.profile.zenodo.tokenEnv = 'PUBLICATION_TEST_TOKEN';
+            const service = new (api().PublicationService)(f.root, { cliPath: wrapper, toolProbe: command => ({ available: true, identity: `${command} TEST` }) });
+            const plan = await service.plan(f.profile), release = await service.build(f.profile, plan.fingerprint); assert(release.pdfSha256);
+            const manifest = await service.readArtifact('book', release.id, 'manifest.json'); assert.equal(manifest.bytes.includes(Buffer.from('TEST_CUSTOM_ONLY')), false);
+        } finally {
+            if (oldDefault === undefined) delete process.env.ZENODO_TOKEN; else process.env.ZENODO_TOKEN = oldDefault;
+            if (oldCustom === undefined) delete process.env.PUBLICATION_TEST_TOKEN; else process.env.PUBLICATION_TEST_TOKEN = oldCustom;
+        }
+    });
+    console.log(`PDF publication backend: ${passed} focused contracts passed.`);
+}
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await testPublications();

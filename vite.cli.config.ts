@@ -20,7 +20,8 @@ export default defineConfig({
             entry: {
                 'math-workspace': 'src/cli/math-workspace.ts',
                 release: 'src/cli/release.ts',
-                archive: 'src/archive/index.ts'
+                archive: 'src/archive/index.ts',
+                publication: 'src/publication/index.ts'
             },
             formats: ['cjs'],
             fileName: (_format, entryName) => `${entryName}.js`

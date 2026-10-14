@@ -29,7 +29,8 @@ Math Workspace 是一组用于长篇数学写作的本地工具。正文保存�
 - **Codex 阅读入口**：支持插件扩展的桌面端可从侧边栏或会话面板打开同一个 Reader，各个面板分别保存项目与阅读位置；普通浏览器入口仍可使用。
 - **Codex 协作**：Reader 选区可引用到当前会话输入框；窄范围 MCP 查询提供命题、依赖、Lean 证据、术语和既有审计。Lean 辅助审核可把 AI 候选回填 Reader，逐条加入待核对草稿，人工结论由审阅者保存。
 - **Codex 文件定位**：可把 Math Workspace 注册为 Codex Desktop 的文件处理器；Codex 返回的 Markdown 文件与行号链接可以直接定位到 Reader，已打开的页面会原位跳转。
-- **发布导出**：可以生成合并或分文件 Markdown，也可以调用本机 Pandoc 与 LaTeX 工具链生成 PDF。
+- **发布导出**：可以生成合并或分文件 Markdown，也可以调用本机 Pandoc 与 LaTeX 工具链生成 PDF。Reader 的“PDF 出版”可保存卷章选择和版次信息，组合封面、前后文、目录与保留原编号的正文，并预览、下载成品。
+- **持续出版**：同一作品可逐版增补章节，区分作品 DOI 与本版 DOI。支持手填 DOI，也支持显式预留 Zenodo DOI、上传草稿和正式发布；后续文件更新通过同一作品的新版本保留旧版。
 
 ![符号审计报告（演示内容已脱敏）](media/readme/symbol-audit-report.png)
 
@@ -39,8 +40,9 @@ Math Workspace 是一组用于长篇数学写作的本地工具。正文保存�
 - `verify` 检查可机械判断的结构一致性。数学正确性、证明完整性和论证质量仍需单独审阅。
 - 符号审计和辅助审阅依赖用户显式启动的 Codex，并保持为建议性结果。
 - Lean 状态记录锚点、构建和依赖证据。正文与声明之间的语义对应及形式化覆盖范围需要人工确认。
-- Reader 不修改 Markdown 正文；用户明确操作后，它可以写入文档阶段、检查点和本机标记等工作区状态。
+- Reader 不修改 Markdown 正文；用户明确操作后，它可以写入文档阶段、检查点、发布方案和本机标记等工作区状态。
 - PDF 导出依赖本机安装的 Pandoc 和 LaTeX 引擎。
+- DOI 文本、预留 DOI、正式登记及签名原稿是不同状态。Zenodo 操作需要明确启动和服务进程环境中的令牌；打开 Reader、查看方案和本地构建不会自动预留、上传或发布。
 - 早期 VS Code 扩展已冻结在 `legacy/vscode-extension/`，不参与当前构建、发布和支持。
 
 ## 接入项目
@@ -102,6 +104,7 @@ math-workspace codex-handler install
 math-workspace export-md book/ --out dist/book.md
 math-workspace export-md-split book/ --out dist/public
 math-workspace export-pdf book/ --out dist/book.pdf
+math-workspace publication inspect
 ```
 
 Lean 项目还可以使用 `math-workspace lean scan|coverage|verify|capture|build|dependencies`。命令参数和项目配置见[使用指南](docs/usage.md)。
