@@ -73,11 +73,11 @@ async function harness() {
     await load('src/reader/web/reader-popover.ts', './reader-popover');
     const { ReaderToolbarMenu } = await load('src/reader/web/reader-toolbar-menu.ts', './reader-toolbar-menu');
     const { ReaderSourceActions } = await load('src/reader/web/source-actions.ts', './source-actions');
-    const { ReaderApplication, words } = await load('src/reader/web/main.ts', './main', '\nexports.ReaderApplication = ReaderApplication; exports.words = words;');
+    const { ReaderApplication, words, documentStatusBadge, documentStatusText } = await load('src/reader/web/main.ts', './main', '\nexports.ReaderApplication = ReaderApplication; exports.words = words; exports.documentStatusBadge = documentStatusBadge; exports.documentStatusText = documentStatusText;');
     const { renderLeanAnchorBadge } = await load('src/reader/web/formal-renderer.ts', './formal-renderer', '\nexports.renderLeanAnchorBadge = renderLeanAnchorBadge;');
     const { ReaderPropositionReview } = await load('src/reader/web/reader-proposition-review.ts', './reader-proposition-review');
     const { archiveAction } = await load('src/reader/web/reader-archive.ts', './reader-archive', '\nexports.archiveAction = iconButton;');
-    return { document, window, copied, icons, ReaderTooltip, ReaderToolbarMenu, observers, notifyMutation, ReaderSourceActions, ReaderApplication, words, renderLeanAnchorBadge, ReaderPropositionReview, archiveAction };
+    return { document, window, copied, icons, ReaderTooltip, ReaderToolbarMenu, observers, notifyMutation, ReaderSourceActions, ReaderApplication, words, documentStatusBadge, documentStatusText, renderLeanAnchorBadge, ReaderPropositionReview, archiveAction };
 }
 
 function assertIconOnly(button, label, tooltip = 'tooltip') {
@@ -88,6 +88,49 @@ function assertIconOnly(button, label, tooltip = 'tooltip') {
 
 function iconShape(button) {
     return button.querySelector('svg').children.map(node => [node.tagName, node.attributes]);
+}
+
+function documentStageContract(h) {
+    const stages = [['draft', 'documentStageDraft'], ['revising', 'documentStageRevising'], ['stable', 'documentStageStable']];
+    const shapes = [];
+    for (const language of ['zh', 'en']) {
+        const words = h.words[language];
+        for (const [stage, key] of stages) {
+            const expectedIcon = new Element('span'); expectedIcon.append(h.icons.readerIcon('stage-' + stage));
+            if (language === 'zh') shapes.push(JSON.stringify(iconShape(expectedIcon)));
+            for (const checkpoint of [undefined, { label: 'RC1 <careful> edition' }]) {
+                for (const changedSinceCheckpoint of [false, true]) {
+                    const page = { documentMode: 'formal', lifecycle: { stage, checkpoint, changedSinceCheckpoint } };
+                    const header = h.documentStatusBadge(page, language, true), sidebar = h.documentStatusBadge(page, language);
+                    assert.equal(header.querySelector('.reader-document-stage-label').textContent, words[key], 'Milestones and later changes cannot replace the base stage name.');
+                    assert.deepEqual(iconShape(header), iconShape(expectedIcon)); assert.deepEqual(iconShape(sidebar), iconShape(expectedIcon));
+                    assert.equal(sidebar.textContent, ''); assert.equal(sidebar.getAttribute('aria-hidden'), 'true'); assert.ok(sidebar.classList.contains('is-compact'));
+                    const expected = [words[key], checkpoint?.label, checkpoint && changedSinceCheckpoint ? words.documentStageChanged : ''].filter(Boolean).join(' · ');
+                    assert.equal(h.documentStatusText(page, language), expected);
+                    assert.equal(header.dataset.readerTooltip, sidebar.dataset.readerTooltip); assert.equal(header.getAttribute('aria-label'), header.dataset.readerTooltip);
+                    assert.equal(header.dataset.readerTooltip.split(words[key]).length - 1, 1, 'Stage wording appears once in hover/ARIA details.');
+                    assert.equal(header.getAttribute('title'), null); assert.equal(header.dataset.tooltip, undefined, 'Header status uses the viewport tooltip.');
+                    assert.equal(!!header.querySelector('.reader-document-changed'), !!checkpoint && changedSinceCheckpoint);
+                    assert.equal(!!header.querySelector('.reader-document-checkpoint'), !!checkpoint);
+                    if (checkpoint) assert.equal(header.querySelector('.reader-document-checkpoint').textContent, '· ' + checkpoint.label);
+                    assert.equal(header.querySelector('careful'), null, 'User milestone labels remain plain text.');
+                }
+            }
+        }
+        const unset = { documentMode: 'formal' }, unsetHeader = h.documentStatusBadge(unset, language, true);
+        assert.equal(h.documentStatusBadge(unset, language), undefined);
+        assert.equal(unsetHeader.textContent, words.documentStageUnset); assert.equal(unsetHeader.querySelector('svg'), null, 'Unset stages do not acquire an initial-draft icon.');
+        const checkpointOnly = { documentMode: 'formal', lifecycle: { checkpoint: { label: 'v1' }, changedSinceCheckpoint: true } };
+        const header = h.documentStatusBadge(checkpointOnly, language, true), sidebar = h.documentStatusBadge(checkpointOnly, language);
+        const flag = new Element('span'); flag.append(h.icons.readerIcon('stage-checkpoint'));
+        assert.equal(header.querySelector('.reader-document-stage-label').textContent, words.documentStageUnset);
+        assert.deepEqual(iconShape(header), iconShape(flag)); assert.deepEqual(iconShape(sidebar), iconShape(flag));
+        assert.equal(h.documentStatusText(checkpointOnly, language), `${words.documentStageUnset} · v1 · ${words.documentStageChanged}`);
+        assert.equal(header.dataset.readerTooltip.includes(words.documentStageDraft), false); assert.equal(header.dataset.readerTooltip.includes(words.documentStageStable), false);
+        const exploratory = { ...checkpointOnly, documentMode: 'draft', lifecycle: { ...checkpointOnly.lifecycle, stage: 'stable' } };
+        assert.equal(h.documentStatusBadge(exploratory, language), undefined); assert.equal(h.documentStatusBadge(exploratory, language, true), undefined);
+    }
+    assert.equal(new Set(shapes).size, 3, 'The three existing stage glyphs remain visually distinct.');
 }
 
 async function toolbarAndIconContract(h) {
@@ -217,7 +260,7 @@ async function tooltipLifecycle(h) {
 export async function testReaderIconClarity() {
     const h = await harness(), previous = globalThis.document; globalThis.document = h.document;
     try {
-        await toolbarAndIconContract(h); await sourceAndArchiveActions(h); await anchorSemantics(h);
+        documentStageContract(h); await toolbarAndIconContract(h); await sourceAndArchiveActions(h); await anchorSemantics(h);
         await tooltipLifecycle(h);
         const shape = icon => h.icons.readerIcon(icon).children.map(node => [node.tagName, node.attributes]);
         assert.notDeepEqual(shape('reset'), shape('verify'), 'Resetting verdicts cannot look like verified evidence.');

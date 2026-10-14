@@ -122,6 +122,7 @@ async function harness() {
     const previousDocument = globalThis.document; globalThis.document = document;
     const window = new EventTarget(); window.innerWidth = 320; window.innerHeight = 700;
     window.setTimeout = () => 1; window.clearTimeout = () => {};
+    window.requestAnimationFrame = () => 1;
     class Owner {
         opened = false; openCount = 0;
         constructor(...args) { this.host = args.at(-1); }
@@ -137,6 +138,9 @@ async function harness() {
         './reader-route': { isReaderEmbedded: () => true },
         './reader-host': { expandReader() { primaryActions.push('expand'); } },
         './reader-embed': { readerViewStateChanged() {} },
+        './reader-figures': { mountReaderFigures: () => () => {} },
+        './reader-assets': { mountReaderAssets: () => () => {} },
+        './formal-renderer': { renderFormalInline: (_renderer, source) => source, renderFormalDocument: () => ({ html: '', formulas: [] }) },
         './reader-tooltip': { ReaderTooltip: Owner },
         './source-actions': { ReaderSourceActions: Owner },
         './recall-popover': { ReaderRecallPopover: Owner },
@@ -158,7 +162,7 @@ async function harness() {
                 localStorage: { setItem() {} }, requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
         modules[name] = exports; return exports;
     }
-    await load('reader-icons.ts', './reader-icons');
+    const icons = await load('reader-icons.ts', './reader-icons');
     await load('reader-popover.ts', './reader-popover');
     await load('reader-toolbar-menu.ts', './reader-toolbar-menu');
     await load('reader-toolbar-panel.ts', './reader-toolbar-panel');
@@ -166,6 +170,7 @@ async function harness() {
     const app = Object.create(ReaderApplication.prototype); app.root = document.createElement('main'); document.body.append(app.root);
     app.state = { language: 'zh', projectId: 'project-a', revision: 1, pages: [], definitions: [] };
     app.currentPath = 'book/01.md'; app.fontSize = 18; app.sourceLineNumbersVisible = false;
+    app.disposeFigures = () => {}; app.disposeAssets = () => {}; app.expandedDraftCollections = new Set();
     app.buildShell(); app.installHandlers(); app.updateToolbarLabels();
     const populated = [];
     for (const [method, view] of [['renderContents', 'contents'], ['renderDefinitions', 'definitions'], ['renderSymbols', 'symbols'], ['renderSymbolAudit', 'symbol-audit']]) {
@@ -175,7 +180,86 @@ async function harness() {
     const click = element => { if (element.disabled) return; element.emit('pointerdown'); element.focus(); element.emit('click'); };
     const key = (key, options = {}) => { const event = document.activeElement.emit('keydown', { key, ...options });
         if (!event.defaultPrevented && ['Enter', ' '].includes(key) && document.activeElement.tagName === 'button' && !document.activeElement.disabled) document.activeElement.emit('click'); return event; };
-    return { app, document, window, words, populated, primaryActions, find, click, key, restore: () => { globalThis.document = previousDocument; } };
+    return { app, document, window, words, icons, populated, primaryActions, find, click, key, restore: () => { globalThis.document = previousDocument; } };
+}
+
+async function documentStageUiContract() {
+    const h = await harness(), { app, document, find, click, key } = h;
+    const drain = async () => { for (let index = 0; index < 8; index++) await Promise.resolve(); };
+    const shape = element => element.querySelector('svg').children.map(node => [node.tagName, node.attributes]);
+    const stageOptions = [['draft', 'documentStageDraft'], ['revising', 'documentStageRevising'], ['stable', 'documentStageStable']];
+    const submitted = [], reports = [];
+    app.postJson = async (route, body) => { submitted.push({ route, body: JSON.parse(JSON.stringify(body)) }); };
+    app.refreshState = async () => {}; app.openPage = async () => {}; app.reportLive = value => reports.push(value);
+    const second = { filePath: 'book/02.md', title: 'Second chapter', documentMode: 'formal', lifecycle: { stage: 'stable' } };
+    const exploratory = { filePath: 'draft/idea.md', title: 'Exploratory idea', documentMode: 'draft', lifecycle: { stage: 'stable', checkpoint: { label: 'Not a formal stage' } } };
+    try {
+        for (const language of ['zh', 'en']) {
+            app.state.language = language; app.updateToolbarLabels();
+            for (const [stage, labelKey] of stageOptions) {
+                const page = { filePath: 'book/01.md', title: 'First chapter', documentMode: 'formal',
+                    lifecycle: { stage, checkpoint: { label: 'RC1 <careful>', hash: 'unchanged-checkpoint' }, changedSinceCheckpoint: true } };
+                const originalLifecycle = JSON.stringify(page.lifecycle);
+                app.state.pages = [page, second, exploratory]; app.selectedPagePaths = [page.filePath];
+                app.page = { filePath: page.filePath, page, content: '', labels: {} };
+                app.renderNavigation(); app.renderArticle();
+                const row = find('#reader-page-nav').querySelectorAll('.reader-nav-page').find(row => row.dataset.pagePath === page.filePath);
+                const sidebar = row.querySelector('.reader-document-status'), header = app.pageTitle.querySelector('.reader-document-status');
+                const expectedIcon = document.createElement('span'); expectedIcon.append(h.icons.readerIcon('stage-' + stage));
+                assert.deepEqual(shape(sidebar), shape(expectedIcon)); assert.deepEqual(shape(header), shape(expectedIcon));
+                assert.equal(header.querySelector('.reader-document-stage-label').textContent, h.words[language][labelKey]);
+                assert.equal(row.getAttribute('aria-label').includes(sidebar.dataset.readerTooltip), true, 'The page keeps the compact badge’s full accessible stage description.');
+                assert.equal(sidebar.getAttribute('aria-hidden'), 'true'); assert.equal(sidebar.textContent, '');
+                assert.deepEqual(shape(row.querySelector('.reader-page-integration')), shape((() => { const value = document.createElement('span'); value.append(h.icons.readerIcon('integration-unmanaged')); return value; })()), 'Stage decoration does not alter the independent integration chain glyph.');
+                for (const [choice, choiceKey] of stageOptions) {
+                    click(header);
+                    assert.match(find('.reader-document-stage-summary').textContent, /RC1 <careful>/);
+                    const choices = find('.reader-document-stage-actions').querySelectorAll('button');
+                    assert.deepEqual(choices.map(button => button.textContent), stageOptions.map(([, key]) => h.words[language][key]));
+                    const action = choices[stageOptions.findIndex(([stage]) => stage === choice)];
+                    const expected = document.createElement('span'); expected.append(h.icons.readerIcon('stage-' + choice));
+                    assert.deepEqual(shape(action), shape(expected)); assert.equal(action.textContent, h.words[language][choiceKey]);
+                    assert.equal(action.querySelector('svg').getAttribute('aria-hidden'), 'true');
+                    action.focus(); key('Enter'); await drain();
+                    assert.deepEqual(submitted.at(-1), { route: '/api/document-state', body: { filePath: page.filePath, stage: choice } });
+                    assert.equal(find('.reader-toolbar-panel'), null);
+                }
+                for (const [choice, choiceKey] of stageOptions) {
+                    app.selectedPagePaths = [page.filePath, second.filePath, exploratory.filePath];
+                    row.emit('contextmenu', { clientX: 16, clientY: 24 });
+                    const context = find('.reader-nav-context-menu');
+                    assert.ok(context); const trigger = context.querySelector('.reader-nav-context-menu-trigger');
+                    trigger.focus(); key('ArrowRight');
+                    assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+                    const choices = context.querySelector('.reader-nav-context-submenu').querySelectorAll('button');
+                    assert.equal(document.activeElement, choices[0], 'The existing keyboard submenu entry still focuses its first choice.');
+                    const action = choices[stageOptions.findIndex(([stage]) => stage === choice)];
+                    const expected = document.createElement('span'); expected.append(h.icons.readerIcon('stage-' + choice));
+                    assert.deepEqual(shape(action), shape(expected)); assert.equal(action.textContent, h.words[language][choiceKey]);
+                    const before = submitted.length; click(action); await drain();
+                    assert.deepEqual(submitted.slice(before), [page.filePath, second.filePath].map(filePath => ({ route: '/api/document-state', body: { filePath, stage: choice } })), 'Batch choices retain their stage values and exclude exploratory drafts.');
+                    assert.equal(find('.reader-nav-context-menu'), null);
+                }
+                click(header);
+                const checkpoint = find('.reader-document-stage-checkpoint'); checkpoint.querySelector('input').value = 'RC2 <literal>';
+                click(checkpoint.querySelector('button')); await drain();
+                assert.deepEqual(submitted.at(-1), { route: '/api/document-state', body: { filePath: page.filePath, checkpointLabel: 'RC2 <literal>' } });
+                click(header); click(find('.reader-document-stage-clear')); await drain();
+                assert.deepEqual(submitted.at(-1), { route: '/api/document-state', body: { filePath: page.filePath, clearCheckpoint: true } });
+                assert.equal(JSON.stringify(page.lifecycle), originalLifecycle, 'Rendering and choice projection never mutate persisted stage/checkpoint input.');
+            }
+            app.page = { filePath: exploratory.filePath, page: exploratory, content: '', labels: {} };
+            app.selectedPagePaths = [exploratory.filePath]; app.renderArticle();
+            assert.equal(app.pageTitle.querySelector('.reader-document-status'), null);
+            const row = find('#reader-page-nav').querySelectorAll('.reader-nav-page').find(row => row.dataset.pagePath === exploratory.filePath);
+            assert.equal(row.querySelector('.reader-document-status'), null);
+            const before = submitted.length; row.emit('contextmenu', { clientX: 16, clientY: 24 });
+            assert.equal(find('.reader-nav-context-menu'), null); assert.equal(reports.at(-1), h.words[language].documentStageBatchNoFormal);
+            app.openDocumentStage(find('[data-panel="contents"]'));
+            assert.equal(find('.reader-toolbar-panel'), null); assert.equal(submitted.length, before);
+        }
+        console.log('Reader document-stage shared glyph, header/sidebar, single/batch choice, checkpoint and bilingual action contracts passed.');
+    } finally { app.closeNavigationContextMenu(); app.toolbarPanel.dispose(); app.toolbarMenu.dispose(); h.restore(); }
 }
 
 export async function testReaderToolbarMenu() {
@@ -323,6 +407,7 @@ export async function testReaderToolbarMenu() {
     assert.equal((h.window.listeners.get('resize') || []).length, 1, 'Only the original application resize handler remains.');
     console.log('Reader category toolbar menus: keyboard, switching, actions, localization, state and category anchors passed.');
     } finally { h.restore(); }
+    await documentStageUiContract();
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await testReaderToolbarMenu();

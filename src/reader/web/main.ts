@@ -523,21 +523,36 @@ function pageIntegrationTooltip(page: ReaderPage | undefined, language: Language
     return `${pageIntegrationStatusLabel(integration, language)} · ${pageIntegrationDetail(integration, language)}`;
 }
 
+const DOCUMENT_STAGE_OPTIONS = [
+    { stage: 'draft', label: 'documentStageDraft', icon: 'stage-draft' },
+    { stage: 'revising', label: 'documentStageRevising', icon: 'stage-revising' },
+    { stage: 'stable', label: 'documentStageStable', icon: 'stage-stable' }
+] as const;
+
+type DocumentStage = typeof DOCUMENT_STAGE_OPTIONS[number]['stage'];
+
 function documentStageLabel(page: ReaderPage | undefined, language: Language): string {
-    const dictionary = words[language];
-    switch (page?.lifecycle?.stage) {
-        case 'draft': return dictionary.documentStageDraft;
-        case 'revising': return dictionary.documentStageRevising;
-        case 'stable': return dictionary.documentStageStable;
-        default: return dictionary.documentStageUnset;
+    const option = DOCUMENT_STAGE_OPTIONS.find(option => option.stage === page?.lifecycle?.stage);
+    return option ? words[language][option.label] : words[language].documentStageUnset;
+}
+
+function documentStageContent(stage: DocumentStage | undefined, language: Language, compact = false): HTMLElement {
+    const content = document.createElement('span');
+    content.className = 'reader-document-stage';
+    const option = DOCUMENT_STAGE_OPTIONS.find(option => option.stage === stage);
+    if (option) content.append(readerIcon(option.icon, 16));
+    if (!compact) {
+        const label = document.createElement('span'); label.className = 'reader-document-stage-label';
+        label.textContent = option ? words[language][option.label] : words[language].documentStageUnset;
+        content.append(label);
     }
+    return content;
 }
 
 function documentStatusText(page: ReaderPage | undefined, language: Language): string {
     const stage = documentStageLabel(page, language);
     const checkpoint = page?.lifecycle?.checkpoint;
-    if (!checkpoint) return stage;
-    return `${checkpoint.label} · ${page?.lifecycle?.changedSinceCheckpoint ? words[language].documentStageChanged : stage}`;
+    return [stage, checkpoint?.label, checkpoint && page?.lifecycle?.changedSinceCheckpoint ? words[language].documentStageChanged : ''].filter(Boolean).join(' · ');
 }
 
 function documentStatusBadge(page: ReaderPage | undefined, language: Language, interactive = false): HTMLElement | undefined {
@@ -546,21 +561,27 @@ function documentStatusBadge(page: ReaderPage | undefined, language: Language, i
     const hasState = !!lifecycle?.stage || !!lifecycle?.checkpoint;
     if (!interactive && !hasState) return undefined;
     const element = interactive ? document.createElement('button') : document.createElement('span');
-    element.className = 'reader-document-status' + (interactive ? ' is-interactive' : '') + (lifecycle?.changedSinceCheckpoint ? ' is-changed' : '');
+    element.className = 'reader-document-status' + (interactive ? ' is-interactive' : '') + (lifecycle?.checkpoint && lifecycle.changedSinceCheckpoint ? ' is-changed' : '');
     const status = documentStatusText(page, language);
-    const detail = lifecycle?.checkpoint ? `${documentStageLabel(page, language)} · ${status}` : status;
-    const description = words[language].documentStage + '：' + detail;
+    const description = words[language].documentStage + (language === 'en' ? ': ' : '：') + status;
+    element.dataset.readerTooltip = description;
+    if (!lifecycle?.stage && lifecycle?.checkpoint) element.append(readerIcon('stage-checkpoint', 16));
+    if (lifecycle?.stage || interactive) element.append(documentStageContent(lifecycle?.stage, language, !interactive));
     if (interactive) {
-        element.textContent = status;
-        element.title = description;
         (element as HTMLButtonElement).type = 'button';
         element.dataset.documentStatus = 'true';
+        element.setAttribute('aria-label', description);
+        if (lifecycle?.checkpoint) {
+            const checkpoint = document.createElement('span'); checkpoint.className = 'reader-document-checkpoint';
+            checkpoint.textContent = '· ' + lifecycle.checkpoint.label; element.append(checkpoint);
+            if (lifecycle.changedSinceCheckpoint) {
+                const changed = document.createElement('span'); changed.className = 'reader-document-changed';
+                changed.textContent = '· ' + words[language].documentStageChanged; element.append(changed);
+            }
+        }
     } else {
         element.classList.add('is-compact');
-        element.dataset.readerTooltip = description;
         element.setAttribute('aria-hidden', 'true');
-        const icon: ReaderIconName = lifecycle?.stage ? `stage-${lifecycle.stage}` : 'stage-checkpoint';
-        element.append(readerIcon(icon, 16));
     }
     return element;
 }
@@ -1272,16 +1293,12 @@ class ReaderApplication {
             stageMenu.querySelector<HTMLButtonElement>('button')?.focus();
         });
         stageBranch.addEventListener('mouseleave', () => setStageMenuOpen(false));
-        ([
-            ['draft', this.dictionary().documentStageDraft],
-            ['revising', this.dictionary().documentStageRevising],
-            ['stable', this.dictionary().documentStageStable]
-        ] as const).forEach(([stage, label]) => {
+        DOCUMENT_STAGE_OPTIONS.forEach(({ stage }) => {
             const action = document.createElement('button');
             action.type = 'button';
             action.className = 'reader-nav-context-menu-item';
             action.setAttribute('role', 'menuitem');
-            action.textContent = label;
+            action.append(documentStageContent(stage, this.state!.language));
             action.addEventListener('click', () => void this.saveNavigationStages(filePaths, stage));
             stageMenu.append(action);
         });
@@ -1648,15 +1665,11 @@ class ReaderApplication {
             summary.textContent = documentStatusText(page, this.state!.language);
             const stages = document.createElement('div');
             stages.className = 'reader-document-stage-actions';
-            ([
-                ['draft', dictionary.documentStageDraft],
-                ['revising', dictionary.documentStageRevising],
-                ['stable', dictionary.documentStageStable]
-            ] as const).forEach(([stage, label]) => {
+            DOCUMENT_STAGE_OPTIONS.forEach(({ stage }) => {
                 const button = document.createElement('button');
                 button.type = 'button';
                 button.className = 'reader-symbol-audit-button';
-                button.textContent = label;
+                button.append(documentStageContent(stage, this.state!.language));
                 button.addEventListener('click', () => void this.saveDocumentStage({ stage }));
                 stages.append(button);
             });

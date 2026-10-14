@@ -284,6 +284,8 @@ An exploratory draft is earlier than a formal document's Initial Draft stage: it
 
 Formal documents use separate lifecycle metadata. They start as Initial Draft and can be changed to Revising or Stable Draft. The navigation context menu updates one document or a multi-selection; the Reader continues to display the first selected document. A document can also record a free-form milestone such as `RC1` or `v1`; Math Workspace stores the content hash at that point and later marks the document as changed when the hash differs.
 
+The sidebar, page header and stage choices share the same document icons: a blank document for Initial Draft, a document with a pencil for Revising, and a document with a check for Stable Draft. The sidebar keeps a compact icon with a hover description. The header keeps the stage icon and name, with milestone and Changed information alongside it. Both the header stage panel and navigation context menu use the same icons beside their stage labels. On narrow screens, the title and stage move to a second row so the stage name and category controls remain visible.
+
 State is stored in `.math-workspace/documents.json` by default and keyed by project-relative path. Moving or renaming a file leaves the old record orphaned by design instead of guessing semantic identity. Set `documents.stateFile` to use another project-relative state path.
 
 ### Codex MCP Entry
@@ -1158,6 +1160,8 @@ npm run workspace -- serve
 `scan.exclude` 让目录不进入正式扫描；`documents.collections` 让其中 Markdown 仍在 Reader 的可折叠探索稿区出现。探索稿只用于阅读，不生成 formal hash、定义或符号索引、依赖图、Lean 对齐或符号审计输入，因此相关工具在探索稿页默认禁用。
 
 正式文档使用独立的阶段元数据：默认“初稿”，可改为“修订中”或“稳定稿”。目录右键菜单支持单篇或多选批量修改；多选时 Reader 仍打开选中的第一篇。还可以为单篇文档记录 `RC1`、`v1` 等自由格式里程碑，Math Workspace 同时保存当时的内容 hash，并在后续内容变化时标记“有改动”。
+
+侧栏、页眉及两处阶段菜单使用同一组文档图标：初稿为空白文档，修订中为文档加笔，稳定稿为文档加勾。页眉始终保留阶段图标与名称，里程碑和“有改动”作为补充；侧栏保持紧凑图标，可悬停查看完整状态。窄屏将标题与阶段放在工具栏的下一行，保留全部分类入口。
 
 状态默认写入 `.math-workspace/documents.json`，以项目相对路径为键。移动或重命名文件后，旧记录会成为 orphan；这是有意的轻量行为，不做不可靠的语义猜测。若需改变状态文件位置，可设置 `documents.stateFile`。
 
