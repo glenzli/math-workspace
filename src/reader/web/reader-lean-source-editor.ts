@@ -61,15 +61,26 @@ export class LeanSourceEditor {
                 } };
             }, { hoverTime: 350 }),
             EditorView.theme({
-                '&': { fontSize: '12px', backgroundColor: 'var(--lean-surface, #fff)', color: 'var(--lean-ink, #33414c)' },
+                '&': { fontSize: '12px', backgroundColor: 'var(--lean-surface, #fff)', color: 'var(--lean-ink, #262626)' },
                 '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', overflow: 'auto', maxHeight: '540px', lineHeight: '1.7' },
-                '.cm-content': { padding: '12px 0', minHeight: '160px', cursor: 'text' },
+                '.cm-content': { padding: '12px 0', minHeight: '160px', cursor: 'text', caretColor: 'var(--lean-ink, #262626)' },
                 '.cm-line': { padding: '0 12px' },
-                '.cm-gutters': { backgroundColor: 'var(--lean-subtle, #f5f6f7)', border: 'none', color: 'var(--lean-muted, #65727e)' },
-                '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: '#8793c014' },
-                '.cm-selectionBackground': { backgroundColor: '#8290d83b !important' },
-                '.cm-panels': { backgroundColor: 'var(--lean-subtle, #f5f6f7)', color: 'inherit' },
-                '.cm-tooltip': { backgroundColor: 'var(--lean-surface, #fff)', color: 'var(--lean-ink, #33414c)', border: '1px solid var(--lean-border, #ddd)' }
+                '.cm-gutters': { backgroundColor: 'var(--lean-subtle, #f3f3f3)', border: 'none', color: 'var(--lean-muted, #626262)' },
+                '.cm-activeLine': { backgroundColor: 'transparent', boxShadow: 'inset 2px 0 var(--reader-border-strong)' },
+                '.cm-activeLineGutter': { backgroundColor: 'var(--reader-code-highlight)' },
+                '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--lean-ink, #262626)' },
+                '.cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': { backgroundColor: 'var(--reader-code-highlight)', outline: '1px solid var(--reader-border-strong)', outlineOffset: '-1px' },
+                '.cm-searchMatch, .cm-selectionMatch': { backgroundColor: 'var(--reader-code-highlight)', boxShadow: 'inset 0 -1px var(--reader-border-strong)' },
+                '.cm-searchMatch-selected': { backgroundColor: 'var(--reader-code-highlight)', outline: '1px solid var(--reader-focus)', outlineOffset: '-1px' },
+                '.cm-foldPlaceholder': { backgroundColor: 'var(--reader-selected)', borderColor: 'var(--reader-border-strong)', color: 'var(--lean-ink, #262626)' },
+                '.cm-panels': { backgroundColor: 'var(--lean-subtle, #f3f3f3)', borderColor: 'var(--lean-border, #d8d8d8)', color: 'inherit' },
+                '.cm-textfield, .cm-button': { backgroundColor: 'var(--lean-surface, #fff)', backgroundImage: 'none', border: '1px solid var(--reader-border-strong)', color: 'inherit' },
+                '.cm-button:hover, .cm-button:active': { backgroundColor: 'var(--reader-hover)', backgroundImage: 'none' },
+                '.cm-panel.cm-search :is(button, input):focus-visible': { outline: '2px solid var(--reader-focus)', outlineOffset: '1px' },
+                '.cm-panel.cm-search input[type=checkbox]': { accentColor: 'var(--reader-primary)' },
+                '.cm-tooltip': { backgroundColor: 'var(--lean-surface, #fff)', color: 'var(--lean-ink, #262626)', border: '1px solid var(--lean-border, #d8d8d8)' },
+                '.cm-tooltip-arrow:before': { borderTopColor: 'var(--lean-border, #d8d8d8)', borderBottomColor: 'var(--lean-border, #d8d8d8)' },
+                '.cm-tooltip-arrow:after': { borderTopColor: 'var(--lean-surface, #fff)', borderBottomColor: 'var(--lean-surface, #fff)' }
             })
         ] }) });
     }
