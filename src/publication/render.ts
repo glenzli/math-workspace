@@ -284,8 +284,12 @@ export async function renderPublication(store: PublicationStore, plan: Publicati
         const frozen = path.join(temporary, 'inputs'); await fs.mkdir(frozen);
         try {
             progress.onProgress?.('Freezing selected sources, formal numbering inputs, and local resources');
-            for (const [name, bytes] of snapshot.files) { const destination = await safePath(frozen, name); await fs.mkdir(path.dirname(destination), { recursive: true }); await fs.writeFile(destination, bytes, { flag: 'wx' }); }
-            if (!snapshot.files.has('.math-workspace/config.json')) { await fs.mkdir(path.join(frozen, '.math-workspace'), { recursive: true }); await fs.writeFile(path.join(frozen, '.math-workspace/config.json'), canonical(snapshot.config), { flag: 'wx' }); }
+            const configName = '.math-workspace/config.json';
+            for (const [name, bytes] of snapshot.files) { if (name === configName) continue; const destination = await safePath(frozen, name); await fs.mkdir(path.dirname(destination), { recursive: true }); await fs.writeFile(destination, bytes, { flag: 'wx' }); }
+            // The plan retains the original config bytes/hash; Markdown export must not scan unfrozen Lean projects.
+            const sourceConfig = snapshot.files.has(configName) ? JSON.parse(snapshot.files.get(configName).toString('utf8')) : snapshot.config;
+            const exportConfig = { ...sourceConfig, lean: { ...sourceConfig?.lean, projects: [] } };
+            await fs.mkdir(path.join(frozen, '.math-workspace'), { recursive: true }); await fs.writeFile(path.join(frozen, configName), canonical(exportConfig), { flag: 'wx' });
             const invoke = options.runCli || ((args, runtimeOptions) => runPublicationCli(options.cliPath || path.resolve(__dirname, 'math-workspace.js'), args, { ...runtimeOptions, credentialEnv: profile.zenodo.tokenEnv }));
             progress.onProgress?.('Compiling selected chapters with their original formal numbering');
             await invoke(['export-md', ...plan.selected.map(page => page.path), '--out=../compiled.md', '--read-only'], { cwd: frozen, onProgress: progress.onProgress });

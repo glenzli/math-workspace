@@ -135,6 +135,44 @@ export async function testPublications() {
         assert.deepEqual(await fs.readFile(path.join(f.root, 'book1/01-one.md')), original); assert.equal(await exists(path.join(f.root, '.math-workspace/workspace-index.json')), false);
         const artifact = await f.service.readArtifact('book', result.id, 'publication.pdf'); assert.equal(hash(artifact.bytes), result.pdfSha256); const second = await build(f); assert.notEqual(second.id, result.id); assert.equal((await f.service.readArtifact('book', result.id, 'publication.pdf')).bytes.toString(), artifact.bytes.toString());
     });
+    await check('frozen export compiles configured Lean projects as Markdown without Lean activity', async f => {
+        const configName = '.math-workspace/config.json', config = {
+            language: 'en', dictionary: { en: { theorem: 'Result' } }, ui: { en: { chapter: 'Unit {number}' } }, render: { pageHeadingStyle: 'number-title' },
+            pdf: { documentClass: 'article', variables: ['colorlinks:false'] },
+            lean: { projects: [{ key: 'fixture', root: 'lean', sourceRoots: ['.'], target: 'Fixture' }], coverageTypes: ['theorem'] }
+        };
+        const leanFiles = { 'lean/Fixture.lean': 'theorem fixture_identity (n : Nat) : n = n := rfl\n', 'lean/lean-toolchain': 'leanprover/lean4:v4.33.1\n', 'lean/lakefile.toml': 'name = "fixture"\n[[lean_lib]]\nname = "Fixture"\n' };
+        await f.put(configName, `${JSON.stringify(config, null, 2)}\n`);
+        for (const [file, content] of Object.entries(leanFiles)) await f.put(file, content);
+        const matterFiles = {
+            'book1/front-matter/preface.md': '# #h-5555555555555555 Author preface\n\nLEAN_FRONT See @h-cccccccccccccccc.\n',
+            'book1/back-matter/conclusion.md': '# #h-7777777777777777 Author conclusion\n\nLEAN_BACK See @h-aaaaaaaaaaaaaaaa.\n',
+            'book1/to-be-continued.md': '# #h-8888888888888888 Next edition\n\nLEAN_CONTINUED See @h-bbbbbbbbbbbbbbbb.\n'
+        };
+        for (const [file, content] of Object.entries(matterFiles)) await f.put(file, content);
+        f.profile.frontMatter = [{ file: 'book1/front-matter/preface.md' }]; f.profile.backMatter = [{ file: 'book1/back-matter/conclusion.md' }]; f.profile.continued = { file: 'book1/to-be-continued.md' };
+        const plan = await f.service.plan(f.profile), originals = new Map();
+        for (const file of [...plan.inputs.map(input => input.path), ...Object.keys(leanFiles)]) originals.set(file, { bytes: await fs.readFile(path.join(f.root, file)), modified: (await fs.stat(path.join(f.root, file))).mtimeMs });
+        const toolBin = path.join(f.root, 'lean-probe-bin'), activityLog = path.join(f.root, 'lean-activity.log');
+        await fs.mkdir(toolBin);
+        for (const command of ['lean', 'lake', 'elan']) { const executable = path.join(toolBin, command); await fs.writeFile(executable, '#!/bin/sh\nprintf "%s\\n" "$0" >> "$PUBLICATION_TEST_LEAN_LOG"\nexit 93\n'); await fs.chmod(executable, 0o755); }
+        const oldPath = process.env.PATH, oldLog = process.env.PUBLICATION_TEST_LEAN_LOG;
+        let release;
+        try { process.env.PATH = toolBin; process.env.PUBLICATION_TEST_LEAN_LOG = activityLog; release = await f.service.build(f.profile, plan.fingerprint); }
+        finally { if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath; if (oldLog === undefined) delete process.env.PUBLICATION_TEST_LEAN_LOG; else process.env.PUBLICATION_TEST_LEAN_LOG = oldLog; }
+        const rendered = f.rendered[0], buildRoot = path.join(f.store, 'builds/book', release.id), frozen = path.join(buildRoot, 'inputs');
+        assert.match(rendered.markdown, /^# 1 First/m); assert.match(rendered.markdown, /^# 3 Third/m); assert.doesNotMatch(rendered.markdown, /^# 2 Second/m); assert.match(rendered.markdown, /Result 2\.1/); assert.match(rendered.markdown, /Unit 3/);
+        assert.match(rendered.front, /LEAN_FRONT See Result 3\.1/); assert.match(rendered.markdown, /LEAN_BACK See Result 1\.1/); assert.match(rendered.markdown, /LEAN_CONTINUED See Result 2\.1/);
+        assert.doesNotMatch(rendered.markdown + rendered.front, /@h-|# #h-/); assert.equal(await exists(path.join(frozen, 'lean')), false); assert.equal(await exists(activityLog), false); assert.equal(await exists(path.join(f.root, 'lean/.lake')), false);
+        const exportConfig = JSON.parse(await fs.readFile(path.join(frozen, configName), 'utf8'));
+        assert.deepEqual(exportConfig, { ...config, lean: { ...config.lean, projects: [] } }, 'Only the frozen export configuration disables Lean project scanning.');
+        for (const [file, original] of originals) { assert.deepEqual(await fs.readFile(path.join(f.root, file)), original.bytes, file); assert.equal((await fs.stat(path.join(f.root, file))).mtimeMs, original.modified, file); }
+        const manifest = JSON.parse(await fs.readFile(path.join(buildRoot, 'manifest.json'), 'utf8'));
+        assert.equal(manifest.plan.fingerprint, plan.fingerprint); assert.equal(manifest.plan.inputs.find(input => input.path === configName).sha256, hash(originals.get(configName).bytes));
+        assert.equal(manifest.mathematicalCorrectnessAssessed, false); assert.equal(manifest.sourceArchiveSignatureAsserted, false);
+        await f.put(configName, JSON.stringify({ ...config, lean: { ...config.lean, projects: [{ ...config.lean.projects[0], target: 'ChangedTarget' }] } }));
+        assert.notEqual((await f.service.plan(f.profile)).fingerprint, plan.fingerprint, 'The original Lean configuration still binds the publication plan.');
+    });
     await check('Chinese publication language selects CTeX without changing the saved profile', async f => {
         f.profile.language = 'zh-CN'; const saved = await f.service.save(f.profile, null); await build(f);
         assert(f.rendered[0].args.includes('--lang=zh-CN')); assert.deepEqual(f.rendered[0].args.filter(arg => arg.startsWith('--documentclass=')), ['--documentclass=ctexart']);

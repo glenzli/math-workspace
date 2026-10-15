@@ -1,13 +1,13 @@
 {
   "name": "math-workspace",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "description": "Query local Math Workspace context from Codex.",
   "author": {
     "name": "Glen Li",
     "url": "https://gitlab.com/glenzli"
   },
-  "homepage": "https://gitlab.com/glenzli/math-workspace",
-  "repository": "https://gitlab.com/glenzli/math-workspace",
+  "homepage": "https://github.com/glenzli/math-workspace",
+  "repository": "https://github.com/glenzli/math-workspace",
   "license": "MIT",
   "keywords": [
     "markdown",

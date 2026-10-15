@@ -1,12 +1,12 @@
 {
   "name": "math-workspace",
   "description": "Local workspace for mathematical writing, formal review, and project navigation",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "publisher": "glenzli",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://gitlab.com/glenzli/math-workspace.git"
+    "url": "git+https://github.com/glenzli/math-workspace.git"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
@@ -79,5 +79,9 @@
     "typescript": "^6.0.3",
     "vite": "6.4.3",
     "zod": "3.25.76"
+  },
+  "homepage": "https://github.com/glenzli/math-workspace#readme",
+  "bugs": {
+    "url": "https://github.com/glenzli/math-workspace/issues"
   }
 }
