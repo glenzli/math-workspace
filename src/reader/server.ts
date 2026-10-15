@@ -7,6 +7,7 @@ import {
     formatDisplayNumber,
     formatPageHeading,
     formatPageReference,
+    isPageLabelType,
     toPosix,
     typeName,
     type LabelData,
@@ -99,7 +100,7 @@ function stripUndefinedFields<T extends Record<string, unknown>>(value: T): T {
 
 function displayLabel(label: LabelData, config: any, pagesByPath: Map<string, PageData>): string {
     const page = pagesByPath.get(label.filePath);
-    if (page && ['chapter', 'appendix', 'intro', 'summary'].includes(label.type)) {
+    if (page && isPageLabelType(label.type)) {
         return formatPageReference(page, config);
     }
     const number = formatDisplayNumber(label);

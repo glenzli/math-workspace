@@ -64,11 +64,18 @@ class Element {
 async function harness(language = 'en') {
     const document = { downloads: [], activeElement: null, createElement(tag) { return new Element(tag, this); } }; document.body = document.createElement('body'); document.activeElement = document.body;
     const context = { language, project: 'project-a', token: 'token-a' }, requests = [], revoked = [], timers = new Map(), previews = []; let sequence = 0, override;
-    const model = { pages: structuredClone(pages), warnings: [], profiles: [{ profile: profile(), revision: 1, updatedAt: '' }], builds: [edition()], remote: remote(), job: undefined,
+    const model = { pages: structuredClone(pages), sources: {}, partial: true, warnings: [], profiles: [{ profile: profile(), revision: 1, updatedAt: '' }], builds: [edition()], remote: remote(), job: undefined,
         uploadPlan: { profileId: 'edition', buildId: hash('b'), draftId: '123', remoteRevision: 4, pdfSha256: hash('a'), fingerprint: hash('c'),
             files: [{ name: 'notes.txt', checksum: 'md5:retained', owned: false }], add: ['publication.pdf'], replace: [], remove: [], blocked: ['notes.txt'] } };
-    const currentPlan = (value = profile()) => ({ ...plan(value), selected: model.pages.filter(page => value.chapters.includes(page.path)),
-        omitted: model.pages.filter(page => !value.chapters.includes(page.path)), warnings: model.warnings });
+    const currentPlan = (value = profile()) => {
+        const resolved = entries => (entries || []).map(entry => ({ ...entry, ...(entry.file ? model.sources[entry.file] : {}) }));
+        const assigned = new Set([...(value.frontMatter || []), ...(value.backMatter || []), ...(value.continued?.enabled === false ? [] : [value.continued || {}])].map(entry => entry.file).filter(Boolean));
+        const notice = value.continued?.file && value.continued.enabled !== false ? { enabled: true, file: value.continued.file,
+            title: model.sources[value.continued.file]?.title || 'To be continued', text: model.sources[value.continued.file]?.content || '' } : plan(value).continuedNotice;
+        return { ...plan(value), selected: model.pages.filter(page => value.chapters.includes(page.path) && !assigned.has(page.path)),
+            omitted: model.pages.filter(page => !value.chapters.includes(page.path) && !assigned.has(page.path)), partial: model.partial,
+            frontMatter: resolved(value.frontMatter), backMatter: resolved(value.backMatter), continuedNotice: notice, warnings: model.warnings };
+    };
     const request = async (route, options) => {
         const value = { route, options, body: options.body ? JSON.parse(options.body) : undefined }; requests.push(value);
         assert.equal(options.headers['x-math-workspace-token'], context.token); assert.equal(options.headers['x-math-workspace-project'], context.project);
@@ -183,16 +190,65 @@ async function testPublicationUi() {
     upload.reader.close();
 
     const optional = await harness(); optional.model.profiles[0].profile.language = 'zh-CN'; optional.model.profiles[0].profile.frontMatter = []; optional.model.profiles[0].profile.backMatter = [];
+    delete optional.model.profiles[0].profile.continued.enabled;
     await optional.reader.open(); await step(optional, 1);
     const language = optional.document.body.querySelectorAll('select').find(control => control.getAttribute('aria-label') === 'Publication language');
     assert.equal(language.value, 'zh', 'Standard saved language tags retain a visible language choice.');
+    assert.ok(optional.document.body.querySelectorAll('input').some(control => control.indeterminate), 'The legacy automatic continued rule is visible without turning it into an explicit override.');
     await action(optional, 'Save publication plan').emit('click'); await drain();
     const optionalSaved = optional.requests.find(request => request.body?.action === 'save').body.profile;
     assert.equal(optionalSaved.language, 'zh-CN'); assert.deepEqual(optionalSaved.frontMatter, []); assert.deepEqual(optionalSaved.backMatter, [], 'Viewing layout does not add optional matter.');
+    assert.equal(optionalSaved.continued.enabled, undefined);
     const identity = optional.document.body.querySelectorAll('input').find(control => control.getAttribute('aria-label') === 'Plan name');
     identity.value = 'new-edition'; await identity.emit('input'); await step(optional, 3);
     assert.equal(optional.document.body.querySelectorAll('button').some(button => button.getAttribute('aria-label') === 'Preview PDF'), false, 'Renaming a plan cannot display the old plan’s PDF.');
     optional.reader.close();
+
+    for (const locale of ['zh', 'en']) {
+        const source = await harness(locale), original = source.model.profiles[0].profile;
+        const files = [
+            { path: 'book/front-matter/preface.md', title: 'A manuscript preface', kind: 'front-matter' },
+            { path: 'book/front-matter/readers-letter.md', title: 'A letter to readers', kind: 'front-matter' },
+            { path: 'book/back-matter/conclusion.md', title: 'An author ending', kind: 'back-matter' },
+            { path: 'book/back-matter/ai-retirement.md', title: 'AI retirement letter', kind: 'back-matter' },
+            { path: 'book/to-be-continued.md', title: 'What comes next', kind: 'continued' }
+        ];
+        source.model.pages.push(...files);
+        for (const file of files) source.model.sources[file.path] = { title: file.title, content: `# #h-9999999999999999 ${file.title}\n\nActual source content for ${file.path}.` };
+        original.chapters.push(files[0].path); original.continued.text = 'Saved inline declaration';
+        source.model.partial = false;
+        await source.reader.open(); await step(source, 1);
+        const picker = identity => source.document.body.querySelector(`[data-publication-file="${identity}"]`);
+        const focusedPicker = picker('frontMatter-1'); focusedPicker.value = files[0].path; focusedPicker.focus(); await focusedPicker.emit('change');
+        assert.notEqual(picker('frontMatter-1'), focusedPicker); assert.equal(source.document.activeElement, picker('frontMatter-1'), 'A file choice restores focus to the rebuilt control with the same identity.');
+        const externalFocus = source.document.createElement('button'); source.document.body.append(externalFocus); externalFocus.focus();
+        await picker('frontMatter-1').emit('change'); assert.equal(source.document.activeElement, externalFocus, 'An unfocused picker cannot take focus from another surface.');
+        let backup = source.document.body.querySelectorAll('textarea').find(control => control.value === 'Why this book.'); assert.ok(backup);
+        backup.value = 'Retained inline backup'; await backup.emit('input');
+        await action(source, locale === 'zh' ? '添加 前文' : 'Add Front matter').emit('click');
+        assert.equal(picker('frontMatter-2').value, '', 'Adding an entry never silently imports a manuscript from another book.');
+        picker('frontMatter-2').value = files[1].path; await picker('frontMatter-2').emit('change');
+        picker('backMatter-1').value = files[2].path; await picker('backMatter-1').emit('change');
+        await action(source, locale === 'zh' ? '添加 后文' : 'Add Back matter').emit('click');
+        assert.equal(picker('backMatter-2').value, ''); picker('backMatter-2').value = files[3].path; await picker('backMatter-2').emit('change');
+        picker('continued').value = files[4].path; await picker('continued').emit('change');
+        await action(source, locale === 'zh' ? '保存出版计划' : 'Save publication plan').emit('click'); await drain();
+        const saved = source.requests.find(request => request.body?.action === 'save').body.profile;
+        assert.equal(saved.frontMatter[0].file, files[0].path); assert.equal(saved.frontMatter[0].content, 'Retained inline backup'); assert.equal(saved.frontMatter[0].title, 'Preface');
+        assert.equal(saved.backMatter.length, 2); assert.equal(saved.continued.text, 'Saved inline declaration'); assert.equal(saved.continued.file, files[4].path);
+        await step(source, 0);
+        const assignedRow = source.document.body.querySelectorAll('.publication-chapter').find(row => row.textContent.includes(files[0].path));
+        assert.equal(assignedRow.querySelector('input').disabled, true); assert.match(assignedRow.textContent, locale === 'zh' ? /已用于 前文/ : /Used as Front matter/);
+        await step(source, 2); await action(source, locale === 'zh' ? '保存并审阅本版' : 'Save and review this edition').emit('click'); await drain();
+        assert.match(source.document.body.textContent, /Actual source content for book\/to-be-continued\.md/);
+        assert.match(source.document.body.textContent, /AI retirement letter/); assert.match(source.document.body.textContent, /book\/front-matter\/readers-letter\.md/);
+        assert.match(source.document.body.textContent, locale === 'zh' ? /稿件内容预览/ : /Manuscript content preview/);
+        assert.doesNotMatch(source.document.body.textContent, /#h-9999999999999999/);
+        assert.doesNotMatch(source.document.body.textContent, /Saved inline declaration|Retained inline backup/);
+        await step(source, 1); picker('continued').value = ''; await picker('continued').emit('change');
+        assert.ok(source.document.body.querySelectorAll('textarea').some(control => control.value === 'Saved inline declaration'), 'Clearing the file restores the existing declaration field.');
+        source.reader.close();
+    }
 
     const late = await harness(), gate = deferred(); late.override(request => request.route === '/api/publication' ? gate.promise : undefined);
     const pending = late.reader.open(); late.context.project = 'project-b'; late.context.token = 'token-b'; late.reader.contextChanged();

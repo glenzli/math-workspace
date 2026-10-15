@@ -4,6 +4,8 @@ import { collectExerciseContent, connectExerciseSolutions, solutionTarget, type 
 export * from './formal-kinds';
 export { associatedProofContent, exerciseSupportKind } from './exercise-structure';
 import { analyzeProjectKnowledge, type ProjectKnowledgeSourceKind, type ProjectStructureAnalysis } from './project-knowledge';
+import { isPageLabelType, isManuscriptMatterKind, sortManuscriptPages, unnumberedPageKind } from './page-structure';
+export * from './page-structure';
 
 export { analyzeProjectKnowledge } from './project-knowledge';
 export type { ProjectKnowledgeAnalysis, ProjectKnowledgeDefinition, ProjectKnowledgeSource, ProjectKnowledgeSourceKind, ProjectStructureAnalysis } from './project-knowledge';
@@ -324,7 +326,6 @@ export interface FormalMarker {
     solutionOf?: string;
 }
 
-const PAGE_LABEL_TYPES = new Set(['chapter', 'intro', 'summary', 'appendix']);
 const SYMBOL_PLACEHOLDER_RE = /\$\{([A-Za-z][A-Za-z0-9_]*)\}/g;
 const SYMBOL_SAMPLE_VALUES: Record<string, string> = {
     operator: 'T',
@@ -1420,6 +1421,7 @@ function parseVolumeOrder(value: string): number {
 function inferBookInfo(filePath: string, config: any): BookInfo {
     const segment = filePath
         .split('/')
+        .slice(0, -1)
         .find(part => /^book[-_\s]?(?:\d+|[a-z0-9]+)(?:[-_\s].*)?$/i.test(part));
     if (!segment) {
         return { key: '__workspace__', title: uiText(config, 'workspace'), order: 0 };
@@ -1434,6 +1436,7 @@ function inferBookInfo(filePath: string, config: any): BookInfo {
 function inferVolumeInfo(filePath: string, config: any): VolumeInfo | undefined {
     const segment = filePath
         .split('/')
+        .slice(0, -1)
         .find(part => /^(?:vol|volume)[-_\s]?(?:\d+|[ivxlcdm]+)(?:[-_\s].*)?$/i.test(part));
     if (!segment) return undefined;
 
@@ -1477,14 +1480,6 @@ function parseNumberingUnit(basename: string): NumberingUnit | undefined {
         order: 100000 + appendixOrder,
         appendix: label
     };
-}
-
-function parseSpecialPageKind(basename: string): string | undefined {
-    if (/^00[-_\s]?(?:intro|introduction)\.md$/i.test(basename)) return 'intro';
-    if (/^intro\.md$/i.test(basename)) return 'intro';
-    if (/^introduction\.md$/i.test(basename)) return 'intro';
-    if (/^summary\.md$/i.test(basename)) return 'summary';
-    return undefined;
 }
 
 function parseMarkdownHeadingLine(line: string): { level: number; id?: string; title: string } | undefined {
@@ -1548,9 +1543,10 @@ function fallbackPageTitle(filePath: string): string {
         .replace(/[-_]+/g, ' ');
 }
 
-function getPageOrder(kind: string, unit?: NumberingUnit): number {
+function getPageOrder(kind: string, unit?: NumberingUnit, filePath = ''): number {
     if (kind === 'intro') return -100000;
     if (kind === 'summary') return 200000;
+    if (isManuscriptMatterKind(kind)) return Math.min(Number(path.posix.basename(filePath).match(/^(\d+)[-_\s]+/)?.[1] ?? Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
     return unit ? unit.order : 0;
 }
 
@@ -1930,8 +1926,8 @@ export function scanFormalDocuments(documents: FormalDocument[], configInput: an
         const content = document.content;
         const book = inferBookInfo(filePath, config);
         const volume = inferVolumeInfo(filePath, config);
-        const unit = parseNumberingUnit(basename);
-        const specialKind = parseSpecialPageKind(basename);
+        const specialKind = unnumberedPageKind(filePath);
+        const unit = specialKind ? undefined : parseNumberingUnit(basename);
         const pageAnchor = unit || specialKind
             ? getPageTitleHeading(content, fallbackPageTitle(filePath))
             : undefined;
@@ -1943,7 +1939,7 @@ export function scanFormalDocuments(documents: FormalDocument[], configInput: an
                 kind,
                 filePath,
                 title: pageAnchor?.title || fallbackPageTitle(filePath),
-                order: getPageOrder(kind, unit),
+                order: getPageOrder(kind, unit, filePath),
                 bookKey: book.key,
                 bookTitle: book.title,
                 bookOrder: book.order,
@@ -2167,7 +2163,7 @@ export function scanFormalDocuments(documents: FormalDocument[], configInput: an
     }
 
     definitions.sort(compareDefinitionRecords);
-    pages.sort(comparePages);
+    pages.splice(0, pages.length, ...sortManuscriptPages(pages));
     const dependencyGraph = buildDependencyGraph({ config, labels, definitions, references }, files);
     return { config, files: files.map(file => file.filePath), labels, pages, definitions, references, pageReferences, symbols: symbolResult.symbols, issues, dependencyGraph, projectAnalysis: projectKnowledge.project };
 }
@@ -2451,13 +2447,6 @@ function lintPages(pages: PageData[]): FormalIssue[] {
     return issues;
 }
 
-function comparePages(a: PageData, b: PageData): number {
-    if ((a.bookOrder || 0) !== (b.bookOrder || 0)) return (a.bookOrder || 0) - (b.bookOrder || 0);
-    if ((a.volumeOrder || 0) !== (b.volumeOrder || 0)) return (a.volumeOrder || 0) - (b.volumeOrder || 0);
-    if (a.order !== b.order) return a.order - b.order;
-    return a.filePath.localeCompare(b.filePath);
-}
-
 function compareDefinitionRecords(a: FormalDefinition, b: FormalDefinition): number {
     const la = a.label;
     const lb = b.label;
@@ -2469,7 +2458,7 @@ function compareDefinitionRecords(a: FormalDefinition, b: FormalDefinition): num
 
 export function formatLabelNumber(label: LabelData): string {
     if (label.type === 'solution') return label.solutionExerciseNumber || '';
-    if (label.type === 'remark' || PAGE_LABEL_TYPES.has(label.type)) return '';
+    if (label.type === 'remark' || isPageLabelType(label.type)) return '';
     const prefix = label.unitLabel || (label.chapter !== undefined ? String(label.chapter) : label.appendix || '');
     return prefix && label.number !== undefined ? `${prefix}.${label.number}` : '';
 }
@@ -2510,7 +2499,7 @@ export function renderReferenceMap(definitions: FormalDefinition[], config: any,
         lines.push('## Pages', '');
         lines.push('| Display | Ref | Path Ref | Title | Location |');
         lines.push('| --- | --- | --- | --- | --- |');
-        for (const page of [...pages].sort(comparePages)) {
+        for (const page of sortManuscriptPages(pages)) {
             const prefix = page.kind === 'chapter' ? 'chapter' : 'page';
             const pathRef = `@${prefix}:${page.filePath}`;
             const ref = page.id ? `@${page.id}` : pathRef;

@@ -25,10 +25,14 @@ const copy = {
         author: '作者（每行一位）', version: '本版版本', edition: '版次说明', license: '许可协议',
         description: '作品介绍', publicationDate: '出版日期', cover: '封面', coverHint: '默认使用书名、副标题、作者与版本制作文字封面。',
         coverImage: '封面图片（可选，项目内的相对路径）', coverVersion: '封面显示版本',
-        front: '写在前面', back: '结语', addMatter: '添加', removeMatter: '移除', matterTitle: '标题', matterText: '正文（支持 Markdown）',
-        matterFile: '使用项目内的现有文件（可选）',
+        front: '前文', back: '后文', addMatter: '添加', removeMatter: '移除', matterTitle: '标题（留空沿用稿件标题）', matterText: '手填正文（支持 Markdown，兼容旧方案）',
+        matterFile: '引用项目内的稿件', inlineSource: '不引用文件，使用手填内容', fileUnavailable: '当前不可用',
+        filePriority: '选择稿件时只引用该文件；手填内容会保留为备用，不会合并进文件。原稿不会被修改。',
+        usedAs: '已用于', sourceFile: '引用稿件', sourceInline: '方案内手填内容', manuscriptPreview: '稿件内容预览',
         toc: '目录', tocEnabled: '自动生成目录', inToc: '纳入目录', tocTitle: '目录标题', tocDepth: '目录层级',
-        continued: '未完待续', continuedEnabled: '为未收录全书的版本附上“未完待续”声明',
+        continued: '未完待续', continuedEnabled: '附上“未完待续”声明（也可用于已收录全部章节的版本）',
+        continuedTitle: '声明标题（留空沿用稿件标题或默认标题）',
+        continuedAuto: '当前沿用自动规则：选择稿件时启用，否则仅在部分发布时附上。操作开关可明确指定。',
         continuedText: '声明正文（留空使用默认文字）', review: '保存并审阅本版',
         reviewHint: '生成前确认本版的确切范围。修改计划后，需要重新审阅。', selected: '本版收录', omitted: '本版未收录',
         external: '指向本版范围以外的引用', noExternal: '未发现指向未收录章节的引用。',
@@ -77,10 +81,14 @@ const copy = {
         author: 'Authors (one per line)', version: 'Edition version', edition: 'Edition note', license: 'License',
         description: 'Description', publicationDate: 'Publication date', cover: 'Cover', coverHint: 'The default text cover uses the title, subtitle, authors and version.',
         coverImage: 'Cover image (optional, path within this project)', coverVersion: 'Show version on cover',
-        front: 'Preface', back: 'Conclusion', addMatter: 'Add', removeMatter: 'Remove', matterTitle: 'Heading', matterText: 'Text (Markdown supported)',
-        matterFile: 'Use an existing file within the project (optional)',
+        front: 'Front matter', back: 'Back matter', addMatter: 'Add', removeMatter: 'Remove', matterTitle: 'Heading (leave blank to use the manuscript heading)', matterText: 'Inline text (Markdown, existing plans supported)',
+        matterFile: 'Reference a project manuscript', inlineSource: 'Use inline content without a file', fileUnavailable: 'Currently unavailable',
+        filePriority: 'A selected file supplies the content. Inline text is retained as a fallback and is not appended to the file. The manuscript stays unchanged.',
+        usedAs: 'Used as', sourceFile: 'Source manuscript', sourceInline: 'Inline content in this plan', manuscriptPreview: 'Manuscript content preview',
         toc: 'Contents', tocEnabled: 'Generate table of contents', inToc: 'Include in contents', tocTitle: 'Contents heading', tocDepth: 'Contents depth',
-        continued: 'To be continued', continuedEnabled: 'Add a “To be continued” declaration when chapters are omitted',
+        continued: 'To be continued', continuedEnabled: 'Add a “To be continued” declaration (also for a complete chapter selection)',
+        continuedTitle: 'Declaration heading (blank uses the manuscript or default heading)',
+        continuedAuto: 'Using the automatic rule: enable a referenced manuscript, otherwise add the declaration only to partial editions. Change the switch to choose explicitly.',
         continuedText: 'Declaration text (leave blank for the default)', review: 'Save and review this edition',
         reviewHint: 'Check the exact scope before building. Editing the plan requires a fresh review.', selected: 'Included in this edition', omitted: 'Omitted from this edition',
         external: 'References outside this edition', noExternal: 'No references to omitted chapters were found.',
@@ -129,6 +137,9 @@ function icon(label: string, glyph: ReaderIconName, run: () => void, primary = f
     value.append(readerIcon(glyph)); value.addEventListener('click', run); return value;
 }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)); }
+function manuscriptPreview(content: string): string {
+    return content.replace(/^(\s*#{1,6}\s+)#h-[a-f0-9]{16}\b[ \t]*/gim, '$1');
+}
 function pageTitle(page: PublicationPage): string {
     const title = (page.title || '').trim(), number = (page.number || '').trim();
     if (!title || !number) return title || number;
@@ -341,9 +352,10 @@ export class ReaderPublication {
         }); label.append(select); plans.append(label, icon(w.refresh, 'reload', () => void this.refresh())); parent.append(plans);
         parent.append(node('p', w.selectHint, 'publication-hint'));
         const actions = node('div', '', 'publication-actions');
+        const assigned = this.matterFiles(), available = this.inspection!.pages.filter(page => !assigned.has(page.path));
         const choose = (paths: string[]) => { profile.chapters = paths; this.changed(); this.render(); };
-        actions.append(icon(w.all, 'list-plus', () => choose(this.inspection!.pages.map(page => page.path))), icon(w.none, 'eraser', () => choose([])),
-            node('span', `${w.selectedCount}: ${profile.chapters.length}`, 'publication-hint')); parent.append(actions);
+        actions.append(icon(w.all, 'list-plus', () => choose(available.map(page => page.path))), icon(w.none, 'eraser', () => choose([])),
+            node('span', `${w.selectedCount}: ${profile.chapters.filter(file => !assigned.has(file)).length}`, 'publication-hint')); parent.append(actions);
         if (!this.inspection!.pages.length) parent.append(node('p', w.empty));
         const groups = new Map<string, typeof this.inspection.pages>();
         for (const page of this.inspection!.pages) {
@@ -352,19 +364,48 @@ export class ReaderPublication {
         }
         for (const [title, pages] of groups) {
             const group = node('fieldset', '', 'publication-chapter-group'), legend = node('legend', title); group.append(legend);
-            const selected = new Set(profile.chapters), groupCheck = this.check(group, w.all + ' · ' + title, pages.every(page => selected.has(page.path)), checked => {
-                pages.forEach(page => checked ? selected.add(page.path) : selected.delete(page.path));
-                choose(this.inspection!.pages.filter(page => selected.has(page.path)).map(page => page.path));
-            }); groupCheck.indeterminate = pages.some(page => selected.has(page.path)) && !groupCheck.checked;
+            const selectable = pages.filter(page => !assigned.has(page.path));
+            const selected = new Set(profile.chapters), groupCheck = this.check(group, w.all + ' · ' + title, !!selectable.length && selectable.every(page => selected.has(page.path)), checked => {
+                selectable.forEach(page => checked ? selected.add(page.path) : selected.delete(page.path));
+                choose(available.filter(page => selected.has(page.path)).map(page => page.path));
+            }); groupCheck.disabled = !selectable.length; groupCheck.indeterminate = selectable.some(page => selected.has(page.path)) && !groupCheck.checked;
             for (const page of pages) {
                 const row = node('div', '', 'publication-chapter');
-                this.check(row, pageTitle(page), selected.has(page.path), checked => {
+                const control = this.check(row, pageTitle(page), !assigned.has(page.path) && selected.has(page.path), checked => {
                     checked ? selected.add(page.path) : selected.delete(page.path);
-                    choose(this.inspection!.pages.filter(item => selected.has(item.path)).map(item => item.path));
-                }); row.append(node('small', page.path)); group.append(row);
+                    choose(available.filter(item => selected.has(item.path)).map(item => item.path));
+                }); control.disabled = assigned.has(page.path);
+                row.append(node('small', page.path + (assigned.has(page.path) ? ` · ${w.usedAs} ${assigned.get(page.path)}` : ''))); group.append(row);
             } parent.append(group);
         }
         this.renderNext(parent);
+    }
+    private matterFiles(): Map<string, string> {
+        const files = new Map<string, string>(), w = this.words(), profile = this.profile;
+        for (const [entries, role] of [[profile?.frontMatter, w.front], [profile?.backMatter, w.back]] as const) {
+            for (const entry of entries || []) if (entry.file) files.set(entry.file, role);
+        }
+        if (profile?.continued?.file && profile.continued.enabled !== false) files.set(profile.continued.file, w.continued);
+        return files;
+    }
+    private manuscriptPicker(parent: HTMLElement, role: 'front-matter' | 'back-matter' | 'continued', current: string | undefined,
+        update: (value: string | undefined) => void, identity: string): void {
+        const w = this.words(), field = node('label', w.matterFile, 'publication-field'), select = node('select');
+        const roleTitle = role === 'front-matter' ? w.front : role === 'back-matter' ? w.back : w.continued, number = /-(\d+)$/.exec(identity)?.[1];
+        select.setAttribute('aria-label', `${w.matterFile} · ${roleTitle}${number ? ` ${number}` : ''}`); select.dataset.publicationFile = identity;
+        const inline = node('option', w.inlineSource); inline.value = ''; select.append(inline);
+        const used = this.matterFiles(), pages = [...(this.inspection?.pages || [])].filter(page => page.path === current || !used.has(page.path));
+        pages.sort((a, b) => Number(b.kind === role) - Number(a.kind === role));
+        for (const page of pages) { const option = node('option', `${pageTitle(page)} · ${page.path}`); option.value = page.path; select.append(option); }
+        if (current && !pages.some(page => page.path === current)) { const option = node('option', `${current} · ${w.fileUnavailable}`); option.value = current; select.append(option); }
+        select.value = current || ''; select.addEventListener('change', () => {
+            const restoreFocus = document.activeElement === select;
+            update(select.value || undefined); this.changed(); this.render();
+            if (restoreFocus && (document.activeElement === document.body || document.activeElement === select)) {
+                this.content?.querySelector<HTMLSelectElement>(`[data-publication-file="${identity}"]`)?.focus();
+            }
+        });
+        field.append(select, node('small', w.filePriority)); parent.append(field);
     }
     private renderDetails(parent: HTMLElement): void {
         const w = this.words(), p = this.profile!, grid = node('div', '', 'publication-fields');
@@ -392,18 +433,18 @@ export class ReaderPublication {
         this.check(cover, w.coverVersion, p.cover?.showVersion !== false, value => { p.cover = { ...p.cover, showVersion: value }; this.changed(); });
         for (const [key, title] of [['frontMatter', w.front], ['backMatter', w.back]] as const) {
             const section = this.section(parent, title);
-            if (!p[key]?.length) {
-                section.append(icon(`${w.addMatter} ${title}`, 'plus', () => {
-                    p[key] = [{ title, content: '', includeInToc: true }]; this.changed(); this.render();
-                }));
-            } else p[key].forEach((matter, index) => {
+            const role = key === 'frontMatter' ? 'front-matter' : 'back-matter';
+            (p[key] || []).forEach((matter, index) => {
                 const entry = node('div', '', 'publication-matter');
-                this.input(entry, w.matterTitle, matter.title || title, value => { matter.title = value; });
-                this.input(entry, w.matterText, matter.content || '', value => { matter.content = value; delete matter.file; }, true);
-                this.input(entry, w.matterFile, matter.file || '', value => { matter.file = value || undefined; if (value) delete matter.content; });
+                this.manuscriptPicker(entry, role, matter.file, value => { matter.file = value; }, `${key}-${index + 1}`);
+                this.input(entry, w.matterTitle, matter.title || '', value => { matter.title = value || undefined; });
+                this.input(entry, w.matterText, matter.content || '', value => { matter.content = value || undefined; }, true);
                 this.check(entry, w.inToc, matter.includeInToc !== false, value => { matter.includeInToc = value; this.changed(); });
                 entry.append(icon(`${w.removeMatter} ${matter.title || title}`, 'trash', () => { p[key].splice(index, 1); this.changed(); this.render(); })); section.append(entry);
             });
+            section.append(icon(`${w.addMatter} ${title}`, 'plus', () => {
+                (p[key] ||= []).push({ includeInToc: true }); this.changed(); this.render();
+            }));
         }
         const toc = this.section(parent, w.toc);
         this.check(toc, w.tocEnabled, p.toc?.enabled !== false, value => { p.toc = { ...p.toc, enabled: value }; this.changed(); });
@@ -411,7 +452,10 @@ export class ReaderPublication {
         const depth = this.input(toc, w.tocDepth, String(p.toc?.depth || 2), value => { p.toc = { ...p.toc, depth: Number(value) }; });
         if (depth instanceof HTMLInputElement) { depth.type = 'number'; depth.min = '1'; depth.max = '6'; }
         const continued = this.section(parent, w.continued);
-        this.check(continued, w.continuedEnabled, p.continued?.enabled !== false, value => { p.continued = { ...p.continued, enabled: value }; this.changed(); });
+        const continuedEnabled = this.check(continued, w.continuedEnabled, p.continued?.enabled ?? !!p.continued?.file, value => { p.continued = { ...p.continued, enabled: value }; this.changed(); this.render(); });
+        if (p.continued?.enabled === undefined) { continuedEnabled.indeterminate = !p.continued?.file; continued.append(node('p', w.continuedAuto, 'publication-hint')); }
+        this.manuscriptPicker(continued, 'continued', p.continued?.file, value => { p.continued = { ...p.continued, file: value }; }, 'continued');
+        this.input(continued, w.continuedTitle, p.continued?.title || '', value => { p.continued = { ...p.continued, title: value || undefined }; });
         this.input(continued, w.continuedText, p.continued?.text || '', value => { p.continued = { ...p.continued, text: value || undefined }; }, true);
         const actions = node('div', '', 'publication-actions'); actions.append(icon(w.save, 'save', () => void this.save())); parent.append(actions); this.renderNext(parent);
     }
@@ -441,7 +485,20 @@ export class ReaderPublication {
         if (plan.externalReferences.length) {
             const list = node('ul'); plan.externalReferences.forEach(reference => list.append(node('li', `${reference.source}:${reference.line} → ${reference.label || reference.target}`))); references.append(list);
         }
-        if (plan.partial && plan.continuedNotice.enabled) { const notice = this.section(parent, plan.continuedNotice.title); notice.append(node('p', plan.continuedNotice.text, 'publication-prose')); }
+        for (const [title, entries] of [[w.front, plan.frontMatter || plan.profile.frontMatter || []], [w.back, plan.backMatter || plan.profile.backMatter || []]] as const) {
+            if (!entries.length) continue;
+            const section = this.section(parent, title);
+            for (const entry of entries) {
+                const preview = node('div', '', 'publication-matter');
+                if (entry.title) preview.append(node('h4', entry.title));
+                preview.append(node('p', entry.file ? `${w.sourceFile}: ${entry.file} · ${w.manuscriptPreview}` : w.sourceInline, 'publication-hint'), node('div', manuscriptPreview(entry.content || ''), 'publication-prose')); section.append(preview);
+            }
+        }
+        if (plan.continuedNotice.enabled) {
+            const notice = this.section(parent, plan.continuedNotice.title);
+            if (plan.continuedNotice.file) notice.append(node('p', `${w.sourceFile}: ${plan.continuedNotice.file} · ${w.manuscriptPreview}`, 'publication-hint'));
+            notice.append(node('div', manuscriptPreview(plan.continuedNotice.text), 'publication-prose'));
+        }
         parent.append(node('p', `${w.reviewDoi}: ${plan.doi.versionDoi || w.noDoi}`));
         // This service warning is already expressed by the localized reference section above.
         const referenceWarning = `${plan.externalReferences.length} reference(s) point outside this edition; omitted pages are not added automatically.`;

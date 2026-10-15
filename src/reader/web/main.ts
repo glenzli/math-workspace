@@ -1387,7 +1387,7 @@ class ReaderApplication {
     private renderNavigation(query = ''): void {
         if (!this.state) return;
         const normalized = normalizeQuery(query);
-        const groups = new Map<string, ReaderPage[]>();
+        const groups: Array<{ key: string; name: string; pages: ReaderPage[] }> = [];
         this.state.pages.filter(page => (
             !normalized || normalizeQuery((page.displayHeading || page.title) + ' ' + page.filePath).includes(normalized)
         )).forEach(page => {
@@ -1395,13 +1395,20 @@ class ReaderApplication {
             const groupName = page.documentMode === 'draft'
                 ? (page.documentCollectionTitle || this.dictionary().documentStageDraft)
                 : (page.volumeTitle ? book + ' · ' + page.volumeTitle : book);
-            if (!groups.has(groupName)) groups.set(groupName, []);
-            groups.get(groupName)?.push(page);
+            const key = page.documentMode === 'draft'
+                ? JSON.stringify(['draft', page.documentCollectionId])
+                : JSON.stringify(['formal', page.bookKey, page.volumeKey]);
+            let group = groups[groups.length - 1];
+            if (!group || group.key !== key) {
+                group = { key, name: groupName, pages: [] };
+                groups.push(group);
+            }
+            group.pages.push(page);
         });
 
         const navigation = this.root.querySelector('#reader-page-nav') as HTMLElement;
         navigation.replaceChildren();
-        groups.forEach((pages, groupName) => {
+        groups.forEach(({ pages, name: groupName }) => {
             const group = document.createElement('section');
             group.className = 'reader-nav-group';
             const heading = document.createElement('h2');

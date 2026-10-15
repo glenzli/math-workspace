@@ -1,8 +1,8 @@
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import { mergeConfig, scanFormalDocuments, shouldExcludeScanPath, formatPageHeading, formatPageReference, stripIgnoredMarkdown, toPosix } from '@math-workspace/core';
+import { mergeConfig, scanFormalDocuments, shouldExcludeScanPath, formatPageHeading, formatPageReference, stripIgnoredMarkdown, toPosix, sortManuscriptPages } from '@math-workspace/core';
 import { PublicationStore, safePath, relativeInput, publicationId, canonical, sha256, atomicJson } from './store';
-import type { PublicationProfile, PublicationPlan, PublicationPage, PublicationInput, PublicationTools, PublicationTool, PublicationServiceOptions, PublicationDoiBinding, PublicationBuild, PublicationBuildOptions, PublicationManifest } from './types';
+import type { PublicationProfile, PublicationPlan, PublicationPage, PublicationInput, PublicationTools, PublicationTool, PublicationServiceOptions, PublicationDoiBinding, PublicationBuild, PublicationBuildOptions, PublicationManifest, PublicationResolvedMatter } from './types';
 
 const fs = require('node:fs/promises');
 const childProcess = require('node:child_process');
@@ -26,6 +26,7 @@ export function normalizeProfile(input: PublicationProfile): PublicationProfile 
     const matter = (items: any, role: string) => list(items, role, 100).map(item => {
         if (!item || typeof item !== 'object') throw new Error(`Invalid ${role} entry.`);
         const value = { title: optionalText(item.title, `${role} title`, 1000), file: item.file === undefined ? undefined : relativeInput(item.file), content: optionalText(item.content, `${role} content`, 1000000), includeInToc: item.includeInToc === true };
+        if (value.file && !/\.md$/i.test(value.file)) throw new Error('Publication matter files must be Markdown files.');
         if (!value.file && !value.content && !value.title) throw new Error(`An empty ${role} entry cannot be published.`);
         return value;
     });
@@ -55,6 +56,11 @@ export function normalizeProfile(input: PublicationProfile): PublicationProfile 
         volumes: list(input.scope.volumes, 'volume scope', 100).map(value => optionalText(value, 'volume key', 200) || ''),
         paths: list(input.scope.paths, 'work scope', 10000).map(relativeInput)
     } : undefined;
+    const continuedFile = input.continued?.file ? relativeInput(input.continued.file) : undefined;
+    if (continuedFile && !/\.md$/i.test(continuedFile)) throw new Error('Publication continued notice files must be Markdown files.');
+    const frontMatter = matter(input.frontMatter, 'front matter'), backMatter = matter(input.backMatter, 'back matter');
+    const matterFiles = [...frontMatter, ...backMatter, ...(input.continued?.enabled === false || !continuedFile ? [] : [{ file: continuedFile }])].map(entry => entry.file).filter(Boolean);
+    if (new Set(matterFiles).size !== matterFiles.length) throw new Error('A publication file can only fill one matter role.');
     return JSON.parse(canonical({
         id: publicationId(input.id), workId: publicationId(input.workId), title, version, authors, chapters, scope,
         subtitle: optionalText(input.subtitle, 'subtitle', 3000), edition: optionalText(input.edition, 'edition', 300),
@@ -62,9 +68,9 @@ export function normalizeProfile(input: PublicationProfile): PublicationProfile 
         description: optionalText(input.description, 'description', 100000), publicationDate: optionalText(input.publicationDate, 'publication date', 100),
         repository: optionalText(input.repository, 'repository', 3000),
         cover: { image: input.cover?.image ? relativeInput(input.cover.image) : undefined, showVersion: input.cover?.showVersion !== false },
-        frontMatter: matter(input.frontMatter, 'front matter'), backMatter: matter(input.backMatter, 'back matter'),
+        frontMatter, backMatter,
         toc: { enabled: input.toc?.enabled !== false, depth, title: optionalText(input.toc?.title, 'contents title', 500) },
-        continued: { enabled: typeof input.continued?.enabled === 'boolean' ? input.continued.enabled : undefined, title: optionalText(input.continued?.title, 'continued title', 1000), text: optionalText(input.continued?.text, 'continued notice', 100000) },
+        continued: { enabled: typeof input.continued?.enabled === 'boolean' ? input.continued.enabled : undefined, file: continuedFile, title: optionalText(input.continued?.title, 'continued title', 1000), text: optionalText(input.continued?.text, 'continued notice', 100000) },
         pdf: { engine, paper, margin, documentClass },
         doi: { versionDoi: normalizeDoi(input.doi?.versionDoi), conceptDoi: normalizeDoi(input.doi?.conceptDoi), provenance: optionalText(input.doi?.provenance, 'DOI provenance', 3000) },
         zenodo: { environment, tokenEnv }
@@ -109,9 +115,7 @@ async function readSnapshot(root: string): Promise<Snapshot> {
     await walk(root);
     const symbols = await capture('.math-workspace/symbols.json', 'metadata'), definitions = await capture('.math-workspace/definitions.json', 'metadata');
     const state = scanFormalDocuments(documents, config, symbols ? JSON.parse(symbols.toString('utf8')) : undefined, definitions ? JSON.parse(definitions.toString('utf8')) : undefined);
-    const order = (page: any) => page.kind === 'intro' ? -100000 : page.kind === 'summary' ? 90000 : page.unitOrder ?? page.order ?? Number.MAX_SAFE_INTEGER;
-    const compare = (a: any, b: any) => (a.bookOrder ?? 1e9) - (b.bookOrder ?? 1e9) || (a.volumeOrder ?? 1e9) - (b.volumeOrder ?? 1e9) || order(a) - order(b) || a.filePath.localeCompare(b.filePath);
-    const pages = state.pages.sort(compare).map(page => ({ path: page.filePath, title: formatPageHeading(page, config), kind: page.kind, number: formatPageReference(page, config), book: page.bookKey, bookTitle: page.bookTitle, volume: page.volumeKey, volumeTitle: page.volumeTitle }));
+    const pages = sortManuscriptPages(state.pages, 'export').map(page => ({ path: page.filePath, title: formatPageHeading(page, config), kind: page.kind, number: formatPageReference(page, config), book: page.bookKey, bookTitle: page.bookTitle, volume: page.volumeKey, volumeTitle: page.volumeTitle }));
     // Plain pages remain deliberately selectable; they do not acquire formal numbering.
     for (const document of documents) if (!pages.some(page => page.path === document.filePath)) pages.push({ path: document.filePath, title: /^#\s+(.+)$/m.exec(document.content)?.[1] || path.basename(document.filePath), kind: 'page', number: undefined, book: undefined, bookTitle: undefined, volume: undefined, volumeTitle: undefined });
     return { state, pages, files, inputs, config };
@@ -137,8 +141,28 @@ function resourceTargets(content: string): Array<{ target: string; image: boolea
 export async function makePublicationPlan(root: string, input: PublicationProfile, doi: PublicationDoiBinding, options: PublicationServiceOptions = {}): Promise<{ plan: PublicationPlan; snapshot: Snapshot }> {
     const profile = normalizeProfile(input), snapshot = await readSnapshot(root), selectedPaths = new Set(profile.chapters);
     for (const name of selectedPaths) if (!snapshot.files.has(name) || !snapshot.pages.some(page => page.path === name)) throw new Error(`Selected publication page is unavailable or excluded: ${name}`);
+    const matters = new Set<string>();
+    const resolveMatter = async (entry: any, role: 'front-matter' | 'back-matter' | 'continued'): Promise<PublicationResolvedMatter> => {
+        let content = entry.content || '';
+        if (entry.file) {
+            await safePath(root, entry.file);
+            if (!/\.md$/i.test(entry.file)) throw new Error('Publication matter files must be Markdown files.');
+            if (!snapshot.files.has(entry.file) || !snapshot.pages.some(page => page.path === entry.file)) throw new Error(`Publication matter file is unavailable or excluded: ${entry.file}`);
+            if (matters.has(entry.file)) throw new Error(`A publication file can only fill one matter role: ${entry.file}`);
+            matters.add(entry.file); selectedPaths.delete(entry.file);
+            snapshot.inputs.find(item => item.path === entry.file).role = role;
+            content = snapshot.files.get(entry.file).toString('utf8');
+        }
+        const pageTitle = entry.file ? snapshot.state.pages.find(page => page.filePath === entry.file)?.title : undefined;
+        return { file: entry.file, title: entry.title || (entry.file ? pageTitle || firstHeadingTitle(content) : undefined), content, includeInToc: entry.includeInToc === true };
+    };
+    const frontMatter: PublicationResolvedMatter[] = [], backMatter: PublicationResolvedMatter[] = [];
+    for (const entry of profile.frontMatter) frontMatter.push(await resolveMatter(entry, 'front-matter'));
+    for (const entry of profile.backMatter) backMatter.push(await resolveMatter(entry, 'back-matter'));
+    const continuedFile = profile.continued.file && profile.continued.enabled !== false
+        ? await resolveMatter({ file: profile.continued.file, title: profile.continued.title }, 'continued') : undefined;
     const selected = snapshot.pages.filter(page => selectedPaths.has(page.path));
-    const matters = new Set([...profile.frontMatter, ...profile.backMatter].map(item => item.file).filter(Boolean));
+    if (!selected.length) throw new Error('Select at least one chapter or page outside the referenced front matter, back matter, and continued notice.');
     const selectedBooks = new Set(selected.map(page => page.book).filter(Boolean));
     const scope = profile.scope;
     const inWork = (page: PublicationPage) => {
@@ -198,33 +222,46 @@ export async function makePublicationPlan(root: string, input: PublicationProfil
         for (const match of content.matchAll(/\[[^\]\n]*\]\(\s*(?:<([^>]+\.md(?:#[^>]*)?)>|([^\s)]+\.md(?:#[^\s)]*)?))/g)) {
             const target = match[1] || match[2]; if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
             const name = toPosix(path.posix.normalize(path.posix.join(path.posix.dirname(page.path), target.split('#')[0])));
-            if (!selectedPaths.has(name)) externalReferences.push({ source: page.path, line: content.slice(0, match.index).split('\n').length, target: name, kind: 'link' as const });
+            if (!selectedPaths.has(name) && !matters.has(name)) externalReferences.push({ source: page.path, line: content.slice(0, match.index).split('\n').length, target: name, kind: 'link' as const });
         }
     }
-    for (const [entries, role] of [[profile.frontMatter, 'front-matter'], [profile.backMatter, 'back-matter']] as const) for (let index = 0; index < entries.length; index++) {
+    for (const [entries, role] of [[frontMatter, 'front-matter'], [backMatter, 'back-matter'], [continuedFile ? [continuedFile] : [], 'continued']] as const) for (let index = 0; index < entries.length; index++) {
         const entry = entries[index];
-        if (entry.file) await addInput(entry.file, role);
-        const content = [entry.file ? snapshot.files.get(entry.file).toString('utf8') : '', entry.content || ''].join('\n\n');
+        const content = entry.content;
         inspectReferences(scanFormalDocuments([{ filePath: entry.file || `${role}-${index + 1}.md`, content }], snapshot.config));
         await addResources(content, entry.file || 'inline.md');
+        for (const match of stripIgnoredMarkdown(content).matchAll(/\[[^\]\n]*\]\(\s*(?:<([^>]+\.md(?:#[^>]*)?)>|([^\s)]+\.md(?:#[^\s)]*)?))/g)) {
+            const target = match[1] || match[2]; if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
+            const name = toPosix(path.posix.normalize(path.posix.join(path.posix.dirname(entry.file || 'inline.md'), target.split('#')[0])));
+            relativeInput(name);
+            if (!selectedPaths.has(name) && !matters.has(name)) externalReferences.push({ source: entry.file || `${role}-${index + 1}.md`, line: 0, target: name, kind: 'link' as const });
+        }
     }
     if (profile.cover.image) await addInput(profile.cover.image, 'asset');
     const english = (profile.language || snapshot.config.language).startsWith('en');
-    const continuedNotice = { enabled: profile.continued.enabled ?? omitted.length > 0, title: profile.continued.title || (english ? 'To be continued' : '未完待续'), text: profile.continued.text || (english ? 'This is a partial edition of a continuing work. Further chapters and revisions will appear in later versions of the same work.' : '本版为持续更新作品的部分内容。后续章节与修订将在同一作品的后续版本中继续发布。') };
+    const continuedNotice = { enabled: profile.continued.enabled ?? (!!continuedFile || omitted.length > 0), file: continuedFile?.file, title: profile.continued.title || continuedFile?.title || (english ? 'To be continued' : '未完待续'), text: continuedFile?.content ?? (profile.continued.text || (english ? 'This is a partial edition of a continuing work. Further chapters and revisions will appear in later versions of the same work.' : '本版为持续更新作品的部分内容。后续章节与修订将在同一作品的后续版本中继续发布。')) };
     const warnings = externalReferences.length ? [`${externalReferences.length} reference(s) point outside this edition; omitted pages are not added automatically.`] : [];
     const tools = await publicationTools(profile, options);
-    const content = { schema: 'math-workspace.publication-plan/v1' as const, profile, selected, omitted, externalReferences, partial: omitted.length > 0, continuedNotice, doi, inputs: snapshot.inputs.sort((a, b) => a.path.localeCompare(b.path)), tools, warnings };
+    const content = { schema: 'math-workspace.publication-plan/v1' as const, profile, selected, omitted, externalReferences, partial: omitted.length > 0, frontMatter, backMatter, continuedNotice, doi, inputs: snapshot.inputs.sort((a, b) => a.path.localeCompare(b.path)), tools, warnings };
     return { plan: { ...content, fingerprint: sha256(canonical(content)) }, snapshot };
 }
-function unnumbered(content: string, listed: boolean): string {
-    let fence = false;
+function firstHeadingTitle(content: string): string | undefined {
+    return /^#\s+(.+?)\s*$/m.exec(stripIgnoredMarkdown(content))?.[1].replace(/[ \t]+#+[ \t]*$/, '').replace(/^#h-[a-f0-9]{16}\s+/i, '').replace(/\s+\{[^}]*\}\s*$/, '').trim();
+}
+function unnumbered(content: string, listed: boolean, clearTitleMarks = false): string {
+    let fence = false, clearedTitleMarks = false;
     return content.split(/\r?\n/).map(line => {
         if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return line; } if (fence) return line;
-        return line.replace(/^(#{1,6}\s+)(.+?)\s*$/, (_match, prefix, title) => {
+        const heading = line.replace(/^(#{1,6}\s+)(.+?)\s*$/, (_match, prefix, title) => {
             const attributes = /\s*\{([^}]*)\}\s*$/.exec(title), body = attributes ? title.slice(0, attributes.index) : title;
             const kept = (attributes?.[1] || '').split(/\s+/).filter(item => item && item !== '.unnumbered' && item !== '.unlisted' && item !== '-');
             return `${prefix}${body} {${[...kept, '.unnumbered', ...(!listed ? ['.unlisted'] : [])].join(' ')}}`;
         });
+        if (clearTitleMarks && !clearedTitleMarks && /^#\s+/.test(line)) {
+            clearedTitleMarks = true;
+            return `${heading}\n\n\\markboth{}{}\n`;
+        }
+        return heading;
     }).join('\n');
 }
 export async function runPublicationCli(cliPath: string, args: string[], options: { cwd: string; onProgress?: (message: string) => void; credentialEnv?: string }): Promise<{ stdout: string; stderr: string }> {
@@ -253,24 +290,50 @@ export async function renderPublication(store: PublicationStore, plan: Publicati
             progress.onProgress?.('Compiling selected chapters with their original formal numbering');
             await invoke(['export-md', ...plan.selected.map(page => page.path), '--out=../compiled.md', '--read-only'], { cwd: frozen, onProgress: progress.onProgress });
             const markdownPath = path.join(temporary, 'compiled.md'); let markdown = await fs.readFile(markdownPath, 'utf8');
-            const matterContent = async (entry: any, key: string) => {
-                const raw = [entry.file ? snapshot.files.get(entry.file).toString('utf8') : '', entry.content || ''].filter(Boolean).join('\n\n');
+            const matterContent = async (entry: any, key: string, fallbackTitle?: string, clearTitleMarks = false) => {
+                const raw = entry.file ? snapshot.files.get(entry.file).toString('utf8') : entry.content || '';
                 const inputName = `.math-workspace/publication-${key}-raw.md`, outputName = `.math-workspace/publication-${key}.md`;
                 await fs.writeFile(await safePath(frozen, inputName), raw, { flag: 'wx' });
                 await invoke(['_publication-fragment', inputName, entry.file || 'inline.md', outputName], { cwd: frozen, onProgress: progress.onProgress });
-                return unnumbered(await fs.readFile(await safePath(frozen, outputName), 'utf8'), entry.includeInToc);
+                let compiled = await fs.readFile(await safePath(frozen, outputName), 'utf8');
+                if (entry.file) {
+                    let found = false, fence = false;
+                    const pageId = snapshot.state.pages.find(page => page.filePath === entry.file)?.id;
+                    compiled = compiled.split(/\r?\n/).map(line => {
+                        if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return line; }
+                        if (fence || found || !/^#\s+/.test(line)) return line;
+                        found = true;
+                        const attributes = /\s*\{([^}]*)\}\s*$/.exec(line);
+                        const heading = (attributes ? line.slice(0, attributes.index) : line).replace(/^#\s+/, '');
+                        let kept = attributes?.[1] || '';
+                        if (pageId && !/(?:^|\s)#[^\s]+/.test(kept)) kept = `${kept} #${pageId}`.trim();
+                        return `# ${entry.title || heading}${kept ? ` {${kept}}` : ''}`;
+                    }).join('\n');
+                    if (!found && (entry.title || fallbackTitle)) compiled = `# ${entry.title || fallbackTitle}\n\n${compiled}`;
+                }
+                return unnumbered(compiled, entry.includeInToc, clearTitleMarks);
             };
             for (let index = 0; index < profile.backMatter.length; index++) {
                 const entry = profile.backMatter[index];
-                markdown += `\n\n\\clearpage\n\\markboth{}{}\n\n${entry.title ? `# ${entry.title} {.unnumbered${entry.includeInToc ? '' : ' .unlisted'}}\n\n` : ''}${await matterContent(entry, `back-${index}`)}\n`;
+                const title = !entry.file && entry.title ? `# ${entry.title} {.unnumbered${entry.includeInToc ? '' : ' .unlisted'}}\n\n\\markboth{}{}\n\n` : '';
+                markdown += `\n\n\\clearpage\n\\markboth{}{}\n\n${title}${await matterContent(entry, `back-${index}`, undefined, !title)}\n`;
             }
-            if (plan.continuedNotice.enabled) markdown += `\n\n\\clearpage\n\\markboth{}{}\n\n# ${plan.continuedNotice.title} {.unnumbered .unlisted}\n\n${plan.continuedNotice.text}\n`;
+            if (plan.continuedNotice.enabled) {
+                const notice = plan.continuedNotice;
+                const content = notice.file ? await matterContent({ file: notice.file, title: profile.continued.title, includeInToc: false }, 'continued', notice.title)
+                    : `# ${notice.title} {.unnumbered .unlisted}\n\n${notice.text}`;
+                markdown += `\n\n\\clearpage\n\\markboth{}{}\n\n${content}\n`;
+            }
             await fs.writeFile(markdownPath, markdown, 'utf8');
-            const args = ['render-pdf', '../compiled.md', '--out=../publication.pdf', '--no-project-pdf-defaults', '--title-page', '--metadata-page', '--toc-page-break', `--title=${profile.title}`, `--release-version=${profile.version}`, `--author=${profile.authors.map(author => author.name).join('; ')}`, `--pdf-engine=${profile.pdf.engine}`, `--paper=${profile.pdf.paper}`, `--margin=${profile.pdf.margin}`, `--lang=${profile.language || (snapshot.config.language === 'en' ? 'en-US' : 'zh-CN')}`, `--toc-depth=${profile.toc.depth}`, `--toc-title=${profile.toc.title || (snapshot.config.language === 'en' ? 'Contents' : '目录')}`];
+            const language = profile.language || (snapshot.config.language === 'en' ? 'en-US' : 'zh-CN');
+            const defaultChineseClass = !profile.pdf.documentClass && language.toLowerCase().startsWith('zh');
+            const documentClass = profile.pdf.documentClass || (defaultChineseClass ? 'ctexart' : undefined);
+            const args = ['render-pdf', '../compiled.md', '--out=../publication.pdf', '--no-project-pdf-defaults', '--title-page', '--metadata-page', '--toc-page-break', `--title=${profile.title}`, `--release-version=${profile.version}`, `--author=${profile.authors.map(author => author.name).join('; ')}`, `--pdf-engine=${profile.pdf.engine}`, `--paper=${profile.pdf.paper}`, `--margin=${profile.pdf.margin}`, `--lang=${language}`, `--toc-depth=${profile.toc.depth}`, `--toc-title=${profile.toc.title || (snapshot.config.language === 'en' ? 'Contents' : '目录')}`];
             args.push(profile.toc.enabled ? '--toc' : '--no-toc', profile.cover.showVersion ? '--show-version-on-cover' : '--no-show-version-on-cover');
             if (profile.subtitle || profile.edition) args.push(`--subtitle=${[profile.subtitle, profile.edition].filter(Boolean).join(' · ')}`);
             if (profile.cover.image) args.push(`--cover-image=${profile.cover.image}`);
-            if (profile.pdf.documentClass) args.push(`--documentclass=${profile.pdf.documentClass}`);
+            if (documentClass) args.push(`--documentclass=${documentClass}`);
+            if (defaultChineseClass) args.push('--variable=classoption:fontset=fandol');
             if (profile.license) args.push(`--license=${profile.license}`);
             if (profile.repository) args.push(`--repository=${profile.repository}`);
             if (profile.publicationDate) args.push(`--date=${profile.publicationDate}`);
@@ -289,7 +352,7 @@ export async function renderPublication(store: PublicationStore, plan: Publicati
                 const entry = profile.frontMatter[index], name = `.math-workspace/publication-front-${index}.md`;
                 const normalized = await matterContent(entry, `front-${index}`);
                 await fs.writeFile(await safePath(frozen, name), normalized, 'utf8');
-                args.push(`--front-matter=${name}`); if (entry.title) args.push(`--front-matter-title=${entry.title}`); if (entry.includeInToc) args.push('--front-matter-toc');
+                args.push(`--front-matter=${name}`); if (!entry.file && entry.title) args.push(`--front-matter-title=${entry.title}`); if (entry.includeInToc) args.push('--front-matter-toc');
             }
             progress.onProgress?.('Rendering cover, publication pages, contents, chapters, and conclusion');
             await invoke(args, { cwd: frozen, onProgress: progress.onProgress });

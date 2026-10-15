@@ -1,3 +1,5 @@
+import { isManuscriptMatterKind, unnumberedPageKind } from './page-structure';
+
 export type ProjectKnowledgeSourceKind = 'concept-appendix' | 'glossary' | 'notation-appendix' | 'summary-page';
 
 export interface ProjectKnowledgeSource {
@@ -126,6 +128,7 @@ function knowledgeRoles(value: string): KnowledgeRoles {
 }
 
 function sourceKind(document: ProjectDocument, headings: Heading[]): Omit<ProjectKnowledgeSource, 'extractedDefinitions'> | undefined {
+    if (isManuscriptMatterKind(unnumberedPageKind(document.filePath))) return;
     const stem = fileStem(document.filePath);
     const topTitle = headings.length > 0
         ? headings.filter(heading => heading.level === Math.min(...headings.map(item => item.level)))[0]?.title || ''

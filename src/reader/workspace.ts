@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { mergeConfig, scanFormalDocuments, shouldExcludeScanPath, toPosix } from '@math-workspace/core';
+import { mergeConfig, scanFormalDocuments, shouldExcludeScanPath, sortManuscriptPages, toPosix } from '@math-workspace/core';
 import { isLeanSourcePath, scanLeanWorkspace } from '../lean/lean-index';
 import {
     collectionMayContainPath,
@@ -141,8 +141,7 @@ export async function loadWorkspaceSnapshot(rootPath: string, revision = 1): Pro
             documentCollectionTitle: collection?.title
         };
     });
-    formalState.pages.push(...draftPages);
-    formalState.pages.sort((left, right) => left.filePath.localeCompare(right.filePath));
+    formalState.pages = sortManuscriptPages([...formalState.pages, ...draftPages], 'workspace');
     const leanIndex = await scanLeanWorkspace(resolvedRoot, config, formalState.labels, formalState.dependencyGraph);
     formalState.issues.push(...leanIndex.diagnostics.map(diagnostic => ({
         severity: diagnostic.severity,

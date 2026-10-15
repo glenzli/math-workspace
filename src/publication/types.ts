@@ -1,6 +1,7 @@
 /** Publication is an explicit PDF release workflow, independent of signed source archives. */
 export interface PublicationAuthor { name: string; orcid?: string; affiliation?: string }
 export interface PublicationMatter { title?: string; file?: string; content?: string; includeInToc?: boolean }
+export interface PublicationResolvedMatter { title?: string; file?: string; content: string; includeInToc: boolean }
 export interface PublicationProfile {
     id: string;
     workId: string;
@@ -21,7 +22,7 @@ export interface PublicationProfile {
     frontMatter?: PublicationMatter[];
     backMatter?: PublicationMatter[];
     toc?: { enabled?: boolean; depth?: number; title?: string };
-    continued?: { enabled?: boolean; title?: string; text?: string };
+    continued?: { enabled?: boolean; file?: string; title?: string; text?: string };
     pdf?: { engine?: string; paper?: string; margin?: string; documentClass?: string };
     doi?: { versionDoi?: string; conceptDoi?: string; provenance?: string };
     zenodo?: { environment?: 'sandbox' | 'production'; tokenEnv?: string };
@@ -31,7 +32,7 @@ export interface PublicationPage {
     path: string; title: string; kind: string; number?: string;
     book?: string; bookTitle?: string; volume?: string; volumeTitle?: string;
 }
-export interface PublicationInput { path: string; sha256: string; role: 'source' | 'config' | 'metadata' | 'asset' | 'front-matter' | 'back-matter' }
+export interface PublicationInput { path: string; sha256: string; role: 'source' | 'config' | 'metadata' | 'asset' | 'front-matter' | 'back-matter' | 'continued' }
 export interface PublicationExternalReference { source: string; line: number; target: string; label?: string; kind: 'formal' | 'page' | 'link' }
 export interface PublicationDoiBinding {
     versionDoi?: string; conceptDoi?: string;
@@ -47,7 +48,9 @@ export interface PublicationPlan {
     omitted: PublicationPage[];
     externalReferences: PublicationExternalReference[];
     partial: boolean;
-    continuedNotice: { enabled: boolean; title: string; text: string };
+    frontMatter: PublicationResolvedMatter[];
+    backMatter: PublicationResolvedMatter[];
+    continuedNotice: { enabled: boolean; file?: string; title: string; text: string };
     doi: PublicationDoiBinding;
     inputs: PublicationInput[];
     tools: PublicationTools;

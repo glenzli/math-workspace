@@ -688,9 +688,30 @@ Lean 项目的 `root` 与 `sourceRoots` 都相对于 Math Workspace 项目根；
 
 ## 按章节发布 PDF
 
-需要逐步发布同一部书时，在 Reader 的“版本与出版 → PDF 出版”新建或继续已有方案。选择本版的卷和章节，填写书名、作者、版本与 DOI，配置封面、写在前面/导言、目录和结语。先审阅收录范围、未收录页与跨范围引用，再生成、预览和下载实际 PDF；Zenodo 的草稿上传与正式发布是之后分别启动的动作。
+需要逐步发布同一部书时，在 Reader 的“版本与出版 → PDF 出版”新建或继续已有方案。选择本版的卷和章节，填写书名、作者、版本与 DOI，配置封面、前文、目录和后文。前后文各可添加多个条目，在项目稿件列表中选择已有 Markdown，保留作者自己的标题。先审阅收录范围、未收录页、实际引用稿件与跨范围引用，再生成、预览和下载实际 PDF；Zenodo 的草稿上传与正式发布是之后分别启动的动作。
 
 发布方案保存选择与元数据，不改写原稿。正文保留整书原有的章号与对象编号；选取第 3、5 章不会改成第 1、2 章。成品顺序为封面、出版信息、前文、目录、所选正文、后文，以及部分发布默认附上的“未完待续 / To be continued”声明；目录和声明可按方案关闭。范围外引用会列入审阅，不会因此自动加入其他章节。
+
+前言、后记和“未完待续”可以直接写成书稿文件，平时在 Reader 中阅读，出版时引用同一份原稿。例如：
+
+```text
+book/
+  front-matter/
+    preface.md
+    readers-letter.md
+  vol-i/
+    intro.md
+    01-foundations.md
+    summary.md
+  back-matter/
+    conclusion.md
+    ai-retirement-note.md
+  to-be-continued.md
+```
+
+`front-matter/` 与 `back-matter/` 可容纳多篇任意标题的文章，文件名前的 `01-`、`02-` 等数字只控制先后，不作为章号；例如 `ai-retirement-note.md` 的标题可以是“AI 退休寄语”，不必改写成“结语”。`to-be-continued.md` 是独立尾页。已有 `intro.md`、`introduction.md` 与 `summary.md` 继续兼容；卷内的前后文仍在该卷两端。各页按书稿规则保留稳定页标识，文件引用与相对图片沿用正文的编译规则。
+
+出版方案明确引用的全书前后文会排到对应位置；仅在章节列表中勾选的卷内前后文仍按所属卷顺序排版。同一文件被前文、后文或声明中的一个条目引用后，不会在正文重复输出；同一文件重复用于多个条目或角色时，需要先在方案中消除歧义。审阅页列出实际文件路径及内容，原稿或图片变化后需重新审阅。
 
 ### 最小方案与本地构建
 
@@ -705,13 +726,16 @@ Lean 项目的 `root` 与 `sourceRoots` 都相对于 Math Workspace 项目根；
   "version": "0.1.0",
   "authors": [{ "name": "Author Name" }],
   "language": "zh-CN",
-  "chapters": ["book/vol-i/01.md", "book/vol-i/02.md"],
+  "chapters": ["book/vol-i/01-foundations.md", "book/vol-i/02-main-results.md"],
   "frontMatter": [
-    { "title": "写在前面", "file": "book/preface.md", "includeInToc": false }
+    { "file": "book/front-matter/preface.md", "includeInToc": false },
+    { "file": "book/front-matter/readers-letter.md", "includeInToc": true }
   ],
   "backMatter": [
-    { "title": "本版结语", "content": "本版收录前两章。", "includeInToc": true }
-  ]
+    { "file": "book/back-matter/conclusion.md", "includeInToc": true },
+    { "file": "book/back-matter/ai-retirement-note.md", "includeInToc": true }
+  ],
+  "continued": { "enabled": true, "file": "book/to-be-continued.md" }
 }
 ```
 
@@ -733,12 +757,14 @@ math-workspace publication status book
 | --- | --- |
 | `scope.books`、`scope.volumes`、`scope.paths` | 用 `inspect` 中的 book/volume 标识或目录路径明确作品范围，三者取并集，用于判断尚未收录的页面；不指定时采用所选章节所属 book，无归属 book 时采用项目范围。 |
 | `cover.image`、`cover.showVersion` | 可选封面图片及版本显示。 |
-| `frontMatter`、`backMatter` | 前后文数组，每项用 `file` 或 `content` 提供内容，`title` 和 `includeInToc` 控制标题与目录项。 |
+| `frontMatter`、`backMatter` | 前后文数组，每项优先用 `file` 引用项目内 Markdown；默认沿用稿件首个一级标题，`title` 可覆盖该标题，`includeInToc` 控制目录项。无 `file` 时沿用旧的 `content` 手填入口。 |
 | `toc.enabled`、`toc.depth`、`toc.title` | 目录开关、深度与标题。 |
-| `continued.enabled`、`continued.title`、`continued.text` | 部分发布声明的开关、标题与文字。 |
+| `continued.enabled`、`continued.file`、`continued.title`、`continued.text` | 声明开关和稿件引用。`file` 优先提供正文，`title` 可覆盖稿件标题；无文件时沿用手填 `text`，再回退到默认声明。文件已指定而未填写开关时启用；旧方案未指定文件或开关时，仅在部分发布时自动启用。显式启用的声明也会用于已收录全部章节的版本。 |
 | `pdf.engine`、`pdf.paper`、`pdf.margin`、`pdf.documentClass` | 本地 PDF 引擎与版式。 |
 
-构建依赖本机 Pandoc 与 LaTeX 引擎，默认使用 `xelatex`；`inspect` 显示工具是否可用。工具缺失时可先保存和审阅方案，安装完成后再生成 PDF。
+旧方案的手填前后文与声明仍可直接使用，不会自动转换成稿件文件。选择文件后，已有 `content` 或 `text` 会保留为备用，不会附加到文件内容；清空文件选择后恢复手填或默认文字。这样既能保留旧方案，也能让日常阅读与 PDF 只维护一份稿件。引用文件须是未被扫描排除的项目内 Markdown，路径不能穿越目录或跟随符号链接。
+
+构建依赖本机 Pandoc 与 LaTeX 引擎，默认使用 `xelatex`；中文出版方案未指定 `pdf.documentClass` 时使用 `ctexart`，需要本机 TeX 发行版提供 CTeX 和中文字体。显式文档类与英文默认保持原设置。`inspect` 显示工具是否可用。工具缺失时可先保存和审阅方案，安装完成后再生成 PDF。
 
 每次构建保存在 `.math-workspace/publications/builds/<id>/<build-id>/`，包含 `publication.pdf`、`compiled.md`、`manifest.json`、`citation.json`、`checksums.sha256` 和构建记录 `build.json`。Reader 可预览、下载 PDF，并取得本版清单和引用信息。清单记录收录与未收录范围、源输入摘要、DOI 状态和产物校验值；构建记录还保留 PDF 的 SHA-256。预览时核对封面、前后文、目录、编号、图片、范围外引用和 DOI，确认的是这份构建的实际文件。PDF 的 DOI 来源说明不是实时登记状态，请到对应平台记录核对。清单建立来源绑定，不是原稿签名、数学正确性或 Lean 证明覆盖的认证；学术留档仍使用独立的 `archive` 流程。
 

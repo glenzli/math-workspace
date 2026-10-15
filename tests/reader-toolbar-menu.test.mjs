@@ -277,6 +277,42 @@ async function documentStageUiContract() {
     } finally { app.closeNavigationContextMenu(); app.toolbarPanel.dispose(); app.toolbarMenu.dispose(); h.restore(); }
 }
 
+async function matterPageNavigationContract() {
+    const h = await harness(), { app, find, click, key } = h;
+    const page = (filePath, kind, volumeKey) => ({ filePath, kind, title: kind === 'back-matter' ? 'AI 退休寄语' : filePath,
+        bookKey: 'book1', bookTitle: 'Same book label', volumeKey, volumeTitle: volumeKey ? 'Same volume label' : undefined, documentMode: 'formal' });
+    const front = page('book1/front-matter/01-author.md', 'front-matter');
+    const volumeFront = page('book1/vol-1/front-matter/01-note.md', 'front-matter', 'vol-1');
+    const chapter = page('book1/vol-1/01-main.md', 'chapter', 'vol-1');
+    const volumeBack = page('book1/vol-1/back-matter/01-note.md', 'back-matter', 'vol-1');
+    const nextVolume = page('book1/vol-2/02-next.md', 'chapter', 'vol-2');
+    const back = page('book1/back-matter/01-ai.md', 'back-matter');
+    const continued = page('book1/to-be-continued.md', 'continued');
+    const otherBook = { ...page('book2/01-other.md', 'chapter'), bookKey: 'book2' };
+    app.state.pages = [front, volumeFront, chapter, volumeBack, nextVolume, back, continued, otherBook];
+    const mount = page => {
+        app.currentPath = page.filePath; app.selectedPagePaths = [page.filePath];
+        app.page = { filePath: page.filePath, page, content: '', labels: {}, symbols: [] }; app.renderArticle();
+    };
+    const opened = []; app.openPage = async (filePath, mode) => { opened.push({ filePath, mode }); };
+    try {
+        mount(chapter); app.renderNavigation();
+        const navigation = find('#reader-page-nav');
+        assert.deepEqual(navigation.querySelectorAll('.reader-nav-page').map(row => row.dataset.pagePath), app.state.pages.map(page => page.filePath), 'Sidebar DOM preserves book front, volumes and book back order.');
+        assert.equal(navigation.querySelectorAll('.reader-nav-group').length, 5, 'Repeated book/volume display labels do not merge separated or distinct scopes.');
+        click(find('[data-title-navigation]'));
+        assert.deepEqual(find('.reader-chapter-list').querySelectorAll('button').map(row => row.dataset.chapterPath), [volumeFront, chapter, volumeBack].map(page => page.filePath));
+        key('Escape'); mount(back); click(find('[data-title-navigation]'));
+        const entries = find('.reader-chapter-list').querySelectorAll('button');
+        assert.deepEqual(entries.map(row => row.dataset.chapterPath), [front, back, continued].map(page => page.filePath), 'Book-level menu includes each unnumbered page with exact book scope.');
+        assert.equal(entries[1].textContent, 'AI 退休寄语');
+        click(entries[2]);
+        assert.deepEqual(opened, [{ filePath: continued.filePath, mode: 'push' }]);
+        assert.equal(find('.reader-chapter-list'), null);
+        console.log('Reader manuscript matter sidebar DOM order and scoped title navigation passed.');
+    } finally { app.toolbarPanel.dispose(); app.toolbarMenu.dispose(); h.restore(); }
+}
+
 async function titleNavigationContract() {
     const h = await harness(), { app, document, find, click, key } = h;
     const drain = async () => { for (let index = 0; index < 12; index++) await Promise.resolve(); };
@@ -572,6 +608,7 @@ export async function testReaderToolbarMenu() {
     console.log('Reader category toolbar menus: keyboard, switching, actions, localization, state and category anchors passed.');
     } finally { h.restore(); }
     await documentStageUiContract();
+    await matterPageNavigationContract();
     await titleNavigationContract();
 }
 

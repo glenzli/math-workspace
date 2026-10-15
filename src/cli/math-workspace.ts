@@ -20,6 +20,8 @@ import {
     formatPageReference,
     mergeConfig,
     normalizeFormalPagePath,
+    isPageLabelType,
+    sortManuscriptPages,
     parseFormalMarkerLine,
     renderAgentGuide,
     renderDependencyGraphBridges,
@@ -40,7 +42,8 @@ import {
     typeName,
     unique,
     type DependencyGraphMatrixScope,
-    type DependencyGraphWhereFilter
+    type DependencyGraphWhereFilter,
+    type ManuscriptPage
 } from '@math-workspace/core';
 import { startReaderServer } from '../reader/server';
 import { runReaderMcpServer } from '../mcp/reader-mcp-server';
@@ -763,7 +766,7 @@ function rewritePageReferences(content, file) {
 }
 
 function isPageLabel(label) {
-    return !!label && ['chapter', 'intro', 'summary', 'appendix'].includes(label.type);
+    return !!label && isPageLabelType(label.type);
 }
 
 function pageFromLabel(label, state) {
@@ -922,37 +925,13 @@ async function compileFormalMarkdownForFiles(files, state, options: { linkTarget
     return `${chunks.filter(Boolean).join('\n\n\\pagebreak\n\n')}\n`;
 }
 
-function exportPageOrder(page) {
-    if (!page) return Number.MAX_SAFE_INTEGER;
-    if (page.kind === 'intro') return -100000;
-    if (page.kind === 'summary') return 90000;
-    if (page.kind === 'appendix') return typeof page.unitOrder === 'number' ? page.unitOrder : 100000;
-    if (typeof page.unitOrder === 'number') return page.unitOrder;
-    return typeof page.order === 'number' ? page.order : Number.MAX_SAFE_INTEGER;
-}
-
-function compareExportNumber(a, b) {
-    const av = Number.isFinite(a) ? a : Number.MAX_SAFE_INTEGER;
-    const bv = Number.isFinite(b) ? b : Number.MAX_SAFE_INTEGER;
-    return av === bv ? 0 : av - bv;
-}
-
 function sortExportFiles(files, state) {
-    const pageByPath = new Map((state.pages || []).map(page => [page.filePath, page]));
-    return [...files].sort((a, b) => {
-        const relA = relativePath(a);
-        const relB = relativePath(b);
-        const pageA: any = pageByPath.get(relA);
-        const pageB: any = pageByPath.get(relB);
-
-        const bookOrder = compareExportNumber(pageA?.bookOrder, pageB?.bookOrder);
-        if (bookOrder !== 0) return bookOrder;
-        const volumeOrder = compareExportNumber(pageA?.volumeOrder, pageB?.volumeOrder);
-        if (volumeOrder !== 0) return volumeOrder;
-        const pageOrder = compareExportNumber(exportPageOrder(pageA), exportPageOrder(pageB));
-        if (pageOrder !== 0) return pageOrder;
-        return relA.localeCompare(relB);
+    const pageByPath = new Map<string, ManuscriptPage>((state.pages || []).map(page => [page.filePath, page]));
+    const pages: Array<ManuscriptPage & { file: string }> = files.map(file => {
+        const filePath = relativePath(file);
+        return { ...pageByPath.get(filePath), kind: pageByPath.get(filePath)?.kind || '', filePath, file };
     });
+    return sortManuscriptPages(pages, 'export').map(page => page.file);
 }
 
 const PDF_TOC_PAGEBREAK_HEADER = '\\let\\markdownFormalOldTableOfContents\\tableofcontents\\renewcommand{\\tableofcontents}{\\clearpage\\markdownFormalOldTableOfContents\\clearpage}';

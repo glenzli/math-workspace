@@ -77,7 +77,8 @@ async function fixture(options = {}) {
     const rendered = [], remote = new MockZenodo();
     const runCli = async (args, runtime) => {
         if (args[0] === 'render-pdf') {
-            rendered.push({ args, markdown: await fs.readFile(path.resolve(runtime.cwd, args[1]), 'utf8'), front: await fs.readFile(path.join(runtime.cwd, '.math-workspace/publication-front-0.md'), 'utf8') });
+            const fronts = await Promise.all(args.filter(arg => arg.startsWith('--front-matter=')).map(arg => fs.readFile(path.resolve(runtime.cwd, arg.slice('--front-matter='.length)), 'utf8')));
+            rendered.push({ args, markdown: await fs.readFile(path.resolve(runtime.cwd, args[1]), 'utf8'), front: fronts[0] || '', fronts });
             if (options.failRender) throw new Error('Test renderer failed');
             if (options.mutateOnRender) await put('book1/01-one.md', 'Changed while rendering\n');
             await fs.writeFile(path.resolve(runtime.cwd, args.find(arg => arg.startsWith('--out=')).slice(6)), '%PDF-1.7\nTEST PUBLICATION\n%%EOF\n');
@@ -128,9 +129,31 @@ export async function testPublications() {
         const original = await fs.readFile(path.join(f.root, 'book1/01-one.md')), result = await build(f), rendered = f.rendered[0];
         assert.match(rendered.markdown, /Chapter 1 First/); assert.match(rendered.markdown, /Chapter 3 Third/); assert.doesNotMatch(rendered.markdown, /#h-|@h-|@chapter:/); assert.match(rendered.markdown, /Theorem 2\.1/); assert.match(rendered.markdown, /\$x\^2\+y\^2=z\^2\$/); assert.match(rendered.markdown, /\\int_0\^1 x\^2\\,dx=\\frac13/);
         assert(rendered.markdown.indexOf('Conclusion') > rendered.markdown.indexOf('Chapter 3')); assert(rendered.markdown.indexOf('To be continued') > rendered.markdown.indexOf('Conclusion')); assert.match(rendered.front, /Existing heading \{#preface \.unnumbered \.unlisted\}/); assert.doesNotMatch(rendered.front, /@h-/); assert(rendered.args.includes('--toc')); assert(rendered.args.includes('--cover-image=cover.png'));
+        assert.equal(rendered.args.some(arg => arg.startsWith('--documentclass=')), false, 'English keeps the renderer default.');
+        assert.equal(rendered.args.some(arg => arg.includes('fontset=')), false, 'English keeps its font settings.');
         assert.match(rendered.markdown, /\\clearpage\n\\markboth\{\}\{\}\n\n# Conclusion/); assert.match(rendered.markdown, /\\clearpage\n\\markboth\{\}\{\}\n\n# To be continued/); assert.equal(rendered.args.some(arg => arg.startsWith('--doi-state=')), false);
         assert.deepEqual(await fs.readFile(path.join(f.root, 'book1/01-one.md')), original); assert.equal(await exists(path.join(f.root, '.math-workspace/workspace-index.json')), false);
         const artifact = await f.service.readArtifact('book', result.id, 'publication.pdf'); assert.equal(hash(artifact.bytes), result.pdfSha256); const second = await build(f); assert.notEqual(second.id, result.id); assert.equal((await f.service.readArtifact('book', result.id, 'publication.pdf')).bytes.toString(), artifact.bytes.toString());
+    });
+    await check('Chinese publication language selects CTeX without changing the saved profile', async f => {
+        f.profile.language = 'zh-CN'; const saved = await f.service.save(f.profile, null); await build(f);
+        assert(f.rendered[0].args.includes('--lang=zh-CN')); assert.deepEqual(f.rendered[0].args.filter(arg => arg.startsWith('--documentclass=')), ['--documentclass=ctexart']);
+        assert(f.rendered[0].args.includes('--variable=classoption:fontset=fandol'));
+        assert.equal((await f.service.status(f.profile.id)).profile.revision, saved.revision); assert.equal((await f.service.status(f.profile.id)).profile.profile.pdf.documentClass, undefined);
+        await f.put('.math-workspace/config.json', JSON.stringify({ language: 'zh' })); delete f.profile.language; await build(f);
+        assert(f.rendered[1].args.includes('--lang=zh-CN')); assert.deepEqual(f.rendered[1].args.filter(arg => arg.startsWith('--documentclass=')), ['--documentclass=ctexart']);
+        assert(f.rendered[1].args.includes('--variable=classoption:fontset=fandol'));
+        f.profile.language = 'en-US'; await build(f);
+        assert(f.rendered[2].args.includes('--lang=en-US')); assert.equal(f.rendered[2].args.some(arg => arg.startsWith('--documentclass=')), false, 'Explicit English overrides the Chinese project language.');
+        assert.equal(f.rendered[2].args.some(arg => arg.includes('fontset=')), false);
+    });
+    await check('explicit publication document classes override the Chinese default', async f => {
+        f.profile.language = 'zh-CN';
+        for (const documentClass of ['ctexart', 'ctexbook', 'article']) {
+            f.profile.pdf = { documentClass }; await build(f);
+            assert.deepEqual(f.rendered.at(-1).args.filter(arg => arg.startsWith('--documentclass=')), [`--documentclass=${documentClass}`]);
+            assert.equal(f.rendered.at(-1).args.some(arg => arg.includes('fontset=')), false, 'Explicit classes keep author font selection.');
+        }
     });
     await check('source, cover, and front matter changes invalidate reviewed plan', async f => {
         const plan = await f.service.plan(f.profile); await f.put('cover.png', 'Changed cover'); await assert.rejects(f.service.build(f.profile, plan.fingerprint), /plan changed/);
@@ -163,6 +186,76 @@ export async function testPublications() {
     await check('matter references receive omission review and unknown refs reject', async f => {
         const plan = await f.service.plan({ ...f.profile, frontMatter: [{ content: 'See @h-bbbbbbbbbbbbbbbb.' }] }); assert(plan.externalReferences.some(reference => reference.source === 'front-matter-1.md' && reference.target === 'book1/02-two.md'));
         await assert.rejects(f.service.plan({ ...f.profile, backMatter: [{ content: 'See @h-eeeeeeeeeeeeeeee.' }] }), /Unresolved publication reference/);
+    });
+    await check('manuscript matter and continued files are single frozen sources with author headings', async f => {
+        const files = {
+            'book1/front-matter/preface.md': '# #h-5555555555555555 Author preface\n\nFRONT_SOURCE See @h-cccccccccccccccc.\n',
+            'book1/front-matter/readers-letter.md': '# #h-6666666666666666 Letter to readers\n\nLETTER_SOURCE\n',
+            'book1/back-matter/ai-retirement.md': '# #h-7777777777777777 AI retirement letter\n\nAI_SOURCE See @h-aaaaaaaaaaaaaaaa.\n',
+            'book1/to-be-continued.md': '# #h-8888888888888888 The next volume\n\nCONTINUED_SOURCE See @h-bbbbbbbbbbbbbbbb and @page:./02-two.md.\n\n![Plot](images/plot.png)\n\n[Next chapter](02-two.md)\n'
+        };
+        for (const [file, content] of Object.entries(files)) await f.put(file, content);
+        f.profile.chapters.push(...Object.keys(files));
+        f.profile.frontMatter = [{ file: 'book1/front-matter/preface.md', content: 'DORMANT_FRONT' }, { file: 'book1/front-matter/readers-letter.md', includeInToc: true }];
+        f.profile.backMatter = [{ file: 'book1/back-matter/ai-retirement.md', content: 'DORMANT_BACK', includeInToc: true }];
+        f.profile.continued = { file: 'book1/to-be-continued.md', text: 'DORMANT_CONTINUED' };
+        const saved = await f.service.save(f.profile, null), plan = await f.service.plan(saved.profile);
+        assert.equal(saved.profile.frontMatter[0].content, 'DORMANT_FRONT'); assert.equal(saved.profile.continued.text, 'DORMANT_CONTINUED');
+        assert.deepEqual(plan.selected.map(page => page.path), ['book1/01-one.md', 'book1/03-three.md']);
+        assert.equal(plan.frontMatter[0].title, 'Author preface'); assert.equal(plan.backMatter[0].title, 'AI retirement letter');
+        assert.equal(plan.continuedNotice.title, 'The next volume'); assert.equal(plan.continuedNotice.file, 'book1/to-be-continued.md'); assert.equal(plan.continuedNotice.text, files['book1/to-be-continued.md']);
+        assert.ok(plan.inputs.some(input => input.path === 'book1/to-be-continued.md' && input.role === 'continued'));
+        assert.ok(plan.inputs.some(input => input.path === 'book1/back-matter/ai-retirement.md' && input.role === 'back-matter'));
+        assert.ok(plan.externalReferences.some(reference => reference.source === 'book1/to-be-continued.md' && reference.target === 'book1/02-two.md'));
+        const release = await f.service.build(saved.profile, plan.fingerprint), rendered = f.rendered[0];
+        assert.equal(rendered.fronts.length, 2); assert.equal((rendered.fronts.join('\n').match(/FRONT_SOURCE/g) || []).length, 1);
+        assert.equal((rendered.markdown.match(/AI_SOURCE/g) || []).length, 1); assert.equal((rendered.markdown.match(/CONTINUED_SOURCE/g) || []).length, 1);
+        assert.equal((rendered.markdown.match(/^# The next volume\b/gm) || []).length, 1); assert.equal((rendered.front.match(/^# Author preface\b/gm) || []).length, 1);
+        assert.doesNotMatch(rendered.markdown + rendered.fronts.join('\n'), /DORMANT_|@h-|@page:|^# #h-/m);
+        assert.match(rendered.markdown, /book1\/images\/plot\.png/); assert.match(rendered.markdown, /#h-8888888888888888/);
+        assert.equal(rendered.args.some(arg => arg.startsWith('--front-matter-title=')), false, 'A file H1 is not duplicated by a generated title.');
+        const buildRoot = path.join(f.store, 'builds/book', release.id);
+        for (const [file, content] of Object.entries(files)) { assert.equal(await fs.readFile(path.join(f.root, file), 'utf8'), content); assert.equal(await fs.readFile(path.join(buildRoot, 'inputs', file), 'utf8'), content); }
+        assert.equal(JSON.parse(await fs.readFile(path.join(buildRoot, 'manifest.json'), 'utf8')).plan.continuedNotice.file, 'book1/to-be-continued.md');
+        await f.put('book1/to-be-continued.md', files['book1/to-be-continued.md'] + '\nUpdated source.\n');
+        await assert.rejects(f.service.build(saved.profile, plan.fingerprint), /plan changed/);
+    });
+    await check('back matter clears running marks after each author heading before its body', async f => {
+        await f.put('book1/back-matter/afterword.md', '# #h-9999999999999999 Author afterword\n\nAFTERWORD_BODY\n');
+        await f.put('book1/back-matter/retirement.md', '# #h-eeeeeeeeeeeeeeee AI retirement letter\n\nRETIREMENT_BODY\n');
+        f.profile.backMatter = [{ file: 'book1/back-matter/afterword.md', includeInToc: true }, { file: 'book1/back-matter/retirement.md' }, { title: 'Legacy afterword', content: 'INLINE_BACK_BODY' }];
+        await build(f); const markdown = f.rendered[0].markdown;
+        assert.match(markdown, /^# Author afterword \{#h-9999999999999999 \.unnumbered\}\n\n\\markboth\{\}\{\}\s+AFTERWORD_BODY/m);
+        assert.match(markdown, /^# AI retirement letter \{#h-eeeeeeeeeeeeeeee \.unnumbered \.unlisted\}\n\n\\markboth\{\}\{\}\s+RETIREMENT_BODY/m);
+        assert.match(markdown, /^# Legacy afterword \{\.unnumbered \.unlisted\}\n\n\\markboth\{\}\{\}\s+INLINE_BACK_BODY/m);
+        assert.doesNotMatch(markdown, /\\markboth\{(?:Author afterword|AI retirement letter|Legacy afterword)/);
+    });
+    await check('continued file paths and duplicate matter roles are validated without source writes', async f => {
+        await f.put('book1/back-matter/note.md', '# #h-9999999999999999 A source note\n\nContent.\n');
+        await f.put('node_modules/hidden.md', '# Excluded source\n');
+        for (const file of ['../outside.md', '/tmp/outside.md', 'book1/../note.md']) await assert.rejects(f.service.plan({ ...f.profile, continued: { file } }), /paths/);
+        for (const file of ['missing.md', 'README.md', 'node_modules/hidden.md']) await assert.rejects(f.service.plan({ ...f.profile, continued: { file } }), /unavailable or excluded/);
+        await assert.rejects(f.service.plan({ ...f.profile, continued: { file: 'cover.png' } }), /Markdown/);
+        await fs.symlink(path.join(f.root, 'book1/back-matter'), path.join(f.root, 'linked-matter'));
+        await assert.rejects(f.service.plan({ ...f.profile, continued: { file: 'linked-matter/note.md' } }), /symbolic/);
+        const file = 'book1/back-matter/note.md';
+        await assert.rejects(f.service.plan({ ...f.profile, frontMatter: [{ file }], backMatter: [{ file }] }), /one matter role/);
+        await assert.rejects(f.service.plan({ ...f.profile, backMatter: [{ file }], continued: { file } }), /one matter role/);
+        await assert.rejects(f.service.plan({ ...f.profile, frontMatter: [{ file }, { file }] }), /one matter role/);
+        const saved = await f.service.save(f.profile, null);
+        await assert.rejects(f.service.save({ ...f.profile, backMatter: [{ file }], continued: { file } }, saved.revision), /one matter role/);
+        assert.equal((await f.service.status(f.profile.id)).profile.revision, saved.revision, 'Ambiguous roles cannot overwrite the saved profile.');
+        assert.equal(await fs.readFile(path.join(f.root, file), 'utf8'), '# #h-9999999999999999 A source note\n\nContent.\n');
+    });
+    await check('enabled full-edition file notice and title overrides retain source and old inline fallback', async f => {
+        const file = 'book1/to-be-continued.md'; await f.put(file, '# #h-9999999999999999 Original ending\n\nFILE_BODY\n');
+        f.profile.chapters = ['book1/01-one.md', 'book1/02-two.md', 'book1/03-three.md'];
+        f.profile.continued = { enabled: true, file, title: 'Override ending', text: 'INLINE_BACKUP' };
+        let plan = await f.service.plan(f.profile); assert.equal(plan.partial, false); assert.equal(plan.continuedNotice.enabled, true);
+        await f.service.build(f.profile, plan.fingerprint); assert.match(f.rendered[0].markdown, /^# Override ending /m); assert.doesNotMatch(f.rendered[0].markdown, /Original ending|INLINE_BACKUP/);
+        f.profile.continued = { enabled: true, title: 'Inline ending', text: 'INLINE_BACKUP' };
+        plan = await f.service.plan(f.profile); assert.equal(plan.continuedNotice.text, 'INLINE_BACKUP'); await f.service.build(f.profile, plan.fingerprint); assert.match(f.rendered[1].markdown, /INLINE_BACKUP/);
+        f.profile.continued = { enabled: false, file: 'missing.md', text: 'DISABLED' }; plan = await f.service.plan(f.profile); assert.equal(plan.continuedNotice.enabled, false);
     });
     await check('nested LaTeX resources are frozen and affect fingerprint', async f => {
         await f.put('preamble.tex', '\\input{nested/macros.tex}\n'); await f.put('nested/macros.tex', '\\newcommand{\\proofmark}{QED}\n'); await f.put('book1/03-three.md', `${await fs.readFile(path.join(f.root, 'book1/03-three.md'), 'utf8')}\n\\input{preamble.tex}\n`);

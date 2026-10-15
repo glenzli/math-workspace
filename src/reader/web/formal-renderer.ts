@@ -2,6 +2,7 @@ import { readerRoute } from './reader-route';
 import { isReaderApp } from './reader-host';
 import { emptyReaderImage } from './reader-assets';
 import { FORMAL_TYPE_PATTERN, stripSolutionAssociation } from '../../../packages/core/src/formal-kinds';
+import { isPageLabelType } from '../../../packages/core/src/page-structure';
 import { installExerciseRules } from './reader-exercises';
 import MarkdownIt from 'markdown-it';
 import { installInteractiveFigureRule } from './reader-figures';
@@ -377,7 +378,7 @@ function prepareFormalMarkdown(source: string, options: FormalRenderOptions): { 
             if (label) {
                 markersByLine[lineIndex] = heading[2];
                 const page = pagesByPath.get(label.filePath);
-                const isPageAnchor = ['chapter', 'appendix', 'intro', 'summary'].includes(label.type);
+                const isPageAnchor = isPageLabelType(label.type);
                 const headingText = isPageAnchor
                     ? (page?.displayHeading || heading[3] || label.title)
                     : [label.display, heading[3] || label.title].filter(Boolean).join(' ');

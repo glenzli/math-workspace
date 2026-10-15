@@ -669,13 +669,34 @@ Lean `root` and `sourceRoots` paths are relative to the Math Workspace project r
 
 ### Publish Selected Chapters as PDF
 
-For successive releases of the same book, open **Versions & publication → PDF publication** in the Reader and create or resume a profile. Select this edition's volumes and chapters, enter its title, authors, version and DOI, and configure the cover, preface, contents and conclusion. Review included and omitted pages and references outside the edition before building, previewing and downloading the actual PDF. Zenodo draft upload and public publication are separate later actions.
+To publish a book in stages, open **Versions & publication → PDF publication** in the Reader and create or continue a plan. Select the volumes and chapters for this edition, enter the title, authors, version and DOI, and configure the cover, front matter, contents and back matter. Front matter and back matter each support multiple entries. Select existing Markdown from the project manuscript list and keep the author's own headings. Review the included and omitted pages, the actual manuscript sources and references outside the edition before building, previewing and downloading the PDF. Uploading a Zenodo draft and publishing it publicly are separate later actions.
 
-Profiles save selections and metadata without rewriting the manuscript. Chapters and formal objects retain the book's original numbering: selecting chapters 3 and 5 does not turn them into chapters 1 and 2. The output order is cover, publication information, front matter, generated contents, selected chapters, back matter, and a default **To be continued** notice for partial editions. Contents and the notice can be disabled. References outside the edition are shown for review without automatically adding other chapters.
+A publication plan stores selections and metadata without rewriting the manuscript. The body retains the original chapter and object numbers for the whole book: selecting chapters 3 and 5 does not renumber them as chapters 1 and 2. The finished order is cover, publication metadata, front matter, contents, selected body pages, back matter, and the “To be continued” declaration included by default for a partial edition. The contents and declaration can be disabled in the plan. References outside the selected scope are listed for review and do not automatically add other chapters.
+
+Prefaces, afterwords and the continuing-work declaration can live directly in manuscript files. Read them in the Reader during normal writing, then reference those same sources for publication. For example:
+
+```text
+book/
+  front-matter/
+    preface.md
+    readers-letter.md
+  vol-i/
+    intro.md
+    01-foundations.md
+    summary.md
+  back-matter/
+    conclusion.md
+    ai-retirement-note.md
+  to-be-continued.md
+```
+
+The `front-matter/` and `back-matter/` directories can contain several pieces with any headings the author chooses. Numeric filename prefixes such as `01-` and `02-` control their order without becoming chapter numbers. For example, `ai-retirement-note.md` can be titled “An AI's retirement letter”; it does not have to become a conclusion. `to-be-continued.md` is a separate final page. Existing `intro.md`, `introduction.md` and `summary.md` files remain supported. Front matter and back matter within a volume stay at that volume's beginning and end. Keep stable page identifiers under the manuscript's normal rules. File references and relative images use the same compilation rules as the body.
+
+Book-wide front matter and back matter explicitly referenced in the publication plan are placed in their corresponding positions. Volume-level matter selected only through the chapter list remains in its volume's order. Once a file is referenced by one front matter, back matter or declaration entry, it is not printed again in the body. Reusing one file for several entries or roles requires resolving the ambiguity in the plan first. The review page shows the actual file paths and content. Review again after a manuscript or image changes.
 
 #### Minimal Profile and Local Build
 
-Run from the project root containing `.math-workspace/config.json`. Put actual chapter paths in `publication.json`; one author and at least one chapter are enough for this example. Front and back matter are optional:
+Run these commands from a project root containing `.math-workspace/config.json`. Put the actual chapter paths in `publication.json`. A plan needs only an author and at least one chapter; front matter and back matter are optional:
 
 ```json
 {
@@ -686,42 +707,47 @@ Run from the project root containing `.math-workspace/config.json`. Put actual c
   "version": "0.1.0",
   "authors": [{ "name": "Author Name" }],
   "language": "zh-CN",
-  "chapters": ["book/vol-i/01.md", "book/vol-i/02.md"],
+  "chapters": ["book/vol-i/01-foundations.md", "book/vol-i/02-main-results.md"],
   "frontMatter": [
-    { "title": "Preface", "file": "book/preface.md", "includeInToc": false }
+    { "file": "book/front-matter/preface.md", "includeInToc": false },
+    { "file": "book/front-matter/readers-letter.md", "includeInToc": true }
   ],
   "backMatter": [
-    { "title": "Conclusion", "content": "This edition includes the first two chapters.", "includeInToc": true }
-  ]
+    { "file": "book/back-matter/conclusion.md", "includeInToc": true },
+    { "file": "book/back-matter/ai-retirement-note.md", "includeInToc": true }
+  ],
+  "continued": { "enabled": true, "file": "book/to-be-continued.md" }
 }
 ```
 
-`id` resumes the same profile, `workId` identifies the work across editions, and `version` identifies this edition. Continue editing the same profile as chapters or volumes are added. Save against its current revision to retain previous builds and provider bindings.
+`id` reopens the same publication plan; `workId` identifies the work across editions, and `version` identifies this edition. When adding chapters or volumes later, continue editing the same plan, save with its current revision, and retain old builds and provider bindings.
 
 ```bash
 math-workspace publication inspect
 math-workspace publication save publication.json --expected-revision new
 math-workspace publication plan book
-math-workspace publication build book --fingerprint <fingerprint-returned-by-plan>
+math-workspace publication build book --fingerprint <fingerprint returned by plan>
 math-workspace publication status book
 ```
 
-These commands return JSON. Use `--expected-revision new` for the first save and the `profile.revision` returned by `status` for later saves. `plan` and `build` also accept a profile JSON path. Build with the fingerprint of the plan just reviewed; changes to source, metadata or resources require a fresh plan and review. Omitted source can still affect whole-book numbering and remains part of the bound build inputs.
+These commands return JSON. Use `--expected-revision new` for the first save; for updates, use `profile.revision` from `status`. Both `plan` and `build` also accept a profile JSON path. Build with the `fingerprint` from the plan just reviewed. Replan and review after manuscript, metadata or resource changes. Omitted manuscript pages can still contribute to whole-book numbering and remain bound inputs of the build.
 
-Optional fields use project-relative local paths:
+Optional configuration follows. Paths are relative to the project root and refer to files within the project:
 
 | Field | Purpose |
 | --- | --- |
-| `scope.books`, `scope.volumes`, `scope.paths` | Define the work boundary using book/volume keys from `inspect` or directory paths. Their union determines omitted pages. Without an explicit scope, selected books define the work; unbooked selections use the project scope. |
+| `scope.books`, `scope.volumes`, `scope.paths` | Define the work's scope with book/volume identities from `inspect` or directory paths. Their union determines which pages remain omitted. When unspecified, use the selected chapters' books, or the project scope when those pages have no book. |
 | `cover.image`, `cover.showVersion` | Optional cover image and version display. |
-| `frontMatter`, `backMatter` | Arrays whose entries provide `file` or `content`; `title` and `includeInToc` control headings and contents entries. |
-| `toc.enabled`, `toc.depth`, `toc.title` | Contents switch, depth and title. |
-| `continued.enabled`, `continued.title`, `continued.text` | Partial-edition notice switch, title and text. |
+| `frontMatter`, `backMatter` | Arrays of front matter and back matter. Each entry can reference project Markdown through `file`. Its first H1 supplies the default heading; `title` can override that heading, and `includeInToc` controls the contents entry. Without `file`, the existing inline `content` field remains available. |
+| `toc.enabled`, `toc.depth`, `toc.title` | Contents switch, depth and heading. |
+| `continued.enabled`, `continued.file`, `continued.title`, `continued.text` | Declaration switch and manuscript reference. `file` supplies the content when present, and `title` can override its heading. Without a file, use inline `text`, then the default declaration. A referenced file is enabled when the switch is unspecified. Existing plans with neither a file nor an explicit switch enable the declaration only for partial editions. An explicitly enabled declaration is also included when all chapters are selected. |
 | `pdf.engine`, `pdf.paper`, `pdf.margin`, `pdf.documentClass` | Local PDF engine and layout. |
 
-Building requires local Pandoc and a LaTeX engine, with `xelatex` as the default. `inspect` reports tool availability. Profiles can be saved and reviewed before the tools are installed.
+Existing inline front matter, back matter and declarations continue to work and are not automatically converted into manuscript files. Selecting a file retains any existing `content` or `text` as a fallback; it does not append that text to the file's content. Clear the file selection to return to inline or default text. This preserves existing plans while allowing normal reading and PDF publication to share one manuscript source. Referenced files must be project Markdown that is not excluded from scanning. Paths cannot traverse directories or follow symbolic links.
 
-Each build is retained under `.math-workspace/publications/builds/<id>/<build-id>/`, containing `publication.pdf`, `compiled.md`, `manifest.json`, `citation.json`, `checksums.sha256` and `build.json`. The Reader previews and downloads the PDF and exposes its manifest and citation data. The manifest records selected and omitted pages, source input digests, DOI state and artifact checksums; the build record also retains the PDF's SHA-256. Review the actual cover, front and back matter, contents, numbering, images, outside references and DOI. The PDF's DOI provenance note is not live registration status; check the corresponding platform record. A manifest binds sources and artifacts without certifying mathematical correctness, Lean coverage or source signatures. Academic source evidence remains in the separate `archive` workflow.
+Building requires local Pandoc and a LaTeX engine; the default is `xelatex`. Chinese publication profiles use `ctexart` when `pdf.documentClass` is not set, requiring CTeX and Chinese fonts in the local TeX distribution. Explicit document classes and English defaults retain their existing behavior. `inspect` reports whether the tools are available. If tools are missing, save and review the plan first, then build after installing them.
+
+Each build is retained under `.math-workspace/publications/builds/<id>/<build-id>/`, with `publication.pdf`, `compiled.md`, `manifest.json`, `citation.json`, `checksums.sha256` and the `build.json` record. The Reader can preview and download the PDF and retrieve its edition manifest and citation data. The manifest records included and omitted scope, source input digests, DOI state and artifact checksums. The build record also retains the PDF's SHA-256. During preview, check the cover, front matter, back matter, contents, numbering, images, references outside the edition and DOI against this build's actual files. A PDF's DOI source note does not report live registration status; check the provider's record. The manifest binds sources to artifacts. It does not certify a manuscript signature, mathematical correctness or Lean proof coverage. Academic source archiving remains the separate `archive` workflow.
 
 #### Manually Entered DOI
 
@@ -1556,9 +1582,30 @@ Lean 项目的 `root` 与 `sourceRoots` 都相对于 Math Workspace 项目根；
 
 ## 按章节发布 PDF
 
-需要逐步发布同一部书时，在 Reader 的“版本与出版 → PDF 出版”新建或继续已有方案。选择本版的卷和章节，填写书名、作者、版本与 DOI，配置封面、写在前面/导言、目录和结语。先审阅收录范围、未收录页与跨范围引用，再生成、预览和下载实际 PDF；Zenodo 的草稿上传与正式发布是之后分别启动的动作。
+需要逐步发布同一部书时，在 Reader 的“版本与出版 → PDF 出版”新建或继续已有方案。选择本版的卷和章节，填写书名、作者、版本与 DOI，配置封面、前文、目录和后文。前后文各可添加多个条目，在项目稿件列表中选择已有 Markdown，保留作者自己的标题。先审阅收录范围、未收录页、实际引用稿件与跨范围引用，再生成、预览和下载实际 PDF；Zenodo 的草稿上传与正式发布是之后分别启动的动作。
 
 发布方案保存选择与元数据，不改写原稿。正文保留整书原有的章号与对象编号；选取第 3、5 章不会改成第 1、2 章。成品顺序为封面、出版信息、前文、目录、所选正文、后文，以及部分发布默认附上的“未完待续 / To be continued”声明；目录和声明可按方案关闭。范围外引用会列入审阅，不会因此自动加入其他章节。
+
+前言、后记和“未完待续”可以直接写成书稿文件，平时在 Reader 中阅读，出版时引用同一份原稿。例如：
+
+```text
+book/
+  front-matter/
+    preface.md
+    readers-letter.md
+  vol-i/
+    intro.md
+    01-foundations.md
+    summary.md
+  back-matter/
+    conclusion.md
+    ai-retirement-note.md
+  to-be-continued.md
+```
+
+`front-matter/` 与 `back-matter/` 可容纳多篇任意标题的文章，文件名前的 `01-`、`02-` 等数字只控制先后，不作为章号；例如 `ai-retirement-note.md` 的标题可以是“AI 退休寄语”，不必改写成“结语”。`to-be-continued.md` 是独立尾页。已有 `intro.md`、`introduction.md` 与 `summary.md` 继续兼容；卷内的前后文仍在该卷两端。各页按书稿规则保留稳定页标识，文件引用与相对图片沿用正文的编译规则。
+
+出版方案明确引用的全书前后文会排到对应位置；仅在章节列表中勾选的卷内前后文仍按所属卷顺序排版。同一文件被前文、后文或声明中的一个条目引用后，不会在正文重复输出；同一文件重复用于多个条目或角色时，需要先在方案中消除歧义。审阅页列出实际文件路径及内容，原稿或图片变化后需重新审阅。
 
 ### 最小方案与本地构建
 
@@ -1573,13 +1620,16 @@ Lean 项目的 `root` 与 `sourceRoots` 都相对于 Math Workspace 项目根；
   "version": "0.1.0",
   "authors": [{ "name": "Author Name" }],
   "language": "zh-CN",
-  "chapters": ["book/vol-i/01.md", "book/vol-i/02.md"],
+  "chapters": ["book/vol-i/01-foundations.md", "book/vol-i/02-main-results.md"],
   "frontMatter": [
-    { "title": "写在前面", "file": "book/preface.md", "includeInToc": false }
+    { "file": "book/front-matter/preface.md", "includeInToc": false },
+    { "file": "book/front-matter/readers-letter.md", "includeInToc": true }
   ],
   "backMatter": [
-    { "title": "本版结语", "content": "本版收录前两章。", "includeInToc": true }
-  ]
+    { "file": "book/back-matter/conclusion.md", "includeInToc": true },
+    { "file": "book/back-matter/ai-retirement-note.md", "includeInToc": true }
+  ],
+  "continued": { "enabled": true, "file": "book/to-be-continued.md" }
 }
 ```
 
@@ -1601,12 +1651,14 @@ math-workspace publication status book
 | --- | --- |
 | `scope.books`、`scope.volumes`、`scope.paths` | 用 `inspect` 中的 book/volume 标识或目录路径明确作品范围，三者取并集，用于判断尚未收录的页面；不指定时采用所选章节所属 book，无归属 book 时采用项目范围。 |
 | `cover.image`、`cover.showVersion` | 可选封面图片及版本显示。 |
-| `frontMatter`、`backMatter` | 前后文数组，每项用 `file` 或 `content` 提供内容，`title` 和 `includeInToc` 控制标题与目录项。 |
+| `frontMatter`、`backMatter` | 前后文数组，每项优先用 `file` 引用项目内 Markdown；默认沿用稿件首个一级标题，`title` 可覆盖该标题，`includeInToc` 控制目录项。无 `file` 时沿用旧的 `content` 手填入口。 |
 | `toc.enabled`、`toc.depth`、`toc.title` | 目录开关、深度与标题。 |
-| `continued.enabled`、`continued.title`、`continued.text` | 部分发布声明的开关、标题与文字。 |
+| `continued.enabled`、`continued.file`、`continued.title`、`continued.text` | 声明开关和稿件引用。`file` 优先提供正文，`title` 可覆盖稿件标题；无文件时沿用手填 `text`，再回退到默认声明。文件已指定而未填写开关时启用；旧方案未指定文件或开关时，仅在部分发布时自动启用。显式启用的声明也会用于已收录全部章节的版本。 |
 | `pdf.engine`、`pdf.paper`、`pdf.margin`、`pdf.documentClass` | 本地 PDF 引擎与版式。 |
 
-构建依赖本机 Pandoc 与 LaTeX 引擎，默认使用 `xelatex`；`inspect` 显示工具是否可用。工具缺失时可先保存和审阅方案，安装完成后再生成 PDF。
+旧方案的手填前后文与声明仍可直接使用，不会自动转换成稿件文件。选择文件后，已有 `content` 或 `text` 会保留为备用，不会附加到文件内容；清空文件选择后恢复手填或默认文字。这样既能保留旧方案，也能让日常阅读与 PDF 只维护一份稿件。引用文件须是未被扫描排除的项目内 Markdown，路径不能穿越目录或跟随符号链接。
+
+构建依赖本机 Pandoc 与 LaTeX 引擎，默认使用 `xelatex`；中文出版方案未指定 `pdf.documentClass` 时使用 `ctexart`，需要本机 TeX 发行版提供 CTeX 和中文字体。显式文档类与英文默认保持原设置。`inspect` 显示工具是否可用。工具缺失时可先保存和审阅方案，安装完成后再生成 PDF。
 
 每次构建保存在 `.math-workspace/publications/builds/<id>/<build-id>/`，包含 `publication.pdf`、`compiled.md`、`manifest.json`、`citation.json`、`checksums.sha256` 和构建记录 `build.json`。Reader 可预览、下载 PDF，并取得本版清单和引用信息。清单记录收录与未收录范围、源输入摘要、DOI 状态和产物校验值；构建记录还保留 PDF 的 SHA-256。预览时核对封面、前后文、目录、编号、图片、范围外引用和 DOI，确认的是这份构建的实际文件。PDF 的 DOI 来源说明不是实时登记状态，请到对应平台记录核对。清单建立来源绑定，不是原稿签名、数学正确性或 Lean 证明覆盖的认证；学术留档仍使用独立的 `archive` 流程。
 
