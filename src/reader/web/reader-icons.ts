@@ -18,6 +18,7 @@ import {
     FileOutput,
     FileWarning,
     FoldVertical,
+    FoldHorizontal,
     GitCompareArrows,
     History,
     Layers,
@@ -62,6 +63,7 @@ export type ReaderIconName =
     | 'arrow-left'
     | 'locate'
     | 'copy'
+    | 'fit-width'
     | 'chevron-down'
     | 'definition'
     | 'chevron-up'
@@ -140,6 +142,7 @@ const ICONS: Record<ReaderIconName, IconNode> = {
     'chevron-up': ChevronUp,
     locate: LocateFixed,
     copy: Copy,
+    'fit-width': FoldHorizontal,
     definition: BookOpenText,
     'chevron-left': ChevronLeft,
     'chevron-right': ChevronRight,

@@ -20,6 +20,7 @@ import { updateDocumentState, type DocumentLifecycleUpdate } from './document-st
 import { ArchiveReaderApi } from '../archive/reader-api';
 import { PublicationReaderApi, PublicationReaderError } from '../publication/reader-api';
 import { readPublicationPdfRuntime, PublicationPdfRuntimeError } from '../publication/pdf-runtime';
+import { readFormulaRuntime, FormulaRuntimeError } from './formula-runtime';
 import { readLeanBuild } from '../lean/lean-state';
 import { readLeanDependencyArtifact } from '../lean/lean-dependencies';
 import { LeanReviewService } from '../lean/lean-review-service';
@@ -352,6 +353,9 @@ async function sendStaticFile(response: any, staticRoot: string, requestPath: st
     if (/^pdfjs(?:\/|$)/i.test(toPosix(relativePath))) {
         sendText(response, 404, 'PDF preview assets use the authenticated publication route.'); return;
     }
+    if (/^mathjax(?:\/|$)/i.test(toPosix(relativePath))) {
+        sendText(response, 404, 'Formula renderer assets use the authenticated formula route.'); return;
+    }
     const absolutePath = resolveWorkspacePath(staticRoot, relativePath);
     if (!absolutePath || !(await pathExists(absolutePath))) {
         sendText(response, 404, 'Math Workspace asset not found.');
@@ -485,7 +489,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
         try {
             const url = new URL(request.url || '/', 'http://127.0.0.1');
 
-            if (url.pathname.startsWith('/api/lean-') || url.pathname === '/api/publication' || url.pathname.startsWith('/api/publication/')) {
+            if (url.pathname.startsWith('/api/lean-') || url.pathname === '/api/publication' || url.pathname.startsWith('/api/publication/') || url.pathname === '/api/formula-runtime') {
                 if (projectChanging) { sendText(response, 409, 'The Reader is changing its bound project. Retry after it finishes.'); return; }
                 const origin = request.headers?.origin;
                 if (request.headers?.host !== new URL(serverUrl).host || (origin !== undefined && origin !== serverUrl)
@@ -591,6 +595,22 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                 return;
             }
             const snapshot = workspace.current();
+
+            if (url.pathname === '/api/formula-runtime') {
+                if (!requireRequestToken(request, response, requestToken)) return;
+                const boundRoot = rootPath;
+                if (request.headers?.['x-math-workspace-project'] !== createHash('sha256').update(boundRoot).digest('hex')) {
+                    sendText(response, 409, 'The formula project changed. Refresh the Reader before retrying.'); return;
+                }
+                if (request.method !== 'GET') { sendText(response, 405, 'Formula renderer reads use GET.'); return; }
+                const runtime = await readFormulaRuntime(staticRoot, url.searchParams.get('file') || '');
+                if (rootPath !== boundRoot || projectChanging) {
+                    sendText(response, 409, 'The formula project changed. Refresh the Reader before retrying.'); return;
+                }
+                response.writeHead(200, { 'cache-control': API_CACHE_CONTROL, 'content-type': runtime.contentType,
+                    'content-length': runtime.bytes.length, 'x-content-type-options': 'nosniff' });
+                response.end(runtime.bytes); return;
+            }
 
             if (url.pathname === '/api/lean-language/source' || url.pathname === '/api/lean-language/action'
                 || url.pathname === '/api/lean-audit' || url.pathname.startsWith('/api/lean-audit/')
@@ -871,7 +891,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
 
             await sendStaticFile(response, staticRoot, url.pathname);
         } catch (error: any) {
-            sendText(response, error instanceof LeanReviewError || error instanceof PublicationReaderError || error instanceof PublicationPdfRuntimeError ? error.status : 500, error instanceof Error ? error.message : String(error));
+            sendText(response, error instanceof LeanReviewError || error instanceof PublicationReaderError || error instanceof PublicationPdfRuntimeError || error instanceof FormulaRuntimeError ? error.status : 500, error instanceof Error ? error.message : String(error));
         }
     });
 

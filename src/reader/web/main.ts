@@ -6,6 +6,7 @@ import { readerReference } from './reader-references';
 import { mountReaderAssets } from './reader-assets';
 import { mountReaderEmbeddedView, readerViewStateChanged } from './reader-embed';
 import { mountReaderFigures } from './reader-figures';
+import { mountReaderFormulaLayout, type ReaderFormulaLayout } from './reader-formula-layout';
 import { ReaderArchive } from './reader-archive';
 import { ReaderPublication } from './reader-publication';
 import {
@@ -197,6 +198,9 @@ const words = {
         noContents: '当前页面没有标题',
         close: '关闭',
         copyLatex: '复制 LaTeX',
+        adaptFormula: '适应宽度',
+        restoreFormula: '恢复原公式排版',
+        adaptingFormula: '正在调整公式排版…',
         copySelectedMarkdown: '复制选中 Markdown',
         copySourceLines: '复制所在行 Markdown',
         lookupDefinition: '查定义',
@@ -368,6 +372,9 @@ const words = {
         noContents: 'No headings on this page',
         close: 'Close',
         copyLatex: 'Copy LaTeX',
+        adaptFormula: 'Adapt formula',
+        restoreFormula: 'Restore original formula layout',
+        adaptingFormula: 'Adapting formula…',
         copySelectedMarkdown: 'Copy selected Markdown',
         copySourceLines: 'Copy source lines',
         lookupDefinition: 'Find definition',
@@ -646,6 +653,7 @@ function storedExpandedDraftCollections(): Set<string> {
 class ReaderApplication {
     private disposeFigures: () => void = () => {};
     private disposeAssets: () => void = () => {};
+    private formulaLayout: ReaderFormulaLayout | undefined;
     private readonly root = document.getElementById('reader-app') as HTMLElement;
     private readonly markdown = createFormalRenderer();
     private state: ReaderState | undefined;
@@ -703,6 +711,7 @@ class ReaderApplication {
         const initialPath = requested && (!isReaderPageRestored() || requested.documentMode !== 'draft')
             ? requested.filePath : this.defaultPagePath();
         if (!initialPath) {
+            this.formulaLayout?.dispose();
             this.page = undefined;
             this.currentPath = '';
             this.pageTitle.replaceChildren();
@@ -747,6 +756,8 @@ class ReaderApplication {
         this.toolbarMenu = new ReaderToolbarMenu(this.root, () => this.dictionary(), () => this.prepareToolbarView('menu'));
         this.tooltip = new ReaderTooltip();
         this.tooltip.bind(this.root);
+        window.addEventListener('pagehide', () => this.formulaLayout?.dispose());
+        window.addEventListener('pageshow', event => { if (event.persisted && this.page && !this.symbolAuditReportOpen) this.mountArticleFormulaLayout(); });
         this.installToolbarIcons();
         this.root.querySelector('#reader-expand')?.addEventListener('click', expandReader);
         this.updateFontSize(this.fontSize, false);
@@ -761,6 +772,9 @@ class ReaderApplication {
             renderDefinition: definition => this.renderDefinitionContent(definition),
             locateDefinition: definition => this.locateDefinition(definition),
             canReference: canReferenceReaderInConversation,
+            canAdaptFormula: formula => this.formulaLayout?.canAdapt(formula) || false,
+            isFormulaAdapted: formula => this.formulaLayout?.isAdapted(formula) || false,
+            toggleFormulaLayout: formula => this.formulaLayout?.toggle(formula) || Promise.resolve(),
             reference: async (location, markdown) => {
                 try {
                     const page = this.page, projectId = this.state?.projectId;
@@ -779,6 +793,9 @@ class ReaderApplication {
                 const dictionary = this.dictionary();
                 return {
                     copyLatex: dictionary.copyLatex,
+                    adaptFormula: dictionary.adaptFormula,
+                    restoreFormula: dictionary.restoreFormula,
+                    adaptingFormula: dictionary.adaptingFormula,
                     copySelectedMarkdown: dictionary.copySelectedMarkdown,
                     copySourceLines: dictionary.copySourceLines,
                     lookupDefinition: dictionary.lookupDefinition,
@@ -932,8 +949,12 @@ class ReaderApplication {
     }
 
     private applyState(state: ReaderState): void {
-        if (this.state?.projectId !== state.projectId) this.toolbarMenu?.close();
+        const projectChanged = this.state?.projectId !== state.projectId;
+        const formulaContextChanged = projectChanged || this.state?.requestToken !== state.requestToken || this.state?.language !== state.language;
+        if (projectChanged) this.toolbarMenu?.close();
+        if (formulaContextChanged) this.formulaLayout?.dispose();
         this.state = state;
+        if (formulaContextChanged && !projectChanged && this.page && !this.symbolAuditReportOpen) this.mountArticleFormulaLayout();
         this.archive?.contextChanged();
         this.publication?.contextChanged();
         this.leanReview?.contextChanged();
@@ -945,6 +966,7 @@ class ReaderApplication {
     }
 
     private renderProjectLauncher(message = ''): void {
+        this.formulaLayout?.dispose();
         const shell = this.root.querySelector('.reader-shell') as HTMLElement;
         shell.classList.add('is-project-launcher');
         this.article.replaceChildren();
@@ -1458,6 +1480,7 @@ class ReaderApplication {
             ? 'replace'
             : historyMode;
         const requestId = ++this.pageRequestId;
+        this.formulaLayout?.invalidate();
         this.clearSourceLocationHighlight?.();
         this.leanReview.navigationStarted(filePath);
         this.toolbarMenu.close();
@@ -1542,9 +1565,11 @@ class ReaderApplication {
         this.page.formulas = rendered.formulas;
         this.disposeFigures();
         this.disposeAssets();
+        this.formulaLayout?.dispose();
         this.article.innerHTML = rendered.html;
         this.disposeFigures = mountReaderFigures(this.article, this.state.language);
         this.disposeAssets = mountReaderAssets(this.article);
+        this.mountArticleFormulaLayout();
         this.article.querySelectorAll<HTMLElement>('[data-source-start-line]').forEach(element => {
             if (!element.parentElement?.closest('[data-source-start-line]')) element.classList.add('reader-source-line-entry');
         });
@@ -1561,6 +1586,25 @@ class ReaderApplication {
         this.dependencyPopover.bind(this.article);
         this.leanPopover.bind(this.article);
         this.leanReview.contextChanged();
+    }
+
+    private mountArticleFormulaLayout(): void {
+        const page = this.page, state = this.state;
+        if (!page || !state) return;
+        this.formulaLayout?.dispose();
+        const projectId = state.projectId, token = state.requestToken;
+        const current = () => this.page === page && this.state?.projectId === projectId && this.state?.requestToken === token;
+        this.formulaLayout = mountReaderFormulaLayout(this.article, state.language, {
+            formulas: page.formulas || [],
+            request: (route, options) => {
+                if (!current()) return Promise.reject(new Error('The formula page has changed.'));
+                const headers = new Headers(options?.headers);
+                if (token) headers.set('x-math-workspace-token', token);
+                if (projectId) headers.set('x-math-workspace-project', projectId);
+                return readerFetch(route, { ...options, cache: 'no-store', headers });
+            },
+            report: message => { if (current()) this.reportLive(message); }
+        });
     }
 
     private openDependencyTarget(filePath: string, id: string): void {
@@ -2022,10 +2066,15 @@ class ReaderApplication {
     }
 
     private async openSymbolAuditReport(historyMode: 'push' | 'replace' | 'pop' = 'push'): Promise<void> {
+        this.formulaLayout?.invalidate();
         this.leanReview.close(false);
         if (!this.state?.available || !this.currentPath) return;
+        const requestId = ++this.pageRequestId, page = this.page, projectId = this.state.projectId;
+        this.article.classList.remove('is-loading');
         const status = await this.fetchJson<ReaderSymbolAuditStatus>('/api/symbol-audit');
+        if (requestId !== this.pageRequestId || page !== this.page || projectId !== this.state?.projectId) return;
         if (!status.report) return;
+        this.formulaLayout?.dispose();
         this.toolbarPanel.close();
         this.symbolAudit.dispose();
         this.symbolAuditReportOpen = true;

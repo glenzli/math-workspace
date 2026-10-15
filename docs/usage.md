@@ -254,6 +254,10 @@ For multiple passages, select and quote each one into the same conversation inpu
 
 The Reader in an ordinary local browser supports Markdown selection and copying. Conversation references require the Math Workspace plugin panel beside a conversation; the UI explains where to use that feature. Discussion, tool calls, edits, and approvals remain in the native conversation.
 
+On narrow screens, ordinary long formulas wrap at safe relation and operator boundaries while keeping atomic groups, fractions and matrices intact. Expressions that remain too wide scroll within the formula, with their beginning visible and keyboard scrolling available on focus. Multiline derivations use slightly more generous default leading; explicit source spacing and layout commands take precedence.
+
+For complex long display formulas, click the formula and use the Adapt formula icon in its popup to reflow it to the available width, or restore its original layout. Only this action loads the locally bundled MathJax renderer; formulas are not sent to an external service. Unsupported or failed adaptations retain the original formula. Display adjustments preserve the original LaTeX, formula numbering, source locations, copied text and conversation references. PDF output continues to use its paper layout.
+
 The project needs `.math-workspace/config.json`; run `prepare` once to create it. The Math Workspace does not require `workspace-index.json`.
 
 The former VS Code preview is archived and unsupported. Project reading and interaction now use the local Math Workspace Reader.
@@ -1130,6 +1134,10 @@ npm run workspace -- serve
 多段内容可分次选取、分次加入同一会话输入框，最后统一补充问题并发送。引用按钮与复制按钮使用相同的紧凑尺寸；失败时保留弹窗供重试。打开页面和翻页仅保存阅读位置，不自动向会话添加引用。
 
 普通本地浏览器中的 Reader 可以选取和复制 Markdown；会话引用需要从会话内的 Math Workspace 插件面板使用。插件会明确提示入口位置。后续讨论、工具调用、修改与审批留在原生会话中。
+
+窄界面中的普通长公式会在关系符、运算符等安全断点换行，保留括号、分式和矩阵等不可拆结构。仍然超宽时，只在公式内部横向滚动，起始部分保持可见；键盘聚焦后也可滚动。多行推导使用温和的默认行距，源码明确指定的行距和排版命令优先。
+
+复杂长公式可以点击公式，再用弹窗中的“适应宽度”图标按当前可用宽度重新排版，或恢复原排版。这个动作才加载随本地插件提供的 MathJax 渲染器，不把公式发往外部服务；不适用或重排失败时保留原公式。显示调整不改原始 LaTeX、公式编号、源码定位、复制或会话引用内容；PDF 仍按纸张宽度排版。
 
 项目需要先有 `.math-workspace/config.json`；首次使用可运行 `prepare`。Math Workspace 不要求预先生成 `workspace-index.json`。
 

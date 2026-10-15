@@ -79,6 +79,8 @@ export async function testReaderApps() {
         assert.match(resource.text, /data:font\/woff2;base64,/);
         assert.doesNotMatch(resource.text, /<(?:script|link)[^>]+(?:src|href)="[^"]+\.(?:js|css)"/);
         assert.doesNotMatch(resource.text, /<iframe[^>]+src="http:/);
+        assert.ok(Buffer.byteLength(resource.text) < 1_900_000, 'The optional formula engine must stay outside the initial Reader resource.');
+        assert.equal(resource.text.includes('Additional formula resources are unavailable.'), false, 'MathJax is fetched only by an explicit formula action.');
         const sidebarSeed = await client.callTool({ name: 'open_workspace', arguments: {} });
         assert.deepEqual(sidebarSeed._meta.reader, { launcher: false, projectRoot: await fs.realpath(roots[0]) });
         const threadSeed = await client.callTool({ name: 'open_reader', arguments: {} });

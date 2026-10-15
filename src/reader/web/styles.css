@@ -537,13 +537,60 @@ button { cursor: pointer; }
     border-radius: 3px;
     cursor: text;
     overflow-wrap: normal;
-    white-space: nowrap;
+    white-space: normal;
     word-break: normal;
     transition: box-shadow 140ms ease, background-color 140ms ease;
 }
-.reader-formula.is-display { display: block; overflow-x: auto; }
+.reader-formula.is-display { display: block; min-width: 0; max-width: 100%; overflow-x: auto; }
+/* KaTeX's .base spans are its safe break chunks; nested groups keep their own nowrap. */
+.reader-formula > .katex,
+.reader-formula > .katex-display > .katex { white-space: normal; }
+.reader-formula > .katex-display > .katex > .katex-html:has(> .tag) { white-space: nowrap; }
+.reader-formula.is-overflowing {
+    display: inline-block;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-block: .2em;
+    vertical-align: middle;
+    text-align: left;
+    overscroll-behavior-x: contain;
+}
+.reader-formula.is-display.is-overflowing { display: block; }
+.reader-formula.is-overflowing > .katex-display > .katex { text-align: left; }
+.reader-formula.is-overflowing > .katex-display > .katex > .katex-html:has(> .tag) {
+    width: max-content;
+    min-width: calc(100% - var(--reader-formula-tag-space));
+    padding-inline-end: var(--reader-formula-tag-space);
+}
+.reader-formula.is-overflowing > .katex-display.leqno > .katex > .katex-html:has(> .tag) {
+    padding-inline-start: var(--reader-formula-tag-space);
+    padding-inline-end: 0;
+}
+.reader-formula.is-overflowing:focus-visible { outline: 2px solid #6478b7; outline-offset: 2px; }
+.reader-formula.is-adapted { position: relative; display: block; max-width: 100%; }
+/* Keep the original KaTeX MathML and DOM available for accessibility and restoration. */
+.reader-formula.is-adapted > .katex-display,
+.reader-formula.is-adapted > .katex {
+    position: absolute;
+    clip-path: inset(50%);
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    overflow: hidden;
+    pointer-events: none;
+    user-select: none;
+}
+.reader-formula-reflow { margin: 1em 0; vertical-align: middle; }
 .reader-formula:hover { background: rgba(54, 101, 145, .045); }
 .reader-formula.is-highlighted { background: rgba(57, 129, 191, .14); box-shadow: 0 0 0 4px rgba(57, 129, 191, .12); }
+@media print {
+    .reader-formula.is-display, .reader-formula.is-overflowing { overflow: visible; max-width: none; padding-block: 0; }
+    .reader-formula.is-adapted > .reader-formula-reflow { display: none !important; }
+    .reader-formula.is-adapted > .katex-display,
+    .reader-formula.is-adapted > .katex { position: static; clip-path: none; width: auto; height: auto; overflow: visible; pointer-events: auto; user-select: auto; }
+    .reader-formula.is-adapted > .katex-display { margin: 1em 0; }
+}
 
 .reader-toolbar-panel {
     position: fixed;

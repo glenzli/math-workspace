@@ -39,6 +39,7 @@ class Element {
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
     closest(selector) { for (let element = this; element; element = element.parent) if (element.matches(selector)) return element; return null; }
     getBoundingClientRect() { return { x: 12, y: 12, left: 12, top: 12, right: 132, bottom: 44, width: 120, height: 32 }; }
+    focus() { this.focused = true; }
 }
 
 async function harness() {
@@ -198,6 +199,30 @@ async function sourceAndArchiveActions(h) {
         actions.host.canReference = () => false; actions.showFormulaActions({ id: 'formula', latex: 'x', source: '$x$', sourceStartLine: 8, sourceEndLine: 8 }, new Element('span').getBoundingClientRect());
         const disabled = h.document.body.querySelector('.reader-source-reference'); assert.equal(disabled.disabled, true); assertIconOnly(disabled, words.referenceUnavailable);
         const before = quoted.length; await disabled.emit('click'); assert.equal(quoted.length, before, 'Unavailable Codex actions never send a reference.');
+        let adapted = false, adaptationCalls = 0;
+        const adaptiveFormula = { id: 'adaptive', latex: '\\begin{aligned}a&=b\\\\&=c\\end{aligned}', source: '$$original formula$$', display: true, sourceStartLine: 8, sourceEndLine: 10 };
+        actions.host.canReference = () => true;
+        actions.host.canAdaptFormula = formula => formula === adaptiveFormula && !adapted;
+        actions.host.isFormulaAdapted = formula => formula === adaptiveFormula && adapted;
+        actions.host.toggleFormulaLayout = async formula => { assert.equal(formula, adaptiveFormula); adaptationCalls++; adapted = !adapted; };
+        actions.showFormulaActions(adaptiveFormula, new Element('span').getBoundingClientRect());
+        const adaptiveButtons = h.document.body.querySelector('.reader-source-popover').querySelectorAll('button');
+        assert.equal(adaptiveButtons.length, 3); assertIconOnly(adaptiveButtons[1], words.adaptFormula); assert.equal(adaptiveButtons[1].getAttribute('aria-pressed'), 'false');
+        await adaptiveButtons[1].emit('click'); assert.equal(adaptationCalls, 1); assertIconOnly(adaptiveButtons[1], words.restoreFormula); assert.equal(adaptiveButtons[1].getAttribute('aria-pressed'), 'true');
+        await adaptiveButtons[0].emit('click'); assert.equal(h.copied.at(-1), adaptiveFormula.latex, 'Adapted formula copy continues to use untouched source TeX.');
+        await adaptiveButtons[2].emit('click'); assert.equal(quoted.at(-1)[0].formulaId, adaptiveFormula.id); assert.equal(quoted.at(-1)[1], adaptiveFormula.source);
+        actions.showFormulaActions(adaptiveFormula, new Element('span').getBoundingClientRect());
+        const restore = h.document.body.querySelector('.reader-source-popover').querySelectorAll('button')[1]; assertIconOnly(restore, words.restoreFormula);
+        await restore.emit('click'); assert.equal(adapted, false); assertIconOnly(restore, words.adaptFormula);
+        actions.host.toggleFormulaLayout = async () => {}; await restore.emit('click'); assert.equal(restore.getAttribute('aria-pressed'), 'false', 'A rejected-fit fallback cannot claim successful adaptation.');
+        assertIconOnly(restore, words.adaptFormula);
+        actions.host.canAdaptFormula = () => false; actions.showFormulaActions(adaptiveFormula, new Element('span').getBoundingClientRect());
+        assert.equal(h.document.body.querySelector('.reader-source-popover').querySelectorAll('button').length, 2, 'No adaptation action is added to fitting or ineligible formulas.');
+        const article = new Element('article'), formulaElement = new Element('span'); formulaElement.nodeType = 1; formulaElement.dataset.readerFormula = adaptiveFormula.id; article.append(formulaElement); h.document.body.append(article);
+        actions.bind(article, { filePath: 'book/01.md', source: adaptiveFormula.source, formulas: [adaptiveFormula] });
+        await article.emit('keyup', { key: 'Enter', target: formulaElement });
+        assert.equal(h.document.body.querySelector('.reader-source-popover').querySelector('button').focused, true, 'Enter makes formula actions reachable from the focused scroll region.');
+        actions.onKeyDown({ key: 'Escape' }); assert.equal(formulaElement.focused, true, 'Escape returns focus to the formula scroll region.');
         actions.dispose();
     }
     let invoked = 0;

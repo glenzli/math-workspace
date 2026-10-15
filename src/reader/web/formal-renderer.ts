@@ -84,11 +84,20 @@ interface MathTokenMeta {
 }
 
 export function renderReaderFormula(formula: Pick<ReaderFormula, 'latex' | 'display'>): string {
+    const alignment = formula.latex.trim().match(/^\\begin\{(aligned|alignedat|gathered|align\*?|alignat\*?|gather\*?|split)\}/)?.[1];
+    const minimumLeading = formula.display && alignment
+        && formula.latex.trim().endsWith('\\end{' + alignment + '}')
+        && (formula.latex.match(/\\begin\s*\{/g) || []).length === 1
+        && /\\\\/.test(formula.latex)
+        && !/\\arraystretch\b|\\\\\*?\s*\[|\\(?:def|gdef|edef|xdef|let|newcommand|renewcommand)\b/.test(formula.latex);
     return katex.renderToString(formula.latex, {
         displayMode: formula.display,
         throwOnError: false,
         strict: 'ignore',
-        trust: false
+        trust: false,
+        // Preview-only row minima: KaTeX still takes max(strut, actual cell extent).
+        // Author spacing and nested arrays/matrices keep their original defaults.
+        ...(minimumLeading ? { macros: { '\\arraystretch': '1.12' } } : {})
     });
 }
 

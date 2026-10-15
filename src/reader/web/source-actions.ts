@@ -25,6 +25,9 @@ export interface ReaderSourceActionLabels {
     reference: string;
     failed: string;
     referenceUnavailable: string;
+    adaptFormula?: string;
+    restoreFormula?: string;
+    adaptingFormula?: string;
 }
 
 export interface ReaderSourceActionsHost {
@@ -34,6 +37,9 @@ export interface ReaderSourceActionsHost {
     locateDefinition(definition: ReaderDefinitionMatch): void;
     canReference(): boolean;
     reference(location: ReaderReferenceLocation, markdown?: string): Promise<void>;
+    canAdaptFormula?(formula: ReaderFormula): boolean;
+    isFormulaAdapted?(formula: ReaderFormula): boolean;
+    toggleFormulaLayout?(formula: ReaderFormula): Promise<void>;
     labels(): ReaderSourceActionLabels;
 }
 
@@ -62,13 +68,18 @@ export class ReaderSourceActions {
     private popover: HTMLElement | undefined;
     private selectionTimer: number | undefined;
     private definitionRequestId = 0;
+    private formulaReturnFocus: HTMLElement | undefined;
     private readonly onPointerDown = (event: PointerEvent) => {
         const target = event.target as Node | null;
         if (this.article?.contains(target) || this.popover?.contains(target)) return;
         this.dismiss();
     };
     private readonly onKeyDown = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') this.dismiss();
+        if (event.key === 'Escape') {
+            const returnFocus = this.formulaReturnFocus;
+            this.dismiss();
+            if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+        }
     };
     private readonly onResize = () => this.dismiss();
     private readonly onScroll = (event: Event) => {
@@ -94,6 +105,13 @@ export class ReaderSourceActions {
         this.selectionTimer = window.setTimeout(() => this.showSelectionActions(), 100);
     };
     private readonly onKeyUp = (event: KeyboardEvent) => {
+        const formula = closestReaderElement(event.target as Node, '[data-reader-formula]');
+        if (event.key === 'Enter' && formula) {
+            this.onArticleClick(event as unknown as MouseEvent);
+            if (this.popover) this.formulaReturnFocus = formula;
+            this.popover?.querySelector<HTMLButtonElement>('button')?.focus();
+            return;
+        }
         if (event.shiftKey || event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown') {
             this.showSelectionActions();
         }
@@ -145,6 +163,7 @@ export class ReaderSourceActions {
 
     private dismiss(): void {
         this.definitionRequestId++;
+        this.formulaReturnFocus = undefined;
         this.popover?.remove();
         this.popover = undefined;
     }
@@ -246,6 +265,28 @@ export class ReaderSourceActions {
                     await this.copyAndMark(button, formula.latex);
                 })
             );
+            if (this.host.toggleFormulaLayout && (this.host.canAdaptFormula?.(formula) || this.host.isFormulaAdapted?.(formula))) {
+                const sourceDocument = this.sourceDocument;
+                const adapted = this.host.isFormulaAdapted?.(formula) || false;
+                const label = () => this.host.isFormulaAdapted?.(formula) ? this.host.labels().restoreFormula! : this.host.labels().adaptFormula!;
+                const button = this.iconButton(adapted ? 'reset' : 'fit-width', label(), async button => {
+                    button.setAttribute('aria-busy', 'true');
+                    button.dataset.tooltip = this.host.labels().adaptingFormula || label();
+                    button.setAttribute('aria-label', button.dataset.tooltip);
+                    try { await this.host.toggleFormulaLayout!(formula); }
+                    finally {
+                        if (this.sourceDocument === sourceDocument && this.popover?.contains(button)) {
+                            const active = this.host.isFormulaAdapted?.(formula) || false;
+                            button.replaceChildren(readerIcon(active ? 'reset' : 'fit-width'));
+                            button.dataset.tooltip = label(); button.setAttribute('aria-label', label());
+                            button.setAttribute('aria-pressed', String(active));
+                            button.removeAttribute('aria-busy');
+                        }
+                    }
+                });
+                button.setAttribute('aria-pressed', String(adapted));
+                actions.append(button);
+            }
             const range = sourceRange || (formula.sourceStartLine && formula.sourceEndLine
                 ? { startLine: formula.sourceStartLine, endLine: formula.sourceEndLine, sourceLines: formula.source }
                 : undefined);

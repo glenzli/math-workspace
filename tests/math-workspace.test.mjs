@@ -2,6 +2,9 @@ import { testReaderApps } from './reader-app.test.mjs';
 import { testReaderDefinitions } from './reader-definitions.test.mjs';
 import { testReaderIconClarity } from './reader-icon-clarity.test.mjs';
 import { testReaderToolbarMenu } from './reader-toolbar-menu.test.mjs';
+import { testFormulaRuntime } from './formula-runtime.test.mjs';
+import { testReaderFormulaReflow } from './reader-formula-reflow.test.mjs';
+import { testReaderFormulaLayout } from './reader-formula-layout.test.mjs';
 import { testLeanReviewBackend } from './lean-review.test.mjs';
 import { testReaderLeanReview } from './reader-lean-review.test.mjs';
 import { testLeanLanguageBackend } from './lean-language.test.mjs';
@@ -2848,6 +2851,9 @@ const tests = [
     ['Reader definition titles and navigation targets', testReaderDefinitions],
     ['Reader icon clarity and action tooltips', testReaderIconClarity],
     ['Reader category menus and keyboard navigation', testReaderToolbarMenu],
+    ['formula runtime packaging and bound transport', testFormulaRuntime],
+    ['optional formula reflow and retained source', testReaderFormulaReflow],
+    ['responsive formula layout and source actions', testReaderFormulaLayout],
     ['interactive figures, isolation and static export', () => testInteractiveFigures({ makeWorkspace, runCli, startReader, stopReader })],
     ['academic archive evidence and compatibility', testArchives],
     ['volume signatures, total binding and recoverable history', testArchiveVolumes],

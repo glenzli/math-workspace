@@ -139,6 +139,7 @@ async function harness() {
         './reader-host': { expandReader() { primaryActions.push('expand'); } },
         './reader-embed': { readerViewStateChanged() {} },
         './reader-figures': { mountReaderFigures: () => () => {} },
+        './reader-formula-layout': { mountReaderFormulaLayout: () => ({ dispose() {}, invalidate() {}, canAdapt: () => false, isAdapted: () => false, toggle: async () => {} }) },
         './reader-assets': { mountReaderAssets: () => () => {} },
         './formal-renderer': { renderFormalInline: (_renderer, source) => source, renderFormalDocument: () => ({ html: '', formulas: [] }) },
         './reader-tooltip': { ReaderTooltip: Owner },
