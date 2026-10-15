@@ -6,6 +6,7 @@
 .reader-lean-assistance-actions button:not(.reader-icon-action) { padding: 6px 10px; }
 .reader-lean-assistance-actions button:disabled { cursor: default; opacity: .55; }
 .reader-lean-assistance-hint { color: var(--reader-muted, #626262); font-size: .9em; overflow-wrap: anywhere; }
-.reader-lean-assistance-warning { color: var(--reader-ink-strong, #161616); overflow-wrap: anywhere; }
+.reader-lean-assistance-warning { color: var(--reader-warning, #855b18); overflow-wrap: anywhere; }
+.reader-lean-assistance-warning[role="alert"] { color: var(--reader-error, #a33a32); }
 .reader-lean-assistance-candidate { border-top: 1px solid var(--reader-border, #d8d8d8); padding: 12px 0; margin-top: 12px; overflow-wrap: anywhere; }
 .reader-lean-assistance-candidate p { white-space: pre-wrap; }

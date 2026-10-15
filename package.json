@@ -1,7 +1,7 @@
 {
   "name": "math-workspace",
   "description": "Local workspace for mathematical writing, formal review, and project navigation",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "publisher": "glenzli",
   "license": "MIT",
   "repository": {

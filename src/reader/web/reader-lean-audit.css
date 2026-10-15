@@ -8,7 +8,8 @@
 .reader-lean-audit button:hover:not(:disabled) { border-color: var(--reader-border-strong, #858585); background: var(--reader-hover, #eaeaea); }
 .reader-lean-audit button:disabled { cursor: default; opacity: .48; }
 .reader-lean-audit-hint { font-size: .9em; opacity: .78; }
-.reader-lean-audit-warning { padding: 8px 10px; border-left: 3px solid var(--reader-border-strong, #858585); background: var(--reader-highlight, rgb(0 0 0 / .08)); overflow-wrap: anywhere; }
+.reader-lean-audit-warning { padding: 8px 10px; border-left: 3px solid var(--reader-warning, #855b18); background: var(--reader-warning-surface, #fff6e6); color: var(--reader-warning, #855b18); overflow-wrap: anywhere; }
+.reader-lean-audit-warning[role="alert"] { border-left-color: var(--reader-error, #a33a32); background: var(--reader-error-surface, #fff1ee); color: var(--reader-error, #a33a32); }
 .reader-lean-audit-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
 .reader-lean-audit-field { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; }
 .reader-lean-audit input, .reader-lean-audit textarea, .reader-lean-audit select { box-sizing: border-box; width: 100%; border: 1px solid var(--lean-border, #d8d8d8); border-radius: 5px; padding: 7px 9px; color: inherit; background: var(--lean-surface, #fff); font: inherit; }
