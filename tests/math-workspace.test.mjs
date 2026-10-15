@@ -18,6 +18,9 @@ import { testInteractiveFigures } from './interactive-figures.test.mjs';
 import assert from 'node:assert/strict';
 import { testExercises } from './exercises.test.mjs';
 import { testMatterPages } from './matter-pages.test.mjs';
+import { testManuscriptCreation } from './manuscript-create.test.mjs';
+import { testManuscriptCreationRules } from './manuscript-create-rules.test.mjs';
+import { testReaderCreatePage } from './reader-create-page.test.mjs';
 import { testArchives, testArchiveReaderApi } from './archives.test.mjs';
 import { testReaderArchiveVolumes } from './reader-archive-volume.test.mjs';
 import { testArchiveVolumes } from './archive-volumes.test.mjs';
@@ -2891,6 +2894,9 @@ const tests = [
     ['verify rejects missing definition content', testVerifyRejectsMissingDefinitionContent],
     ['scan exclude and zero introduction pages', testScanExcludeAndZeroIntroductionPages],
     ['unnumbered manuscript matter pages', () => testMatterPages({ core: formalCore(), cliPath })],
+    ['manuscript page planning and atomic creation', () => testManuscriptCreation({ cliPath })],
+    ['manuscript creation guide and usage contracts', () => testManuscriptCreationRules({ core: formalCore(), cliPath })],
+    ['Reader read-only manuscript creation handoff', testReaderCreatePage],
     ['page title uses unique highest heading', testPageTitleUsesUniqueHighestHeading],
     ['page integration status', testPageIntegrationStatus],
     ['perf-dummy thresholds', testPerfDummyThresholds],

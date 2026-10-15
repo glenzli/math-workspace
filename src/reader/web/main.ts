@@ -9,6 +9,7 @@ import { mountReaderFigures } from './reader-figures';
 import { mountReaderFormulaLayout, type ReaderFormulaLayout } from './reader-formula-layout';
 import { ReaderArchive } from './reader-archive';
 import { ReaderPublication } from './reader-publication';
+import { ReaderCreatePage } from './reader-create-page';
 import {
     createFormalRenderer,
     renderFormalDocument,
@@ -692,6 +693,7 @@ class ReaderApplication {
     private propositionReview!: ReaderPropositionReview;
     private archive!: ReaderArchive;
     private publication!: ReaderPublication;
+    private createPage!: ReaderCreatePage;
     private symbolAudit!: ReaderSymbolAudit;
     private symbolAuditReport!: ReaderSymbolAuditReportView;
     private symbolAuditReportOpen = false;
@@ -734,7 +736,10 @@ class ReaderApplication {
         this.root.innerHTML = [
             '<div class="reader-shell' + (this.navigationCollapsed ? ' is-navigation-collapsed' : '') + '">',
             '<aside id="reader-sidebar" class="reader-sidebar" aria-label="Project navigation">',
+            '<div class="reader-navigation-actions">',
             '<label class="reader-filter"><span class="sr-only">Filter pages</span><input id="reader-page-filter" type="search" autocomplete="off" /></label>',
+            '<button id="reader-create-page" class="icon-button" type="button"></button>',
+            '</div>',
             '<nav id="reader-page-nav" class="reader-page-nav"></nav>',
             '</aside>',
             '<main id="reader-main" class="reader-main">',
@@ -762,7 +767,7 @@ class ReaderApplication {
         this.toolbarMenu = new ReaderToolbarMenu(this.root, () => this.dictionary(), () => this.prepareToolbarView('menu'));
         this.tooltip = new ReaderTooltip();
         this.tooltip.bind(this.root);
-        window.addEventListener('pagehide', () => this.formulaLayout?.dispose());
+        window.addEventListener('pagehide', () => { this.formulaLayout?.dispose(); this.createPage?.close(false); });
         window.addEventListener('pageshow', event => { if (event.persisted && this.page && !this.symbolAuditReportOpen) this.mountArticleFormulaLayout(); });
         this.installToolbarIcons();
         this.root.querySelector('#reader-expand')?.addEventListener('click', expandReader);
@@ -882,6 +887,24 @@ class ReaderApplication {
         this.root.querySelector('#reader-archive')?.addEventListener('click', () => { this.prepareToolbarView('archive'); void this.archive.open(); });
         this.publication = new ReaderPublication(() => ({ language: this.state?.language || 'zh', token: this.state?.requestToken || '', project: this.state?.projectId || '' }));
         this.root.querySelector('#reader-publication')?.addEventListener('click', () => { this.prepareToolbarView('publication'); void this.publication.open(); });
+        this.createPage = new ReaderCreatePage(this.root.querySelector<HTMLButtonElement>('#reader-create-page')!, {
+            context: () => ({ projectId: this.state?.projectId || null, requestToken: this.state?.requestToken,
+                language: this.state?.language || 'zh', currentPath: this.currentPath, revision: this.state?.revision }),
+            request: readerFetch,
+            beforeOpen: () => this.prepareToolbarView('create-page'),
+            canAssist: canReferenceReaderInConversation,
+            assist: referenceReaderInConversation,
+            openPage: async (filePath, isCurrent) => {
+                const projectId = this.state?.projectId, token = this.state?.requestToken;
+                const state = await this.fetchJson<ReaderState>('/api/state');
+                if (!isCurrent() || projectId !== this.state?.projectId || token !== this.state?.requestToken
+                    || state.projectId !== projectId || state.requestToken !== token
+                    || !state.pages.some(page => page.filePath === filePath)) return false;
+                this.applyState(state);
+                await this.openPage(filePath, 'push'); return true;
+            },
+            report: message => this.reportLive(message)
+        });
         this.toolbarPanel = new ReaderToolbarPanel(() => ({ close: this.dictionary().close }));
         this.propositionReview = new ReaderPropositionReview({
             labels: () => {
@@ -965,6 +988,7 @@ class ReaderApplication {
         this.archive?.contextChanged();
         this.publication?.contextChanged();
         this.leanReview?.contextChanged();
+        this.createPage?.contextChanged();
         const dictionary = this.dictionary();
         (this.root.querySelector('#reader-page-filter') as HTMLInputElement).placeholder = dictionary.search;
         this.renderNavigation((this.root.querySelector('#reader-page-filter') as HTMLInputElement).value);
@@ -1042,6 +1066,7 @@ class ReaderApplication {
     private updateToolbarLabels(): void {
         const dictionary = this.dictionary();
         this.toolbarMenu?.updateLabels();
+        this.createPage?.contextChanged();
         this.root.querySelector('.reader-tools')?.setAttribute('aria-label', dictionary.readerTools);
         const expand = this.root.querySelector<HTMLElement>('#reader-expand');
         if (expand) { const label = this.state?.language === 'en' ? 'Full screen' : '全屏阅读'; replaceReaderButtonIcon(expand, 'expand'); expand.dataset.readerTooltip = label; expand.setAttribute('aria-label', label); }
@@ -1373,6 +1398,7 @@ class ReaderApplication {
 
     private installToolbarIcons(): void {
         const icons: Array<[string, ReaderIconName]> = [
+            ['#reader-create-page', 'plus'],
             ['#reader-back', 'chevron-left'],
             ['#reader-forward', 'chevron-right'],
             ['[data-panel="contents"]', 'contents']
@@ -1496,6 +1522,7 @@ class ReaderApplication {
         this.formulaLayout?.invalidate();
         this.clearSourceLocationHighlight?.();
         this.leanReview.navigationStarted(filePath);
+        this.createPage?.navigationStarted();
         this.toolbarMenu.close();
         this.toolbarPanel.close();
         this.symbolAuditReportOpen = false;
@@ -1804,12 +1831,13 @@ class ReaderApplication {
         }
     }
 
-    private prepareToolbarView(view: 'menu' | 'panel' | 'lean' | 'archive' | 'publication'): void {
+    private prepareToolbarView(view: 'menu' | 'panel' | 'lean' | 'archive' | 'publication' | 'create-page'): void {
         if (view !== 'menu') this.toolbarMenu?.close();
         if (view !== 'panel') this.toolbarPanel?.close();
         if (view !== 'lean') this.leanReview?.close(false);
         if (view !== 'archive') this.archive?.close();
         if (view !== 'publication') this.publication?.close();
+        if (view !== 'create-page') this.createPage?.close(false);
     }
 
     private openDocumentStage(trigger: HTMLElement): void {

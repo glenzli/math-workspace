@@ -43,7 +43,7 @@ class Element extends EventTarget {
     constructor(tag, document) {
         super(); this.tagName = tag.toLowerCase(); this.document = document; this.nodeType = 1;
         this.children = []; this.dataset = {}; this.attributes = {}; this.className = ''; this._text = '';
-        this.style = { setProperty(name, value) { this[name] = value; } }; this.disabled = false; this.tabIndex = 0;
+        this.style = { setProperty(name, value) { this[name] = value; } }; this.disabled = false; this.tabIndex = 0; this.value = '';
     }
     get classList() { return { contains: name => this.className.split(' ').includes(name),
         add: (...names) => { this.className = [...new Set([...this.className.split(' '), ...names])].filter(Boolean).join(' '); },
@@ -51,6 +51,7 @@ class Element extends EventTarget {
         toggle: (name, force) => force ?? !this.classList.contains(name) ? this.classList.add(name) : this.classList.remove(name) }; }
     append(...children) { for (const child of children) { child.remove(); child.parent = this; this.children.push(child); } }
     appendChild(child) { this.append(child); return child; }
+    prepend(...children) { const existing = [...this.children]; this.replaceChildren(...children, ...existing); }
     replaceChildren(...children) { for (const child of this.children) child.parent = undefined; this.children = []; this._text = ''; this.append(...children); }
     remove() { if (this.parent?.children) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = undefined; }
     replaceWith(...nodes) {
@@ -112,6 +113,8 @@ class Element extends EventTarget {
         previous?.emit('focusout', { relatedTarget: this }); this.emit('focusin', { relatedTarget: previous });
     }
     scrollIntoView() { this.scrolledIntoView = true; }
+    showModal() { this.open = true; }
+    close() { this.open = false; }
     getBoundingClientRect() {
         for (let element = this; element instanceof Element; element = element.parent) {
             if (element.hidden) return { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
@@ -122,7 +125,7 @@ class Element extends EventTarget {
     }
 }
 
-async function harness() {
+export async function readerToolbarHarness() {
     const document = new EventTarget();
     document.createElement = tag => new Element(tag, document);
     document.documentElement = document.createElement('html');
@@ -132,7 +135,9 @@ async function harness() {
     document.body = document.createElement('body'); document.body.parent = document; document.activeElement = document.body;
     const previousDocument = globalThis.document; globalThis.document = document;
     const window = new EventTarget(); window.innerWidth = 320; window.innerHeight = 700;
-    window.setTimeout = () => 1; window.clearTimeout = () => {};
+    const timers = new Map(); let timerSequence = 0;
+    window.setTimeout = (run, delay) => { const id = ++timerSequence; timers.set(id, { run, delay }); return id; };
+    window.clearTimeout = id => timers.delete(id);
     window.requestAnimationFrame = () => 1;
     class Owner {
         opened = false; openCount = 0;
@@ -143,12 +148,15 @@ async function harness() {
         openPageQueue() { this.open(); }
         render(parent) { parent.append(document.createElement('button')); }
     }
-    const primaryActions = [], historyEvents = [], inlineCalls = [];
+    const primaryActions = [], historyEvents = [], inlineCalls = [], handoffs = [], copies = [], createRequests = [];
+    let canAssist = true, copyResult = true, requestHandler = async route => { throw new Error('Unexpected fixture route ' + route); };
     let inlineRenderer = source => source;
     const modules = {
         lucide: require('lucide'),
-        './reader-route': { isReaderEmbedded: () => true },
-        './reader-host': { expandReader() { primaryActions.push('expand'); }, readerHistory(mode, state, url) { historyEvents.push({ mode, state, url }); } },
+        './reader-route': { isReaderEmbedded: () => true, readerFetch: (route, options) => { createRequests.push({ route, options }); return requestHandler(route, options); } },
+        './reader-host': { expandReader() { primaryActions.push('expand'); }, readerHistory(mode, state, url) { historyEvents.push({ mode, state, url }); },
+            canReferenceReaderInConversation: () => canAssist, referenceReaderInConversation: async content => { handoffs.push(content); } },
+        './reader-clipboard': { copyReaderText: async text => { copies.push(text); return copyResult; } },
         './reader-embed': { readerViewStateChanged() {} },
         './reader-figures': { mountReaderFigures: () => () => {} },
         './reader-formula-layout': { mountReaderFormulaLayout: () => ({ dispose() {}, invalidate() {}, canAdapt: () => false, isAdapted: () => false, toggle: async () => {} }) },
@@ -179,6 +187,7 @@ async function harness() {
     await load('reader-popover.ts', './reader-popover');
     await load('reader-toolbar-menu.ts', './reader-toolbar-menu');
     await load('reader-toolbar-panel.ts', './reader-toolbar-panel');
+    await load('reader-create-page.ts', './reader-create-page');
     const { ReaderApplication, words } = await load('main.ts', './main', '\nexports.ReaderApplication = ReaderApplication; exports.words = words;');
     const app = Object.create(ReaderApplication.prototype); app.root = document.createElement('main'); document.body.append(app.root);
     app.state = { language: 'zh', projectId: 'project-a', revision: 1, pages: [], definitions: [] };
@@ -195,8 +204,13 @@ async function harness() {
     const key = (key, options = {}) => { const event = document.activeElement.emit('keydown', { key, ...options });
         if (!event.defaultPrevented && ['Enter', ' '].includes(key) && document.activeElement.tagName === 'button' && !document.activeElement.disabled) document.activeElement.emit('click'); return event; };
     return { app, document, window, words, icons, populated, primaryActions, historyEvents, inlineCalls, find, click, key,
+        handoffs, copies, createRequests, setCanAssist: value => { canAssist = value; }, setCopyResult: value => { copyResult = value; },
+        setRequestHandler: handler => { requestHandler = handler; },
+        timers, flushTimers: () => { const queued = [...timers.values()]; timers.clear(); queued.forEach(timer => timer.run()); },
         setInlineRenderer: renderer => { inlineRenderer = renderer; }, restore: () => { globalThis.document = previousDocument; } };
 }
+
+const harness = readerToolbarHarness;
 
 async function documentStageUiContract() {
     const h = await harness(), { app, document, find, click, key } = h;

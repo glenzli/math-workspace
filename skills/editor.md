@@ -20,6 +20,8 @@
 
 ## 日常闭环
 
+下列命令以项目已有的 `workspace` script 为例。Reader 交接提供确切的 Node、CLI 路径与工作目录时，复用该入口；否则使用项目已验证的 CLI，必要时以 `paths` / `help-ai` 定位随包规则。不要为套用示例静默修改项目脚本、替换原生 AI 规则或安装全局命令。
+
 首次进入任务或索引可能过期时：
 
 ```bash
@@ -35,6 +37,13 @@ npm run workspace -- finish path/to/chapter-or-dir
 ```
 
 `finish` 固化目标范围内的 `tmp-*`，并已执行校验。只有本次确实新增跨文件 `@tmp-*` 引用时才加 `--all`。仅在直接运行 `finalize`、执行迁移，或作为独立 release 门禁时，再单独运行 `verify`。
+
+## 新增稿件
+
+- 先读取项目原生写作规则并检查已有稿件，确认类型与所属容器。`chapter` 是正文章节；`front-matter`、`back-matter` 是书或卷两端的独立 Markdown，允许多篇任意标题；`continued` 是独立的未完待续页。角色由位置决定，不限定文体；“AI 退休寄语”通常放后文，无需改名为“结语”。旧 `intro.md`、`introduction.md` 与 `summary.md` 继续兼容，不为采用新格式搬动旧稿。
+- 使用同一 CLI 的 `create-page --kind chapter|front-matter|back-matter|continued --container <项目相对书或卷目录，根为 .> --title <标题>`；先加 `--dry-run --json` 检查计划，再按计划创建。除固定文件名的 `continued` 外，可加 `--slug` 指定文件名词干。容器用真实路径，不从书名猜测。Reader 的“＋”也使用这个 helper，只把创建请求加入会话输入框；仍需用户发送。
+- helper 分配路径、顺序和稳定页 ID，并拒绝覆盖已有稿件。复用计划的 `stateToken` 作为 `--expect-state`；过期就重新只读规划，项目、类型、标题、容器和目标路径均未变时用新 token 继续，目标变化或已存在时先核对差异或复用原稿。不要手写章号或 hash，不要绕过已有文件另造副本。沿返回的 `filePath` 写正文，保留已创建的页 ID，然后对该文件运行 `finish`。
+- 日常阅读与出版只维护这一份 Markdown。创建不会自动将稿件加入出版方案；需要出版时显式用 `frontMatter[].file`、`backMatter[].file` 或 `continued.file` 引用同一原稿，不把正文复制到方案的手填字段。
 
 ## 声明与引用
 

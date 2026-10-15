@@ -18,6 +18,7 @@
 
 - `packages/core/src/**`: shared formal scanner, numbering, references, lookup, dependency analysis, and conservative project-knowledge discovery.
 - `src/cli/**`, `src/reader/**`: primary CLI and localhost Reader implementation.
+- `src/manuscript/**`: shared read-only page-creation plans and explicit no-overwrite manuscript creation; the CLI performs source writes, while Reader prepares the native-conversation handoff.
 - `src/archive/**`: project-owned academic evidence, immutable snapshots, Sigstore verification, format conversion, and archive publication; Reader and MCP projections use this owner.
 - `src/publication/**`: explicit chapter-selection profiles, frozen PDF builds, publication artifacts, and manual or Zenodo DOI/version lifecycle; source-archive signatures remain independent.
 - `src/lean/**`: deterministic anchors/build facts, explicit elaborated evidence, read-only local Lean language sessions, and atomic per-object human review/audit artifacts. Codex assistance writes only separately bound candidate metadata; human verdicts remain explicit. Source/evidence freshness, candidates and human verdicts are independent; snapshots and decision history stay bounded.

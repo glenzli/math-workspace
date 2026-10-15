@@ -55,6 +55,7 @@ import { runCodexFileHandler } from '../codex/file-handler';
 import { runArchiveCli } from '../archive/cli';
 import { runPublicationCli } from '../publication/cli';
 import { safePath as publicationSafePath, relativeInput as publicationRelativeInput } from '../publication/store';
+import { createManuscriptPage, planManuscriptPage, type CreatePageInput } from '../manuscript/create-page';
 
 let ROOT = process.cwd();
 let CACHE_DIR = path.join(ROOT, '.math-workspace');
@@ -684,6 +685,41 @@ async function finish(args) {
     await finalize(args, 'finish');
     if (process.exitCode && process.exitCode !== 0) return;
     await verify([]);
+}
+
+async function createPage(args: string[]): Promise<void> {
+    const usage = 'Usage: math-workspace create-page --kind chapter|front-matter|back-matter|continued --container <project-relative-dir|.> --title "Title" [--slug stem] [--dry-run] [--json] [--expect-state token]';
+    if (args[0] === 'help') { console.log(usage); return; }
+    const values: Record<string, string> = {};
+    let dryRun = false, json = false;
+    for (let index = 0; index < args.length; index++) {
+        const argument = args[index];
+        if (argument === '--help') { console.log(usage); return; }
+        if (argument === '--dry-run') { dryRun = true; continue; }
+        if (argument === '--json') { json = true; continue; }
+        const match = argument.match(/^--(kind|container|title|slug|expect-state)(?:=(.*))?$/);
+        if (!match) throw new Error(`Unknown create-page option: ${argument}.\n${usage}`);
+        if (Object.prototype.hasOwnProperty.call(values, match[1])) throw new Error(`Duplicate create-page option: --${match[1]}.`);
+        const value = match[2] === undefined ? args[++index] : match[2];
+        if (!value || (match[2] === undefined && match[1] !== 'title' && value.startsWith('--'))) throw new Error(`Missing create-page value: --${match[1]}.`);
+        values[match[1]] = value;
+    }
+    if (!values.kind || !values.container || !values.title) throw new Error(usage);
+    const root = await findMathWorkspaceRoot(ROOT);
+    if (!root) throw new Error('Create pages only in a prepared project with .math-workspace/config.json.');
+    const input: CreatePageInput = { kind: values.kind as CreatePageInput['kind'], container: values.container, title: values.title,
+        ...(values.slug === undefined ? {} : { slug: values.slug }) };
+    const result = dryRun ? await planManuscriptPage(root, input)
+        : await createManuscriptPage(root, input, { expectedStateToken: values['expect-state'] });
+    if (json) { console.log(JSON.stringify(result, null, 2)); return; }
+    if (dryRun) {
+        console.log(`${result.exists ? 'EXISTS' : 'PLAN'} create-page: ${result.existingFile || result.filePath}`);
+        console.log(`State: ${result.stateToken}`);
+    } else {
+        console.log(`OK create-page: ${result.filePath}`);
+        console.log(`Stable page ID: ${(result as any).id}`);
+        console.log(`Continue writing the page, then run finish on ${result.filePath}.`);
+    }
 }
 
 function naturalTmpCompare(a, b) {
@@ -2752,6 +2788,7 @@ function printHelp({ all = false } = {}) {
         console.log(`Usage:
   math-workspace init [project-dir]
   math-workspace open [project-dir] [--port 0]
+  math-workspace create-page --kind <kind> --container <dir|.> --title "Title" [--dry-run] [--json]
   math-workspace finish <file-or-dir> [...] [--all]
   math-workspace verify [--strict-chapters]
   math-workspace doctor [project-dir]
@@ -2782,7 +2819,7 @@ Migrations are dry-run by default. Pass --apply to edit files.
 Agent workflow:
   1. Run prepare when starting or resuming a task, or when the index may be stale.
   2. Read the target source; retrieve only matching rows from .math-workspace/reference-map.md for external existing refs.
-  3. Use tmp-* for new objects and page anchors, then run finish on the edited file or directory (it verifies).
+  3. Create blank pages with create-page; they receive a stable page ID. Use tmp-* for new numbered objects, then run finish on the edited file or directory (it verifies).
   4. For old numbered prose, migrate-text-refs <scope> updates target files plus incoming references by default.
   5. If you use finalize directly, run verify before treating generated or migrated content as complete.
 
@@ -2795,6 +2832,7 @@ Advanced commands:
   math-workspace init [project-dir]
   math-workspace open [project-dir] [--port 0]
   math-workspace doctor [project-dir]
+  math-workspace create-page --kind chapter|front-matter|back-matter|continued --container <dir|.> --title "Title" [--slug stem] [--dry-run] [--json] [--expect-state token]
   npm run workspace -- prepare
   npm run workspace -- finish <file-or-dir> [...] [--all]
   npm run workspace -- migrate-text-refs <file-or-dir> [...] [--apply] [--target-only] [--all]
@@ -2833,7 +2871,7 @@ Migrations are dry-run by default. Pass --apply to edit files.
 Agent workflow:
   1. Run prepare when starting or resuming a task, or when the index may be stale.
   2. Read the target source; retrieve only matching rows from .math-workspace/reference-map.md for external existing refs.
-  3. Use tmp-* for new objects and page anchors, then run finish on the edited file or directory (it verifies).
+  3. Create blank pages with create-page; they receive a stable page ID. Use tmp-* for new numbered objects, then run finish on the edited file or directory (it verifies).
   4. For old numbered prose, migrate-text-refs <scope> updates target files plus incoming references by default.
   5. If you use finalize directly, run verify before treating generated or migrated content as complete.`);
 }
@@ -3010,6 +3048,8 @@ async function main() {
         await finalize(args);
     } else if (command === 'finish') {
         await finish(args);
+    } else if (command === 'create-page') {
+        await createPage(args);
     } else if (command === 'migrate-text-refs') {
         await migrateTextRefs(args);
     } else if (command === 'migrate-ids') {

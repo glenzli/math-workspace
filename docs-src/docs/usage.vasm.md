@@ -229,6 +229,39 @@ npm run workspace -- finish path/to/chapter-or-dir
 npm run workspace -- verify
 ```
 
+## 创建章节与前后文
+
+正文、前言、后记和未完待续页都以项目内的普通 Markdown 为唯一维护源。先检查已有稿件，再选择类型和所属的书或卷：
+
+| 类型 | 用途与位置 |
+| --- | --- |
+| `chapter` | 当前书的下一章；卷目录不重置章号。 |
+| `front-matter` | 所属书或卷的 `front-matter/`，可以有多篇任意标题的文章。 |
+| `back-matter` | 所属书或卷的 `back-matter/`，可以有多篇任意标题的文章。 |
+| `continued` | 所属书或卷的独立 `to-be-continued.md`。 |
+
+前后文的角色由所在位置决定，不限定标题或文体。“AI 退休寄语”通常属于后文，可以保留这个标题。旧 `intro.md`、`introduction.md` 与 `summary.md` 继续兼容，不必为采用新入口搬动旧稿。
+
+下例的 `math-workspace` 代表当前安装的 CLI 入口；项目已有 `workspace` script 时也可用 `npm run workspace --`。以 `paths` 或 `help-ai` 查看随包规则和文档的位置。Reader 交接提供确切的 Node、CLI 路径和工作目录时，直接复用；不要求项目额外安装全局命令或修改脚本。
+
+从拥有 `.math-workspace/config.json` 的项目根运行。`--container` 使用真实的项目相对书/卷目录，项目根为 `.`，不要填写显示书名。先查看只读计划：
+
+```bash
+math-workspace create-page --kind back-matter --container book --title "AI 退休寄语" --slug ai-retirement-note --dry-run --json
+```
+
+计划返回 `kind`、`title`、`container`、`filePath`、`exists` 和 `stateToken` 等信息。核对所属书卷、路径及是否已有稿件后，将下面的 `PLAN_STATE_TOKEN` 换成计划返回的值，再创建空白稿件：
+
+```bash
+math-workspace create-page --kind back-matter --container book --title "AI 退休寄语" --slug ai-retirement-note --expect-state PLAN_STATE_TOKEN --json
+```
+
+标题须为非空的单行文字。`--slug` 可选，只决定文件名词干；`continued` 使用固定文件名，不能加 `--slug`。helper 分配文件路径、顺序和稳定页 ID，以不覆盖方式写入一个带标题的空白 Markdown；正文由作者或 AI 续写。已有文件不会覆盖，同一书卷已有的未完待续页也不重复创建；先检查是否应继续原稿。计划过期时先重新只读规划，项目、类型、标题、容器与目标路径均未变即可用新 token 继续；目标变化或已存在时先核对差异或复用原稿。不手写章号或 hash，也不通过另造副本绕过冲突。
+
+创建后沿返回的 `filePath` 写正文，保留页 ID，然后对该文件运行 `finish`。创建不会自动加入出版方案；出版时显式以 `frontMatter[].file`、`backMatter[].file` 或 `continued.file` 引用这份原稿，日常阅读与 PDF 共同使用同一内容。
+
+Reader 的“＋”提供同一创建入口：填写标题、选择类型和当前书/卷，查看只读计划后将请求加入 Codex 输入框。请求附带实际命令入口和工作目录，不自动发送；无会话宿主支持时可以复制请求。Reader 本身不写源稿，也不自动将新稿选入出版。
+
 ## Math Workspace
 
 Math Workspace 是 `math-workspace` 引擎之上的本地工作区界面。日常入口是：
@@ -617,15 +650,19 @@ Reader 的 Lean 审阅面板以稳定对象 ID 展示当前题面、关联证明
 
 ## 项目结构
 
-扫描器从路径推断书、卷、章节、导论、总结和附录。
+扫描器从路径识别书、卷、章节、前后文、未完待续页和附录；旧导论与总结页继续兼容。例如：
 
 ```text
 book/
-  00-introduction.md
+  front-matter/
+    01-preface.md
+    02-readers-letter.md
   01-foundations.md
   02-main-results.md
-  summary.md
   appendix-a-background.md
+  back-matter/
+    01-ai-retirement-note.md
+  to-be-continued.md
 
 multi-volume-book/
   vol-01-foundations/
@@ -640,6 +677,8 @@ multi-volume-book/
 ```
 
 卷目录只增加导航层，不重置正文章号。
+
+`front-matter/` 与 `back-matter/` 中的文件序号只控制先后，不作为章号。选定容器后，路径与顺序由 `create-page` 计划分配；标题和正文仍由作者决定。
 
 附录采用附录局部编号，例如 `A.1`、`A.2`。
 

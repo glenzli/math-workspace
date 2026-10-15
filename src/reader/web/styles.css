@@ -124,6 +124,9 @@ a { color: inherit; }
     transition: opacity 150ms ease, padding 180ms ease, border-color 180ms ease;
 }
 .reader-shell.is-navigation-collapsed .reader-sidebar { overflow: hidden; border-color: transparent; opacity: 0; padding-right: 0; padding-left: 0; pointer-events: none; }
+.reader-navigation-actions { display: flex; align-items: center; gap: 6px; }
+.reader-navigation-actions .reader-filter { flex: 1; min-width: 0; }
+.reader-navigation-actions > .icon-button { flex: 0 0 28px; width: 28px; height: 32px; }
 .reader-filter input, .reader-panel-search {
     width: 100%;
     border: 1px solid var(--reader-border);
@@ -133,6 +136,26 @@ a { color: inherit; }
     color: inherit;
 }
 .reader-filter input:focus, .reader-panel-search:focus { border-color: var(--reader-border-strong); box-shadow: 0 0 0 3px color-mix(in srgb, var(--reader-focus) 20%, transparent); }
+.reader-create-page { width: min(470px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--reader-border); border-radius: 9px; background: var(--reader-surface); color: var(--reader-ink); font-size: 13px; }
+.reader-create-page::backdrop { background: rgb(0 0 0 / .32); }
+.reader-create-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--reader-border); }
+.reader-create-header h1 { margin: 0; font-size: 15px; font-weight: 650; }
+.reader-create-body { display: grid; gap: 14px; padding: 16px 18px 18px; }
+.reader-create-hint { margin: 0; color: var(--reader-muted); font-size: 12px; line-height: 1.65; }
+.reader-create-field { display: grid; gap: 5px; }
+.reader-create-field > span, .reader-create-preview > span { color: var(--reader-muted); font-size: 12px; }
+.reader-create-page input, .reader-create-page select, .reader-create-page textarea, .reader-create-actions button { min-width: 0; border: 1px solid var(--reader-border); border-radius: 5px; padding: 8px 10px; font: inherit; color: inherit; background: var(--reader-surface); }
+.reader-create-page input:focus-visible, .reader-create-page select:focus-visible, .reader-create-page textarea:focus-visible, .reader-create-actions button:focus-visible { outline: 2px solid var(--reader-focus); outline-offset: 2px; }
+.reader-create-preview { display: grid; gap: 5px; padding: 10px 12px; background: var(--reader-subtle); border-radius: 5px; }
+.reader-create-preview code { overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.reader-create-status { margin: 0; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.reader-create-status:empty { display: none; }
+.reader-create-status.is-error { color: var(--reader-error); }
+.reader-create-page textarea { width: 100%; min-height: 170px; resize: vertical; font-size: 12px; }
+.reader-create-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.reader-create-actions button { cursor: pointer; }
+.reader-create-actions button:disabled { cursor: default; opacity: .5; }
+.reader-create-actions .reader-create-submit { background: var(--reader-ink-strong); color: var(--reader-surface); border-color: var(--reader-ink-strong); }
 .reader-nav-group { margin-top: 20px; }
 .reader-nav-group h2 {
     display: flex;

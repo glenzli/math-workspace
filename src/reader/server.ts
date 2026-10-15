@@ -34,6 +34,7 @@ import { handleLeanAssistanceRoute } from '../lean/lean-assistance-routes';
 import { SymbolAuditService } from './symbol-audit-service';
 import type { SymbolAuditScope, SymbolAuditSettings } from './symbol-audit';
 import { registerReaderInstance, unregisterReaderInstance } from './location-bridge';
+import { handleReaderCreatePageRoute, ReaderCreatePageError } from './reader-create-api';
 
 const http = require('node:http');
 const { URL } = require('node:url');
@@ -490,7 +491,8 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
         try {
             const url = new URL(request.url || '/', 'http://127.0.0.1');
 
-            if (url.pathname.startsWith('/api/lean-') || url.pathname === '/api/publication' || url.pathname.startsWith('/api/publication/') || url.pathname === '/api/formula-runtime') {
+            if (url.pathname.startsWith('/api/lean-') || url.pathname === '/api/publication' || url.pathname.startsWith('/api/publication/') || url.pathname === '/api/formula-runtime'
+                || url.pathname === '/api/create-page' || url.pathname.startsWith('/api/create-page/')) {
                 if (projectChanging) { sendText(response, 409, 'The Reader is changing its bound project. Retry after it finishes.'); return; }
                 const origin = request.headers?.origin;
                 if (request.headers?.host !== new URL(serverUrl).host || (origin !== undefined && origin !== serverUrl)
@@ -596,6 +598,19 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                 return;
             }
             const snapshot = workspace.current();
+
+            if (url.pathname === '/api/create-page' || url.pathname.startsWith('/api/create-page/')) {
+                if (!requireRequestToken(request, response, requestToken)) return;
+                const boundRoot = rootPath;
+                if (request.headers?.['x-math-workspace-project'] !== createHash('sha256').update(boundRoot).digest('hex')) {
+                    sendText(response, 409, 'The page project changed. Refresh the Reader before retrying.'); return;
+                }
+                const result = await handleReaderCreatePageRoute(boundRoot, request.method, url.pathname, url.searchParams);
+                if (rootPath !== boundRoot || projectChanging) {
+                    sendText(response, 409, 'The page project changed while preparing the preview. Refresh the Reader.'); return;
+                }
+                sendJson(response, 200, result); return;
+            }
 
             if (url.pathname === '/api/formula-runtime') {
                 if (!requireRequestToken(request, response, requestToken)) return;
@@ -892,7 +907,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
 
             await sendStaticFile(response, staticRoot, url.pathname);
         } catch (error: any) {
-            sendText(response, error instanceof LeanReviewError || error instanceof PublicationReaderError || error instanceof PublicationPdfRuntimeError || error instanceof FormulaRuntimeError ? error.status : 500, error instanceof Error ? error.message : String(error));
+            sendText(response, error instanceof LeanReviewError || error instanceof PublicationReaderError || error instanceof PublicationPdfRuntimeError || error instanceof FormulaRuntimeError || error instanceof ReaderCreatePageError ? error.status : 500, error instanceof Error ? error.message : String(error));
         }
     });
 
