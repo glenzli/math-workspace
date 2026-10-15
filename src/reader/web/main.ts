@@ -85,6 +85,9 @@ interface ReaderPagePayload {
 const words = {
     zh: {
         contents: '目录',
+        volumeChapters: '本卷章节',
+        bookChapters: '本书章节',
+        collectionPages: '本草稿区篇目',
         readerTools: '阅读工具',
         toolsReference: '查阅',
         toolsReview: '审阅',
@@ -259,6 +262,9 @@ const words = {
     },
     en: {
         contents: 'Contents',
+        volumeChapters: 'Volume chapters',
+        bookChapters: 'Book chapters',
+        collectionPages: 'Draft collection pages',
         readerTools: 'Reader tools',
         toolsReference: 'Reference',
         toolsReview: 'Review',
@@ -951,6 +957,7 @@ class ReaderApplication {
     private applyState(state: ReaderState): void {
         const projectChanged = this.state?.projectId !== state.projectId;
         const formulaContextChanged = projectChanged || this.state?.requestToken !== state.requestToken || this.state?.language !== state.language;
+        if (this.toolbarPanel?.isActive('chapters')) this.toolbarPanel.close(this.titleNavigationHasFocus());
         if (projectChanged) this.toolbarMenu?.close();
         if (formulaContextChanged) this.formulaLayout?.dispose();
         this.state = state;
@@ -1384,11 +1391,10 @@ class ReaderApplication {
         this.state.pages.filter(page => (
             !normalized || normalizeQuery((page.displayHeading || page.title) + ' ' + page.filePath).includes(normalized)
         )).forEach(page => {
-            const data = page as ReaderPage & { bookTitle?: string; bookKey?: string; volumeTitle?: string };
-            const book = data.bookTitle || data.bookKey || this.state?.rootName || '';
+            const book = page.bookTitle || page.bookKey || this.state?.rootName || '';
             const groupName = page.documentMode === 'draft'
                 ? (page.documentCollectionTitle || this.dictionary().documentStageDraft)
-                : (data.volumeTitle ? book + ' · ' + data.volumeTitle : book);
+                : (page.volumeTitle ? book + ' · ' + page.volumeTitle : book);
             if (!groups.has(groupName)) groups.set(groupName, []);
             groups.get(groupName)?.push(page);
         });
@@ -1540,16 +1546,34 @@ class ReaderApplication {
 
     private renderArticle(): void {
         if (!this.page || !this.state) return;
+        const restoreTitleFocus = this.titleNavigationHasFocus();
+        if (this.toolbarPanel?.isActive('chapters')) this.toolbarPanel.close();
         this.clearSourceLocationHighlight?.();
         const title = this.page.page?.displayHeading || this.page.page?.title || this.page.filePath;
         const titleLabel = document.createElement('span');
         titleLabel.className = 'reader-page-title-label';
         titleLabel.innerHTML = renderFormalInline(this.markdown, title, this.renderOptions(this.page.filePath, this.page.labels));
         const documentStatus = documentStatusBadge(this.page.page, this.state.language, true);
-        const titleParts: Node[] = [titleLabel];
+        const navigation = this.titleNavigationScope();
+        let titleTrigger: HTMLButtonElement | undefined;
+        if (navigation) {
+            this.unwrapNavigationTitleLinks(titleLabel);
+            titleTrigger = document.createElement('button');
+            titleTrigger.type = 'button';
+            titleTrigger.className = 'reader-page-title-trigger';
+            titleTrigger.dataset.titleNavigation = 'true';
+            titleTrigger.dataset.readerTooltip = title + ' — ' + navigation.title;
+            titleTrigger.setAttribute('aria-label', title + ' — ' + navigation.title);
+            titleTrigger.setAttribute('aria-haspopup', 'dialog');
+            titleTrigger.setAttribute('aria-controls', 'reader-chapter-navigation');
+            titleTrigger.setAttribute('aria-expanded', 'false');
+            titleTrigger.append(titleLabel, readerIcon('chevron-down', 12));
+        }
+        const titleParts: Node[] = [titleTrigger || titleLabel];
         if (documentStatus) titleParts.push(documentStatus);
         titleParts.push(pageIntegrationGlyph(this.page.page, this.state.language));
         this.pageTitle.replaceChildren(...titleParts);
+        if (restoreTitleFocus) (titleTrigger || this.pageTitle.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
         const descriptor = this.page.page?.documentMode === 'draft'
             ? (this.page.page?.documentCollectionTitle || 'Draft collection')
             : pageIntegrationTooltip(this.page.page, this.state.language);
@@ -1687,6 +1711,90 @@ class ReaderApplication {
             if (view === 'propositions') this.propositionReview.render(content, this.currentPropositionReviewItems());
             if (view === 'symbol-audit') this.renderSymbolAudit(content);
         }, this.toolbarMenu.anchorFor(trigger));
+    }
+
+    private titleNavigationScope(): { title: string; pages: ReaderPage[] } | undefined {
+        if (!this.state || !this.page || this.symbolAuditReportOpen) return;
+        const current = this.pageForPath(this.page.filePath);
+        if (!current) return;
+        const dictionary = this.dictionary();
+        if (current.documentMode === 'draft') {
+            if (typeof current.documentCollectionId !== 'string') return;
+            return {
+                title: dictionary.collectionPages,
+                pages: this.state.pages.filter(page => page.documentMode === 'draft'
+                    && page.documentCollectionId === current.documentCollectionId)
+            };
+        }
+        if (typeof current.bookKey !== 'string') return;
+        return {
+            title: typeof current.volumeKey === 'string' ? dictionary.volumeChapters : dictionary.bookChapters,
+            pages: this.state.pages.filter(page => page.documentMode !== 'draft'
+                && page.bookKey === current.bookKey && page.volumeKey === current.volumeKey)
+        };
+    }
+
+    private titleNavigationHasFocus(): boolean {
+        return this.pageTitle.contains(document.activeElement)
+            || Boolean(document.body.querySelector('#reader-chapter-navigation')?.contains(document.activeElement));
+    }
+
+    private unwrapNavigationTitleLinks(container: HTMLElement): void {
+        container.querySelectorAll('a').forEach(link => link.replaceWith(...Array.from(link.childNodes)));
+    }
+
+    private openTitleNavigation(trigger: HTMLElement): void {
+        const navigation = this.titleNavigationScope();
+        if (!navigation) return;
+        this.prepareToolbarView('panel');
+        const content = this.toolbarPanel.open('chapters', trigger, navigation.title, container => {
+            const list = document.createElement('nav');
+            list.className = 'reader-chapter-list';
+            list.setAttribute('aria-label', navigation.title);
+            navigation.pages.forEach(page => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'reader-chapter-entry';
+                button.dataset.chapterPath = page.filePath;
+                const title = page.displayHeading || page.title;
+                button.innerHTML = renderFormalInline(this.markdown, title, this.renderOptions(page.filePath, {}));
+                this.unwrapNavigationTitleLinks(button);
+                button.setAttribute('aria-label', title);
+                if (page.filePath === this.page?.filePath) button.setAttribute('aria-current', 'page');
+                button.addEventListener('click', () => {
+                    this.toolbarPanel.close();
+                    const projectId = this.state?.projectId;
+                    const opened = this.openPage(page.filePath, 'push');
+                    const requestId = this.pageRequestId;
+                    void opened.then(() => {
+                        const focused = document.activeElement;
+                        const restoreTitleFocus = !focused || focused === document.body || !focused.isConnected || this.pageTitle.contains(focused);
+                        if (restoreTitleFocus && requestId === this.pageRequestId && projectId === this.state?.projectId
+                            && this.currentPath === page.filePath && !this.symbolAuditReportOpen) {
+                            this.pageTitle.querySelector<HTMLElement>('[data-title-navigation]')?.focus({ preventScroll: true });
+                        }
+                    }).catch(error => this.reportLive(error instanceof Error ? error.message : String(error)));
+                });
+                list.append(button);
+            });
+            list.addEventListener('keydown', event => {
+                const buttons = Array.from(list.querySelectorAll<HTMLButtonElement>('button'));
+                const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                const next = event.key === 'ArrowDown' ? (index + 1) % buttons.length
+                    : event.key === 'ArrowUp' ? (index - 1 + buttons.length) % buttons.length
+                    : event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : -1;
+                if (next < 0) return;
+                event.preventDefault();
+                buttons[next]?.focus();
+            });
+            container.append(list);
+        });
+        if (content) {
+            content.parentElement!.id = 'reader-chapter-navigation';
+            const current = content.querySelector<HTMLElement>('[aria-current="page"]') || content.querySelector<HTMLElement>('.reader-chapter-entry');
+            current?.focus({ preventScroll: true });
+            current?.scrollIntoView({ block: 'nearest' });
+        }
     }
 
     private prepareToolbarView(view: 'menu' | 'panel' | 'lean' | 'archive' | 'publication'): void {
@@ -2166,6 +2274,11 @@ class ReaderApplication {
             const documentStatus = target.closest<HTMLElement>('[data-document-status]');
             if (documentStatus && this.page) {
                 this.openDocumentStage(documentStatus);
+                return;
+            }
+            const titleNavigation = target.closest<HTMLElement>('[data-title-navigation]');
+            if (titleNavigation) {
+                this.openTitleNavigation(titleNavigation);
                 return;
             }
             const panelButton = target.closest<HTMLElement>('[data-panel]');

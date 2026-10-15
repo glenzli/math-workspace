@@ -170,7 +170,6 @@ a { color: inherit; }
 }
 .reader-page-integration.is-unmanaged { color: var(--reader-faint); }
 .reader-page-integration.is-attention { color: var(--reader-ink-strong); }
-.reader-page-title .reader-page-integration { margin-left: 7px; }
 .reader-page-integration.is-hidden { display: none; }
 .reader-nav-group-toggle {
     appearance: none;
@@ -227,7 +226,6 @@ a { color: inherit; }
     background: transparent;
     padding: 0;
 }
-.reader-page-title .reader-document-status { margin-left: 8px; }
 .reader-nav-page:hover { background: var(--reader-hover); }
 .reader-nav-page.is-selected { background: var(--reader-selected); box-shadow: inset 3px 0 var(--reader-border-strong); color: var(--reader-ink); }
 .reader-nav-page.is-active { background: var(--reader-active); box-shadow: inset 3px 0 var(--reader-border-strong); color: var(--reader-ink); font-weight: 650; }
@@ -309,7 +307,11 @@ a { color: inherit; }
 }
 .reader-history, .reader-tools, .reader-type-control { display: flex; align-items: center; gap: 2px; height: 34px; }
 .reader-history, .reader-type-control { flex-shrink: 0; border: 1px solid var(--reader-border); border-radius: 6px; background: color-mix(in srgb, var(--reader-surface) 68%, transparent); padding: 2px; }
-.reader-page-title { display: flex; align-items: center; min-width: 0; height: 32px; flex: 1; overflow: hidden; color: var(--reader-ink); font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.reader-page-title { display: flex; align-items: center; gap: 10px; min-width: 0; height: 32px; flex: 1; margin-inline-start: 4px; overflow: hidden; color: var(--reader-ink); font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.reader-page-title-trigger { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; border: 0; border-radius: 4px; padding: 3px 4px; background: transparent; color: inherit; font: inherit; text-align: left; }
+.reader-page-title-trigger:hover, .reader-page-title-trigger[aria-expanded="true"] { background: var(--reader-hover); }
+.reader-page-title-trigger:focus-visible { outline-offset: -2px; }
+.reader-page-title-trigger > .reader-icon { width: 12px; height: 12px; color: var(--reader-muted); }
 .reader-live { display: flex; align-items: center; position: absolute; top: calc(100% + 4px); right: 12px; max-width: calc(100% - 24px); padding: 6px 10px; border-radius: 6px; background: var(--reader-subtle); color: var(--reader-ink-strong); font-size: 12px; z-index: 32; }
 .reader-live:empty { display: none; }
 .icon-button, .tool-button {
@@ -670,6 +672,12 @@ a { color: inherit; }
     max-height: calc(100vh - 24px);
 }
 .reader-toolbar-panel.is-symbol-audit { width: min(620px, calc(100vw - 24px)); max-height: min(700px, calc(100vh - 24px)); }
+.reader-toolbar-panel.is-chapters { width: min(440px, calc(100vw - 24px)); }
+.reader-chapter-list { display: grid; gap: 3px; }
+.reader-chapter-entry { width: 100%; border: 0; border-radius: 4px; padding: 8px 10px; background: transparent; color: inherit; font: inherit; text-align: left; overflow-wrap: anywhere; }
+.reader-chapter-entry:hover { background: var(--reader-hover); }
+.reader-chapter-entry[aria-current="page"] { background: var(--reader-selected); box-shadow: inset 3px 0 var(--reader-border-strong); font-weight: 650; }
+.reader-chapter-entry:focus-visible { outline-offset: -2px; }
 .reader-toolbar-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--reader-border); padding: 2px 2px 8px; }
 .reader-toolbar-panel h2, .archive-header h1 { margin: 0; color: var(--reader-ink); font-size: 13px; font-weight: 700; }
 .reader-panel-close, .reader-panel-action, .reader-source-action {
@@ -1075,7 +1083,7 @@ a { color: inherit; }
     .reader-article { padding: 32px 20px 90px; }
     .reader-article.shows-source-line-numbers { padding-left: 56px; }
     .reader-article.shows-source-line-numbers .reader-source-line-entry::before { right: calc(100% + 14px + var(--reader-source-line-indent, 0px)); width: 28px; }
-    .reader-page-title { font-size: 12px; }
+    .reader-page-title { gap: 8px; margin-inline-start: 0; font-size: 12px; }
     .reader-shell.is-project-launcher .reader-article { padding: 32px 22px; }
     .reader-recent-projects button { align-items: start; grid-template-columns: minmax(0, 1fr); gap: 3px; }
     .reader-article.is-symbol-audit-report { padding: 24px 16px 80px; }

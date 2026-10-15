@@ -30,6 +30,10 @@ export interface ReaderPage {
     title: string;
     displayHeading?: string;
     displayReference?: string;
+    bookKey?: string;
+    bookTitle?: string;
+    volumeKey?: string;
+    volumeTitle?: string;
     chapter?: number;
     appendix?: string;
     line?: number;

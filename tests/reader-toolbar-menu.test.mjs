@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { build } from 'esbuild';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -51,6 +53,12 @@ class Element extends EventTarget {
     appendChild(child) { this.append(child); return child; }
     replaceChildren(...children) { for (const child of this.children) child.parent = undefined; this.children = []; this._text = ''; this.append(...children); }
     remove() { if (this.parent?.children) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = undefined; }
+    replaceWith(...nodes) {
+        const parent = this.parent; if (!parent) return;
+        const index = parent.children.indexOf(this); this.remove();
+        for (const node of nodes) { node.remove(); node.parent = parent; }
+        parent.children.splice(index, 0, ...nodes);
+    }
     get parentElement() { return this.parent instanceof Element ? this.parent : null; }
     get childNodes() { return this.children; }
     get isConnected() { return this.tagName === 'body' || !!this.parent?.isConnected; }
@@ -80,6 +88,7 @@ class Element extends EventTarget {
         if (key.startsWith('data-')) return this.dataset[key.slice(5).replace(/-([a-z])/g, (_, char) => char.toUpperCase())] ?? null;
         return this.attributes[key] ?? null;
     }
+    hasAttribute(key) { return this.getAttribute(key) !== null; }
     removeAttribute(key) { delete this.attributes[key]; }
     matches(selector) {
         if (selector.includes(',')) return selector.split(',').some(value => this.matches(value.trim()));
@@ -116,6 +125,8 @@ class Element extends EventTarget {
 async function harness() {
     const document = new EventTarget();
     document.createElement = tag => new Element(tag, document);
+    document.documentElement = document.createElement('html');
+    document.compatMode = 'CSS1Compat';
     document.createElementNS = (_, tag) => document.createElement(tag);
     document.createTextNode = text => { const node = document.createElement('#text'); node.textContent = text; return node; };
     document.body = document.createElement('body'); document.body.parent = document; document.activeElement = document.body;
@@ -126,22 +137,23 @@ async function harness() {
     class Owner {
         opened = false; openCount = 0;
         constructor(...args) { this.host = args.at(-1); }
-        bind() {} contextChanged() {} navigationStarted() {}
+        bind() {} contextChanged() {} navigationStarted() {} dispose() {}
         close() { this.opened = false; }
         open() { this.opened = true; this.openCount++; this.returnFocus = document.activeElement; }
         openPageQueue() { this.open(); }
         render(parent) { parent.append(document.createElement('button')); }
     }
-    const primaryActions = [];
+    const primaryActions = [], historyEvents = [], inlineCalls = [];
+    let inlineRenderer = source => source;
     const modules = {
         lucide: require('lucide'),
         './reader-route': { isReaderEmbedded: () => true },
-        './reader-host': { expandReader() { primaryActions.push('expand'); } },
+        './reader-host': { expandReader() { primaryActions.push('expand'); }, readerHistory(mode, state, url) { historyEvents.push({ mode, state, url }); } },
         './reader-embed': { readerViewStateChanged() {} },
         './reader-figures': { mountReaderFigures: () => () => {} },
         './reader-formula-layout': { mountReaderFormulaLayout: () => ({ dispose() {}, invalidate() {}, canAdapt: () => false, isAdapted: () => false, toggle: async () => {} }) },
         './reader-assets': { mountReaderAssets: () => () => {} },
-        './formal-renderer': { renderFormalInline: (_renderer, source) => source, renderFormalDocument: () => ({ html: '', formulas: [] }) },
+        './formal-renderer': { renderFormalInline: (_renderer, source, options) => { inlineCalls.push({ source, filePath: options.currentFilePath }); return inlineRenderer(source, options); }, renderFormalDocument: () => ({ html: '', formulas: [] }) },
         './reader-tooltip': { ReaderTooltip: Owner },
         './source-actions': { ReaderSourceActions: Owner },
         './recall-popover': { ReaderRecallPopover: Owner },
@@ -159,7 +171,7 @@ async function harness() {
         if (file === 'main.ts') source = source.replace(/\nstartReader\(\);\s*$/, '\n');
         const exports = {};
         vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText + expose,
-            { exports, require: name => modules[name] || {}, document, window, Element, HTMLElement: Element, Node: Element, console,
+            { exports, require: name => modules[name] || {}, document, window, Element, HTMLElement: Element, Node: Element, URLSearchParams, console,
                 localStorage: { setItem() {} }, requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
         modules[name] = exports; return exports;
     }
@@ -171,6 +183,7 @@ async function harness() {
     const app = Object.create(ReaderApplication.prototype); app.root = document.createElement('main'); document.body.append(app.root);
     app.state = { language: 'zh', projectId: 'project-a', revision: 1, pages: [], definitions: [] };
     app.currentPath = 'book/01.md'; app.fontSize = 18; app.sourceLineNumbersVisible = false;
+    app.historyPaths = []; app.historyIndex = -1; app.pageRequestId = 0; app.selectedPagePaths = [];
     app.disposeFigures = () => {}; app.disposeAssets = () => {}; app.expandedDraftCollections = new Set();
     app.buildShell(); app.installHandlers(); app.updateToolbarLabels();
     const populated = [];
@@ -181,7 +194,8 @@ async function harness() {
     const click = element => { if (element.disabled) return; element.emit('pointerdown'); element.focus(); element.emit('click'); };
     const key = (key, options = {}) => { const event = document.activeElement.emit('keydown', { key, ...options });
         if (!event.defaultPrevented && ['Enter', ' '].includes(key) && document.activeElement.tagName === 'button' && !document.activeElement.disabled) document.activeElement.emit('click'); return event; };
-    return { app, document, window, words, icons, populated, primaryActions, find, click, key, restore: () => { globalThis.document = previousDocument; } };
+    return { app, document, window, words, icons, populated, primaryActions, historyEvents, inlineCalls, find, click, key,
+        setInlineRenderer: renderer => { inlineRenderer = renderer; }, restore: () => { globalThis.document = previousDocument; } };
 }
 
 async function documentStageUiContract() {
@@ -261,6 +275,155 @@ async function documentStageUiContract() {
         }
         console.log('Reader document-stage shared glyph, header/sidebar, single/batch choice, checkpoint and bilingual action contracts passed.');
     } finally { app.closeNavigationContextMenu(); app.toolbarPanel.dispose(); app.toolbarMenu.dispose(); h.restore(); }
+}
+
+async function titleNavigationContract() {
+    const h = await harness(), { app, document, find, click, key } = h;
+    const drain = async () => { for (let index = 0; index < 12; index++) await Promise.resolve(); };
+    const chapter = (filePath, fields = {}) => ({ kind: 'chapter', filePath, title: 'Repeated title', bookKey: 'book-a', bookTitle: 'Same book label',
+        volumeKey: 'volume-1', volumeTitle: 'Same volume label', documentMode: 'formal', lifecycle: { stage: 'revising' }, ...fields });
+    const first = chapter('book-a/volume-1/z.md'), current = chapter('book-a/volume-1/m.md', { displayHeading: 'Chapter 2 · $x+y$' }), last = chapter('book-a/volume-1/a.md');
+    const otherVolume = chapter('book-a/volume-1/elsewhere.md', { volumeKey: 'volume-2' });
+    const otherBook = chapter('book-b/volume-1/m.md', { bookKey: 'book-b' });
+    const bookRoot = chapter('book-a/preface.md', { volumeKey: undefined, volumeTitle: undefined });
+    const emptyVolume = chapter('book-a/empty.md', { volumeKey: '' });
+    const draftA = chapter('book-a/volume-1/draft-a.md', { documentMode: 'draft', documentCollectionId: 'notes-a', documentCollectionTitle: 'Same draft label' });
+    const draftASibling = chapter('elsewhere/idea.md', { documentMode: 'draft', documentCollectionId: 'notes-a', documentCollectionTitle: 'Same draft label' });
+    const draftB = chapter('book-a/volume-1/draft-b.md', { documentMode: 'draft', documentCollectionId: 'notes-b', documentCollectionTitle: 'Same draft label' });
+    const missingDraftId = chapter('draft/missing.md', { documentMode: 'draft', documentCollectionId: undefined });
+    const emptyBook = chapter('empty-book/one.md', { bookKey: '', volumeKey: undefined });
+    const emptyBookSibling = chapter('empty-book/two.md', { bookKey: '', volumeKey: undefined });
+    const missingBook = chapter('unknown/one.md', { bookKey: undefined, volumeKey: undefined });
+    const emptyDraft = chapter('draft/empty-one.md', { documentMode: 'draft', documentCollectionId: '' });
+    const emptyDraftSibling = chapter('draft/empty-two.md', { documentMode: 'draft', documentCollectionId: '' });
+    const pages = [first, otherBook, current, otherVolume, draftA, bookRoot, last, emptyVolume, draftB, draftASibling, emptyBook, missingBook, emptyBookSibling, missingDraftId, emptyDraft, emptyDraftSibling];
+    const mount = (page, candidates = pages) => {
+        app.toolbarPanel.close(); app.symbolAuditReportOpen = false;
+        app.state = { ...app.state, available: true, pages: candidates };
+        app.currentPath = page.filePath; app.selectedPagePaths = [page.filePath]; app.selectionAnchorPath = page.filePath;
+        app.page = { revision: 1, filePath: page.filePath, page, content: '', labels: {}, symbols: [] };
+        app.renderArticle();
+    };
+    const rows = () => find('.reader-chapter-list').querySelectorAll('button');
+    const rowPaths = () => rows().map(button => button.dataset.chapterPath);
+    try {
+        for (const language of ['zh', 'en']) {
+            app.state.language = language; mount(current);
+            const title = find('[data-title-navigation]'), status = app.pageTitle.querySelector('[data-document-status]'), integration = app.pageTitle.querySelector('.reader-page-integration');
+            assert.equal(title.type, 'button'); assert.equal(title.getAttribute('aria-haspopup'), 'dialog');
+            assert.equal(title.getAttribute('aria-expanded'), 'false'); assert.equal(title.getAttribute('aria-controls'), 'reader-chapter-navigation');
+            assert.equal(title.contains(status), false); assert.equal(title.contains(integration), false);
+            assert.equal(title.parentElement, status.parentElement, 'Stage action remains a sibling of the title action.');
+            assert.equal(title.querySelector('.reader-page-title-label').textContent, current.displayHeading);
+            assert.ok(h.inlineCalls.some(call => call.source === current.displayHeading && call.filePath === current.filePath), 'Title math uses the formal inline renderer.');
+            title.focus(); key('Enter');
+            assert.equal(find('#reader-chapter-navigation').getAttribute('role'), 'dialog');
+            assert.equal(find('#reader-chapter-navigation').getAttribute('aria-label'), h.words[language].volumeChapters);
+            assert.deepEqual(rowPaths(), [first.filePath, current.filePath, last.filePath], 'Real book and volume keys isolate matching labels while retaining project order.');
+            assert.equal(document.activeElement.getAttribute('aria-current'), 'page');
+            assert.equal(document.activeElement.dataset.chapterPath, current.filePath);
+            key('ArrowDown'); assert.equal(document.activeElement.dataset.chapterPath, last.filePath);
+            key('ArrowDown'); assert.equal(document.activeElement.dataset.chapterPath, first.filePath);
+            key('End'); assert.equal(document.activeElement.dataset.chapterPath, last.filePath);
+            key('Home'); assert.equal(document.activeElement.dataset.chapterPath, first.filePath);
+            key('ArrowUp'); assert.equal(document.activeElement.dataset.chapterPath, last.filePath);
+            key('Escape'); assert.equal(find('.reader-toolbar-panel'), null); assert.equal(document.activeElement, title);
+            click(title); click(title); assert.equal(find('.reader-toolbar-panel'), null, 'A second title activation closes its own panel.');
+            click(title); click(app.article); assert.equal(find('.reader-toolbar-panel'), null, 'Outside pointer input dismisses the chapter list.');
+            click(title); click(status);
+            assert.equal(app.toolbarPanel.isActive('document-stage'), true); assert.equal(find('.reader-chapter-list'), null);
+            key('Escape'); assert.equal(document.activeElement, status);
+            click(title); click(integration); assert.equal(find('.reader-toolbar-panel'), null, 'The integration glyph cannot activate chapter navigation.');
+            click(find('[data-panel="contents"]'));
+            assert.equal(find('.reader-toolbar-panel').getAttribute('aria-label'), h.words[language].contents);
+            assert.equal(find('.reader-chapter-list'), null, 'The chapter outline remains the independent Contents action.');
+            key('Escape');
+
+            for (const [page, expected, label] of [
+                [otherVolume, [otherVolume], 'volumeChapters'], [otherBook, [otherBook], 'volumeChapters'],
+                [bookRoot, [bookRoot], 'bookChapters'], [emptyVolume, [emptyVolume], 'volumeChapters'],
+                [emptyBook, [emptyBook, emptyBookSibling], 'bookChapters'],
+                [draftA, [draftA, draftASibling], 'collectionPages'], [draftB, [draftB], 'collectionPages'],
+                [emptyDraft, [emptyDraft, emptyDraftSibling], 'collectionPages']
+            ]) {
+                mount(page); click(find('[data-title-navigation]'));
+                assert.equal(find('.reader-toolbar-panel').getAttribute('aria-label'), h.words[language][label]);
+                assert.deepEqual(rowPaths(), expected.map(value => value.filePath), 'Absent keys never alias explicit empty keys or named collections.');
+                key('Escape');
+            }
+            for (const page of [missingBook, missingDraftId]) {
+                mount(page); assert.equal(find('[data-title-navigation]'), null, 'Unknown ownership cannot infer a catalog from labels or path prefixes.');
+            }
+        }
+
+        mount(current); app.historyPaths = [current.filePath]; app.historyIndex = 0;
+        const requests = [];
+        app.fetchJson = async route => {
+            requests.push(route);
+            const filePath = decodeURIComponent(route.split('?path=')[1]);
+            const page = pages.find(value => value.filePath === filePath);
+            assert.ok(page);
+            return { revision: 1, filePath, page, content: '', labels: {}, symbols: [] };
+        };
+        const previousTitle = find('[data-title-navigation]'); click(previousTitle);
+        rows().find(row => row.dataset.chapterPath === last.filePath).focus(); key('Enter'); await drain();
+        assert.equal(find('.reader-toolbar-panel'), null); assert.equal(app.currentPath, last.filePath);
+        assert.deepEqual(Array.from(app.historyPaths), [current.filePath, last.filePath]);
+        assert.equal(h.historyEvents.at(-1).mode, 'push'); assert.equal(h.historyEvents.at(-1).state.filePath, last.filePath);
+        assert.deepEqual(requests, ['/api/page?path=' + encodeURIComponent(last.filePath)]);
+        assert.notEqual(find('[data-title-navigation]'), previousTitle); assert.equal(document.activeElement, find('[data-title-navigation]'), 'Selecting a chapter focuses its new connected title after the normal history navigation.');
+        const rerenderedTitle = find('[data-title-navigation]'); app.renderArticle();
+        assert.notEqual(find('[data-title-navigation]'), rerenderedTitle); assert.equal(document.activeElement, find('[data-title-navigation]'));
+
+        click(find('[data-title-navigation]')); app.applyState({ ...app.state, revision: 2, pages: pages.filter(page => page !== first) });
+        assert.equal(find('.reader-toolbar-panel'), null); assert.equal(document.activeElement, find('[data-title-navigation]'), 'A metadata refresh dismisses and restores focus from the stale catalog.');
+        app.renderArticle(); assert.equal(document.activeElement, find('[data-title-navigation]'));
+        click(find('[data-title-navigation]')); app.renderArticle();
+        assert.equal(find('.reader-toolbar-panel'), null); assert.equal(document.activeElement, find('[data-title-navigation]'), 'Replacing a focused title or chapter panel never retains a disconnected trigger.');
+        const unrelated = find('#reader-back');
+        click(find('[data-title-navigation]')); unrelated.focus(); app.applyState({ ...app.state, revision: 3 });
+        assert.equal(find('.reader-toolbar-panel'), null); assert.equal(document.activeElement, unrelated, 'A refresh does not steal focus that has tabbed outside the catalog.');
+        click(find('[data-title-navigation]')); unrelated.focus(); app.renderArticle();
+        assert.equal(find('.reader-toolbar-panel'), null); assert.equal(document.activeElement, unrelated, 'Article rendering preserves unrelated control focus.');
+
+        mount(current);
+        let resolvePage;
+        app.fetchJson = () => new Promise(resolve => { resolvePage = resolve; });
+        click(find('[data-title-navigation]')); click(rows().find(row => row.dataset.chapterPath === last.filePath));
+        const outsideInput = find('#reader-page-filter'); outsideInput.focus();
+        resolvePage({ revision: 1, filePath: last.filePath, page: last, content: '', labels: {}, symbols: [] }); await drain();
+        assert.equal(app.currentPath, last.filePath); assert.equal(document.activeElement, outsideInput, 'A delayed chapter response cannot steal focus from a subsequently focused external input.');
+
+        const bundle = await fs.mkdtemp(path.join(os.tmpdir(), 'reader-title-renderer-'));
+        try {
+            const output = path.join(bundle, 'renderer.cjs');
+            await build({ entryPoints: [path.join(root, 'src/reader/web/formal-renderer.ts')], outfile: output, bundle: true, format: 'cjs', platform: 'node', logLevel: 'silent' });
+            const renderer = require(output), markdown = renderer.createFormalRenderer();
+            h.setInlineRenderer((source, options) => renderer.renderFormalInline(markdown, source, options));
+            const linked = { ...draftA, title: '[**Notebook $x+y$**](https://example.com/source)' };
+            const linkedSibling = { ...draftASibling, title: '[Next **linked** page](https://example.com/next)' };
+            const linkedPages = [linked, linkedSibling, draftB];
+            mount(linked, linkedPages);
+            const title = find('[data-title-navigation]');
+            assert.equal(title.querySelector('a'), null); assert.equal(title.querySelector('[href]'), null);
+            assert.ok(title.querySelector('strong')); assert.ok(title.querySelector('.katex'), 'Unwrapping real Markdown links retains emphasis and rendered title math.');
+            assert.equal(title.querySelector('.katex-error'), null);
+            assert.equal(title.querySelector('[tabindex]'), null, 'A linked title creates one native title control without a nested tab stop.');
+            click(title);
+            for (const row of rows()) { assert.equal(row.querySelector('a'), null); assert.equal(row.querySelector('[href]'), null); assert.equal(row.querySelector('[tabindex]'), null); }
+            assert.ok(rows()[0].querySelector('.katex')); assert.ok(rows()[1].querySelector('strong'));
+            app.fetchJson = async route => { const filePath = decodeURIComponent(route.split('?path=')[1]); return { revision: 1, filePath, page: linkedPages.find(page => page.filePath === filePath), content: '', labels: {}, symbols: [] }; };
+            rows()[1].focus(); key('Enter'); await drain();
+            assert.equal(app.currentPath, linkedSibling.filePath); assert.equal(find('.reader-toolbar-panel'), null);
+            assert.equal(h.historyEvents.at(-1).state.filePath, linkedSibling.filePath, 'Linked labels activate the Reader chapter route rather than their external href.');
+        } finally { await fs.rm(bundle, { recursive: true, force: true }); }
+
+        app.fetchJson = async () => ({ report: {} });
+        await app.openSymbolAuditReport('replace');
+        assert.equal(find('[data-title-navigation]'), null, 'A symbol audit report title is not presented as a book chapter.');
+        app.openTitleNavigation(previousTitle); assert.equal(find('.reader-chapter-list'), null);
+        console.log('Reader title chapter navigation: key isolation, bilingual labels, ordering, independent stage/outline actions, history and focused popover lifecycle passed.');
+    } finally { app.toolbarPanel.dispose(); app.toolbarMenu.dispose(); h.restore(); }
 }
 
 export async function testReaderToolbarMenu() {
@@ -409,6 +572,7 @@ export async function testReaderToolbarMenu() {
     console.log('Reader category toolbar menus: keyboard, switching, actions, localization, state and category anchors passed.');
     } finally { h.restore(); }
     await documentStageUiContract();
+    await titleNavigationContract();
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await testReaderToolbarMenu();
