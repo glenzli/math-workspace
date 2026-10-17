@@ -1,3 +1,4 @@
+import { readerText, readerAttribute } from './reader-ui-labels';
 import { readerIcon } from './reader-icons';
 import type { ReaderDependencyMarker } from './formal-renderer';
 
@@ -394,7 +395,7 @@ export class ReaderPropositionReview {
         if (items.length === 0) {
             const empty = document.createElement('p');
             empty.className = 'reader-panel-empty';
-            empty.textContent = labels.empty;
+            readerText(empty, () => this.host.labels().empty);
             container.append(empty);
             return;
         }
@@ -407,7 +408,7 @@ export class ReaderPropositionReview {
         section.className = 'reader-proposition-review-map';
         const hint = document.createElement('p');
         hint.className = 'reader-proposition-review-map-hint';
-        hint.textContent = labels.graphHint;
+        readerText(hint, () => this.host.labels().graphHint);
         const legend = document.createElement('div');
         legend.className = 'reader-proposition-review-legend';
         (['hub', 'linked', 'terminal', 'isolated'] as NodeStatus[]).forEach(status => {
@@ -416,7 +417,7 @@ export class ReaderPropositionReview {
             const dot = document.createElement('i');
             dot.setAttribute('aria-hidden', 'true');
             const text = document.createElement('span');
-            text.textContent = statusLabel(status, labels);
+            readerText(text, () => statusLabel(status, this.host.labels()));
             item.append(dot, text);
             legend.append(item);
         });
@@ -428,7 +429,7 @@ export class ReaderPropositionReview {
         const svg = svgElement('svg');
         svg.setAttribute('viewBox', `0 0 ${layout.width} ${layout.height}`);
         svg.setAttribute('role', 'group');
-        svg.setAttribute('aria-label', labels.graphTitle);
+        readerAttribute(svg, 'aria-label', () => this.host.labels().graphTitle);
 
         const defs = svgElement('defs');
         const arrow = svgElement('marker');
@@ -482,17 +483,17 @@ export class ReaderPropositionReview {
             node.style.setProperty('--reader-proposition-node-glow', color.glow);
             node.setAttribute('tabindex', '0');
             node.setAttribute('role', 'button');
-            node.setAttribute('aria-label', labels.nodeLabel(
+            readerAttribute(node, 'aria-label', () => this.host.labels().nodeLabel(
                 item.display,
                 item.marker.directDependencies,
                 item.marker.directDependents,
                 item.marker.ambientReferenceCount || 0,
                 item.marker.leanDeclarationCount || 0,
-                statusLabel(status, labels)
+                statusLabel(status, this.host.labels())
             ));
             const title = svgElement('title');
-            title.textContent = item.display + (item.title ? ' · ' + item.title : '') + ' · ' + statusLabel(status, labels)
-                + ((item.marker.leanDeclarationCount || 0) > 0 ? ` · Lean ×${item.marker.leanDeclarationCount}` : '');
+            readerText(title, () => item.display + (item.title ? ' · ' + item.title : '') + ' · ' + statusLabel(status, this.host.labels())
+                + ((item.marker.leanDeclarationCount || 0) > 0 ? ` · Lean ×${item.marker.leanDeclarationCount}` : ''));
             const circle = svgElement('circle');
             circle.setAttribute('cx', String(position.x));
             circle.setAttribute('cy', String(position.y));
@@ -532,13 +533,13 @@ export class ReaderPropositionReview {
         const terminal = items.filter(item => item.marker.directDependents === 0);
         const section = document.createElement('section');
         section.className = 'reader-proposition-terminal-summary';
-        section.setAttribute('aria-label', labels.terminalPropositions);
+        readerAttribute(section, 'aria-label', () => this.host.labels().terminalPropositions);
         const summary = document.createElement('div');
         summary.className = 'reader-proposition-terminal-summary-copy';
         const label = document.createElement('strong');
-        label.textContent = labels.terminalPropositionSummary(terminal.length);
+        readerText(label, () => this.host.labels().terminalPropositionSummary(terminal.length));
         const hint = document.createElement('p');
-        hint.textContent = labels.terminalPropositionHint;
+        readerText(hint, () => this.host.labels().terminalPropositionHint);
         summary.append(label, hint);
         section.append(summary);
 

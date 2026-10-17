@@ -1,3 +1,4 @@
+import { readerUiLabels, installReaderTextNodes } from './reader-ui-harness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -61,6 +62,8 @@ class Element {
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
+installReaderTextNodes(Element);
+
 async function harness(language = 'en') {
     const document = { downloads: [], activeElement: null, createElement(tag) { return new Element(tag, this); } }; document.body = document.createElement('body'); document.activeElement = document.body;
     const context = { language, project: 'project-a', token: 'token-a' }, requests = [], revoked = [], timers = new Map(), previews = []; let sequence = 0, override;
@@ -101,7 +104,7 @@ async function harness(language = 'en') {
         { exports, document, HTMLElement: Element, HTMLInputElement: Element, AbortController, Blob, console,
             URL: { createObjectURL: () => 'blob:publication-' + (++sequence), revokeObjectURL: value => revoked.push(value) },
             setTimeout: run => { const id = ++sequence; timers.set(id, run); return id; }, clearTimeout: id => timers.delete(id),
-            require: name => ({ './reader-route': { readerFetch: request }, './reader-publication-pdf': { ReaderPublicationPdf: class {
+            require: name => ({ './reader-ui-labels': readerUiLabels, './reader-route': { readerFetch: request }, './reader-publication-pdf': { ReaderPublicationPdf: class {
                 constructor(parent, host) { this.host = host; this.canvas = document.createElement('canvas'); parent.append(this.canvas); this.abort = new AbortController(); previews.push(this); }
                 async open(load) { this.blob = await load(this.abort.signal); if (!this.abort.signal.aborted) this.canvas.dataset.rendered = 'true'; }
                 destroy() { this.abort.abort(); this.canvas.remove(); }
@@ -114,7 +117,7 @@ const action = (h, label) => { const value = h.document.body.querySelectorAll('b
 const step = async (h, index) => { const nav = h.document.body.querySelector('.publication-steps'); await nav.children[index].emit('click'); await drain(); };
 const check = async (h, attribute) => { const control = h.document.body.querySelector('[' + attribute + ']'); assert.ok(control); control.checked = true; await control.emit('change'); await drain(); };
 
-async function testPublicationUi() {
+export async function testPublicationUi() {
     const focus = await harness(), more = focus.document.createElement('button'), contents = focus.document.createElement('button');
     focus.document.body.append(more, contents); more.focus(); await focus.reader.open(); focus.reader.close();
     assert.equal(focus.document.activeElement, more, 'Closing the actual publication dialog returns focus to its visible launcher.');
@@ -158,6 +161,11 @@ async function testPublicationUi() {
         assert.equal(h.requests.filter(request => request.body?.action === 'build').length, 1);
         const preview = action(h, language === 'en' ? 'Preview PDF' : '预览 PDF'); assert.equal(preview.textContent, ''); await preview.emit('click'); await drain();
         assert.equal(h.document.body.querySelector('canvas').dataset.rendered, 'true'); assert.equal(h.document.body.querySelector('iframe'), null);
+        const canvas = h.document.body.querySelector('canvas'), previewCount = h.previews.length, requestsBeforeLocale = h.requests.length;
+        h.context.language = language === 'zh' ? 'en' : 'zh'; h.reader.contextChanged();
+        assert.equal(h.document.body.querySelector('canvas'), canvas); assert.equal(h.previews.length, previewCount);
+        assert.equal(h.requests.length, requestsBeforeLocale); assert.equal(h.previews.at(-1).abort.signal.aborted, false, 'Locale changes keep the existing PDF preview mounted.');
+        h.context.language = language; h.reader.contextChanged();
         await action(h, language === 'en' ? 'Download PDF' : '下载 PDF').emit('click'); await drain();
         assert.equal(h.document.downloads.length, 1, 'Canvas preview preserves the existing download action.');
         const publication = action(h, language === 'en' ? 'Publish this edition publicly' : '公开发布这一版'); assert.equal(publication.disabled, true);

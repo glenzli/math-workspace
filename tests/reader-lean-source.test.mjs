@@ -1,3 +1,4 @@
+import { installReaderTextNodes } from './reader-ui-harness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -117,6 +118,8 @@ class Element {
     scrollIntoView() {}
     querySelectorAll(selector) { const result = []; for (const child of this.children) { if (child.className.split(' ').includes(selector.slice(1))) result.push(child); result.push(...child.querySelectorAll(selector)); } return result; }
 }
+
+installReaderTextNodes(Element);
 
 async function sourceControllerModule(directory) {
     const output = path.join(directory, 'source-controller.mjs');

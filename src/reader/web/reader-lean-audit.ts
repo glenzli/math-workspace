@@ -1,3 +1,4 @@
+import { readerLabel, readerAttribute, refreshReaderLabels, readerIconDescription } from './reader-ui-labels';
 import type { LeanReviewResponse, ReviewVerdict } from '../../lean/lean-review';
 import type { AuditAnchorInput, AuditCategory, AuditCorrespondence, AuditIssue, AuditIssueStatus, AuditLink,
     AuditRange, AuditSource, LeanAuditOverview, LeanAuditResponse, LeanAuditReport } from '../../lean/lean-audit';
@@ -129,6 +130,7 @@ export class ReaderLeanAudit {
             void this.load(this.active!);
         } else if (selectionChanged || languageChanged) this.render();
     }
+    refreshLanguage(): void { this.language = this.host.context().language; refreshReaderLabels(this.section); }
     selectionChanged(selected: LeanAuditSelection): void {
         if (JSON.stringify(this.selected) === JSON.stringify(selected)) return;
         this.selected = { ...selected }; if (this.active && !this.section.hidden) this.render();
@@ -204,7 +206,7 @@ export class ReaderLeanAudit {
     }
     private select<T extends string>(labelText: string, choices: T[], value: T, name: string, text: (value: T) => string, update: (value: T) => void): HTMLLabelElement {
         const label = el('label', '', 'reader-lean-audit-field'), select = el('select'); select.dataset.leanAuditField = name; select.disabled = this.busy;
-        for (const choice of choices) { const option = el('option', text(choice)); option.value = choice; select.append(option); }
+        for (const choice of choices) { const option = readerLabel(el('option', text(choice)), () => text(choice)); option.value = choice; select.append(option); }
         select.value = value; select.addEventListener('change', () => update(select.value as T)); label.append(el('span', labelText), select); return label;
     }
     private verdictLabel(value: ReviewVerdict): string { return this.host.context().language === 'zh' ? verdictZh[value] : value; }
@@ -231,30 +233,32 @@ export class ReaderLeanAudit {
     private render(): void {
         if (this.section.hidden) return;
         this.section.replaceChildren(); const head = el('div', '', 'reader-lean-audit-actions');
-        head.append(el('h3', this.t('位置关联与问题', 'Source associations and issues')),
-            action(this.t('重新读取', 'Reload'), 'reload', () => { if (this.active) void this.load(this.active); }),
-            action(this.t('项目总览', 'Project overview'), 'overview', () => {
+        head.append(readerLabel(el('h3', this.t('位置关联与问题', 'Source associations and issues')), () => this.t('位置关联与问题', 'Source associations and issues')),
+            readerLabel(action(this.t('重新读取', 'Reload'), 'reload', () => { if (this.active) void this.load(this.active); }), () => this.t('重新读取', 'Reload')),
+            readerLabel(action(this.t('项目总览', 'Project overview'), 'overview', () => {
                 this.showOverview = !this.showOverview; this.render(); if (this.showOverview && this.active) void this.loadOverview(this.active);
-            }), action(this.t('导出审阅报告', 'Export review report'), 'export', () => { void this.exportReport(); }));
+            }), () => this.t('项目总览', 'Project overview')), readerLabel(action(this.t('导出审阅报告', 'Export review report'), 'export', () => { void this.exportReport(); }), () => this.t('导出审阅报告', 'Export review report')));
         head.querySelector('[data-lean-audit-action="overview"]')?.setAttribute('aria-pressed', String(this.showOverview));
-        this.section.append(head, el('p', this.t('人工选择两侧原文，记录对应范围、假设/符号及问题。关联结论与整对象结论分别显示；构建或 AI 建议不会更新人工结论。',
-            'Select exact text on both sides and record scope, assumptions/symbols and issues. Link verdicts and object verdicts are independent; builds or AI suggestions never update a human decision.'), 'reader-lean-audit-hint'));
+        this.section.append(head, readerLabel(el('p', this.t('人工选择两侧原文，记录对应范围、假设/符号及问题。关联结论与整对象结论分别显示；构建或 AI 建议不会更新人工结论。',
+            'Select exact text on both sides and record scope, assumptions/symbols and issues. Link verdicts and object verdicts are independent; builds or AI suggestions never update a human decision.'), 'reader-lean-audit-hint'), () => this.t('人工选择两侧原文，记录对应范围、假设/符号及问题。关联结论与整对象结论分别显示；构建或 AI 建议不会更新人工结论。',
+            'Select exact text on both sides and record scope, assumptions/symbols and issues. Link verdicts and object verdicts are independent; builds or AI suggestions never update a human decision.')));
         if (this.error) { const error = el('p', this.error, 'reader-lean-audit-warning'); error.setAttribute('role', 'alert'); this.section.append(error); }
-        if (this.outdated) this.section.append(el('p', this.t('记录或源码已变化。草稿保留；重新读取后须重新选择当前两侧范围。', 'Records or source changed. The draft is retained; reload and select both current ranges before saving.'), 'reader-lean-audit-warning'));
-        if (!this.payload) { this.section.append(el('p', this.t('正在读取位置审阅…', 'Loading source audit…'))); return; }
-        this.section.append(el('p', this.t('整对象人工结论：', 'Object human verdict: ') + this.verdictLabel(this.payload.manualReview.verdict || 'undecided') + ' · ' +
+        if (this.outdated) this.section.append(readerLabel(el('p', this.t('记录或源码已变化。草稿保留；重新读取后须重新选择当前两侧范围。', 'Records or source changed. The draft is retained; reload and select both current ranges before saving.'), 'reader-lean-audit-warning'), () => this.t('记录或源码已变化。草稿保留；重新读取后须重新选择当前两侧范围。', 'Records or source changed. The draft is retained; reload and select both current ranges before saving.')));
+        if (!this.payload) { this.section.append(readerLabel(el('p', this.t('正在读取位置审阅…', 'Loading source audit…')), () => this.t('正在读取位置审阅…', 'Loading source audit…'))); return; }
+        this.section.append(readerLabel(el('p', this.t('整对象人工结论：', 'Object human verdict: ') + this.verdictLabel(this.payload.manualReview.verdict || 'undecided') + ' · ' +
+            (this.payload.manualReview.freshness === 'unreviewed' ? this.t('未审阅', 'unreviewed') : this.freshness(this.payload.manualReview.freshness))), () => this.t('整对象人工结论：', 'Object human verdict: ') + this.verdictLabel(this.payload.manualReview.verdict || 'undecided') + ' · ' +
             (this.payload.manualReview.freshness === 'unreviewed' ? this.t('未审阅', 'unreviewed') : this.freshness(this.payload.manualReview.freshness))));
         this.section.append(this.renderLinks(), this.renderLinkEditor(), this.renderIssues());
         if (this.issueDraft) this.section.append(this.renderIssueEditor());
         this.section.append(this.renderHistory());
         const assist = el('div', '', 'reader-lean-audit-actions');
-        assist.append(action(this.host.canAssist?.() ? this.t('引用位置审阅到会话', 'Quote source audit in conversation') : this.t('复制审阅材料', 'Copy audit context'), 'assist', () => { void this.assist(); }, this.host.canAssist?.() ? 'quote' : 'copy'));
+        assist.append(readerLabel(action(this.host.canAssist?.() ? this.t('引用位置审阅到会话', 'Quote source audit in conversation') : this.t('复制审阅材料', 'Copy audit context'), 'assist', () => { void this.assist(); }, this.host.canAssist?.() ? 'quote' : 'copy'), () => this.host.canAssist?.() ? this.t('引用位置审阅到会话', 'Quote source audit in conversation') : this.t('复制审阅材料', 'Copy audit context')));
         this.section.append(assist);
         if (this.showOverview) this.section.append(this.renderOverview());
     }
-    private describeActionState(button: HTMLButtonElement, reason: string): void {
-        describeReaderIconAction(button, button.dataset.readerActionLabel!, button.disabled
-            ? this.busy ? this.t('请等待当前操作完成', 'Wait for the current operation to finish') : reason : '');
+    private describeActionState(button: HTMLButtonElement, reason: () => string, label: () => string): void {
+        readerIconDescription(button, label, () => button.disabled
+            ? this.busy ? this.t('请等待当前操作完成', 'Wait for the current operation to finish') : reason() : '');
     }
     private renderSourcePicker(side: 'prose' | 'lean'): HTMLElement {
         const section = el('div', '', 'reader-lean-audit-source-picker'), sources = side === 'prose' ? this.payload!.proseSources : this.payload!.leanSources;
@@ -269,11 +273,11 @@ export class ReaderLeanAudit {
         }
         select.value = selectedKey;
         select.addEventListener('change', () => { if (side === 'prose') this.proseKey = select.value; else this.leanKey = select.value; this.render(); });
-        section.append(el('h4', this.t(side === 'prose' ? '正文原文选区' : 'Lean 原文选区', side === 'prose' ? 'Prose source selection' : 'Lean source selection')), select);
+        section.append(readerLabel(el('h4', this.t(side === 'prose' ? '正文原文选区' : 'Lean 原文选区', side === 'prose' ? 'Prose source selection' : 'Lean source selection')), () => this.t(side === 'prose' ? '正文原文选区' : 'Lean 原文选区', side === 'prose' ? 'Prose source selection' : 'Lean source selection')), select);
         const source = sources.find(item => item.key === selectedKey);
         if (source) {
             const textarea = el('textarea'); textarea.readOnly = true; textarea.value = source.source.content; textarea.dataset.leanAuditSelection = side;
-            textarea.className = 'reader-lean-audit-source-text'; textarea.setAttribute('aria-label', this.t('拖拽选择要关联的原文', 'Select source text to associate'));
+            textarea.className = 'reader-lean-audit-source-text'; readerAttribute(textarea, 'aria-label', () => this.t('拖拽选择要关联的原文', 'Select source text to associate'));
             const capture = () => {
                 const start = textarea.selectionStart, end = textarea.selectionEnd;
                 if (start === end || this.busy) return;
@@ -281,19 +285,19 @@ export class ReaderLeanAudit {
                 this.capture(side, source, { start: position(textarea.value, start, source.source.startLine), end: position(textarea.value, end, source.source.startLine) }, textarea.value.slice(start, end));
             };
             textarea.addEventListener('select', capture); textarea.addEventListener('mouseup', capture); textarea.addEventListener('keyup', capture); section.append(textarea);
-            if (source.source.truncated) section.append(el('p', this.t('这里只显示有限摘录；完整 Lean 文件可从源码查看器选择。', 'This is a bounded excerpt; select from the full Lean source viewer for other ranges.'), 'reader-lean-audit-hint'));
+            if (source.source.truncated) section.append(readerLabel(el('p', this.t('这里只显示有限摘录；完整 Lean 文件可从源码查看器选择。', 'This is a bounded excerpt; select from the full Lean source viewer for other ranges.'), 'reader-lean-audit-hint'), () => this.t('这里只显示有限摘录；完整 Lean 文件可从源码查看器选择。', 'This is a bounded excerpt; select from the full Lean source viewer for other ranges.')));
             if (side === 'lean') {
-                const use = action(this.t('采用源码查看器当前选区', 'Use current source viewer selection'), 'capture-lean', () => {
+                const use = readerLabel(action(this.t('采用源码查看器当前选区', 'Use current source viewer selection'), 'capture-lean', () => {
                     if (!this.sourceSelectionValid(source)) return;
                     this.capture('lean', { ...source, fileHash: this.selected.sourceHash! }, this.selected.range!);
-                });
+                }), () => this.t('采用源码查看器当前选区', 'Use current source viewer selection'));
                 use.disabled = this.busy || !this.sourceSelectionValid(source);
-                this.describeActionState(use, this.t('请在源码查看器中选择此声明的非空范围', 'Select a nonempty range for this declaration in the source viewer'));
+                this.describeActionState(use, () => this.t('请在源码查看器中选择此声明的非空范围', 'Select a nonempty range for this declaration in the source viewer'), () => this.t('采用源码查看器当前选区', 'Use current source viewer selection'));
                 section.append(use);
             }
-        } else section.append(el('p', this.t('当前对象没有可选择的来源。', 'This object has no selectable source.')));
+        } else section.append(readerLabel(el('p', this.t('当前对象没有可选择的来源。', 'This object has no selectable source.')), () => this.t('当前对象没有可选择的来源。', 'This object has no selectable source.')));
         const captured = this.draft[side];
-        if (captured) { const preview = el('div', '', 'reader-lean-audit-capture'); preview.append(el('strong', this.t('已选择：', 'Selected: ') + rangeLabel(captured)), el('pre', captured.quote || this.t('保存时核对源码查看器选区原文。', 'Source viewer text is checked when saving.'))); section.append(preview); }
+        if (captured) { const preview = el('div', '', 'reader-lean-audit-capture'); preview.append(readerLabel(el('strong', this.t('已选择：', 'Selected: ') + rangeLabel(captured)), () => this.t('已选择：', 'Selected: ') + rangeLabel(captured)), readerLabel(el('pre', captured.quote || this.t('保存时核对源码查看器选区原文。', 'Source viewer text is checked when saving.')), () => captured.quote || this.t('保存时核对源码查看器选区原文。', 'Source viewer text is checked when saving.'))); section.append(preview); }
         return section;
     }
     private capture(side: 'prose' | 'lean', source: AuditSource, range: AuditRange, quote?: string): void {
@@ -307,77 +311,78 @@ export class ReaderLeanAudit {
         // Keep the active text selection visible; update only its saved-position preview and save admission.
         const picker = this.section.querySelector<HTMLElement>(`[data-lean-audit-selection="${side}"]`)?.parentElement;
         picker?.querySelector('.reader-lean-audit-capture')?.remove();
-        const preview = el('div', '', 'reader-lean-audit-capture'); preview.append(el('strong', this.t('已选择：', 'Selected: ') + rangeLabel(anchor)), el('pre', quote || this.t('保存时核对当前选区原文。', 'Current selection is checked on save.'))); picker?.append(preview);
+        const preview = el('div', '', 'reader-lean-audit-capture'); preview.append(readerLabel(el('strong', this.t('已选择：', 'Selected: ') + rangeLabel(anchor)), () => this.t('已选择：', 'Selected: ') + rangeLabel(anchor)), readerLabel(el('pre', quote || this.t('保存时核对当前选区原文。', 'Current selection is checked on save.')), () => quote || this.t('保存时核对当前选区原文。', 'Current selection is checked on save.'))); picker?.append(preview);
         const save = this.section.querySelector<HTMLButtonElement>('[data-lean-audit-action="save-link"]');
         if (save) {
             save.disabled = this.busy || this.outdated || !this.draftCurrent(this.draft) || !this.selectionReady();
-            this.describeActionState(save, this.outdated || !this.draftCurrent(this.draft)
+            this.describeActionState(save, () => this.outdated || !this.draftCurrent(this.draft)
                 ? this.t('草稿依据的材料或审阅版本已变化，请重新读取并核对', 'Draft material or review revisions changed. Reload and recheck')
-                : this.t('请先选择当前两侧原文', 'Select both current source ranges first'));
+                : this.t('请先选择当前两侧原文', 'Select both current source ranges first'), () => this.t('保存此位置关联', 'Save this source association'));
         }
     }
     private renderLinkEditor(): HTMLElement {
         const editor = el('section', '', 'reader-lean-audit-link-editor');
-        editor.append(el('h4', this.t(this.draft.mode === 'create' ? '新建位置关联' : this.draft.mode === 'recheck' ? '重新核对两侧范围' : '更新人工关联说明',
+        editor.append(readerLabel(el('h4', this.t(this.draft.mode === 'create' ? '新建位置关联' : this.draft.mode === 'recheck' ? '重新核对两侧范围' : '更新人工关联说明',
+            this.draft.mode === 'create' ? 'New source association' : this.draft.mode === 'recheck' ? 'Explicitly recheck both source ranges' : 'Update human link notes')), () => this.t(this.draft.mode === 'create' ? '新建位置关联' : this.draft.mode === 'recheck' ? '重新核对两侧范围' : '更新人工关联说明',
             this.draft.mode === 'create' ? 'New source association' : this.draft.mode === 'recheck' ? 'Explicitly recheck both source ranges' : 'Update human link notes')));
         if (this.draft.mode !== 'edit') { const pair = el('div', '', 'reader-lean-audit-pair'); pair.append(this.renderSourcePicker('prose'), this.renderSourcePicker('lean')); editor.append(pair); }
-        editor.append(this.field(this.t('审阅者', 'Reviewer'), this.draft.reviewer, 'link-reviewer', value => { this.touchLinkDraft(); this.draft.reviewer = value; }, false, 300),
-            this.select(this.t('此关联范围内的人工结论', 'Human verdict within this link scope'), verdicts, this.draft.verdict, 'link-verdict', value => this.verdictLabel(value), value => { this.touchLinkDraft(); this.draft.verdict = value; }),
-            this.field(this.t('范围和说明', 'Scope and notes'), this.draft.note, 'link-note', value => { this.touchLinkDraft(); this.draft.note = value; }, true));
-        const pairs = el('fieldset', '', 'reader-lean-audit-correspondences'); pairs.append(el('legend', this.t('明确假设与符号对应', 'Explicit assumptions and symbols')));
+        editor.append(readerLabel(this.field(this.t('审阅者', 'Reviewer'), this.draft.reviewer, 'link-reviewer', value => { this.touchLinkDraft(); this.draft.reviewer = value; }, false, 300), () => this.t('审阅者', 'Reviewer')),
+            readerLabel(this.select(this.t('此关联范围内的人工结论', 'Human verdict within this link scope'), verdicts, this.draft.verdict, 'link-verdict', value => this.verdictLabel(value), value => { this.touchLinkDraft(); this.draft.verdict = value; }), () => this.t('此关联范围内的人工结论', 'Human verdict within this link scope')),
+            readerLabel(this.field(this.t('范围和说明', 'Scope and notes'), this.draft.note, 'link-note', value => { this.touchLinkDraft(); this.draft.note = value; }, true), () => this.t('范围和说明', 'Scope and notes')));
+        const pairs = el('fieldset', '', 'reader-lean-audit-correspondences'); pairs.append(readerLabel(el('legend', this.t('明确假设与符号对应', 'Explicit assumptions and symbols')), () => this.t('明确假设与符号对应', 'Explicit assumptions and symbols')));
         this.draft.correspondences.forEach((pair, index) => {
             const row = el('div', '', 'reader-lean-audit-correspondence');
-            row.append(this.select(this.t('类型', 'Kind'), ['assumption', 'symbol'], pair.kind, 'pair-kind-' + index, value => this.categoryLabel(value), value => pair.kind = value),
-                this.field(this.t('正文假设 / 符号', 'Prose assumption / symbol'), pair.prose, 'pair-prose-' + index, value => pair.prose = value, false, 1000),
-                this.field(this.t('Lean 假设 / 符号', 'Lean assumption / symbol'), pair.lean, 'pair-lean-' + index, value => pair.lean = value, false, 1000),
-                this.field(this.t('对应说明', 'Correspondence note'), pair.note, 'pair-note-' + index, value => pair.note = value, true, 4000),
-                action(this.t('移除', 'Remove'), 'remove-pair', () => { this.draft.correspondences.splice(index, 1); this.render(); })); pairs.append(row);
+            row.append(readerLabel(this.select(this.t('类型', 'Kind'), ['assumption', 'symbol'], pair.kind, 'pair-kind-' + index, value => this.categoryLabel(value), value => pair.kind = value), () => this.t('类型', 'Kind')),
+                readerLabel(this.field(this.t('正文假设 / 符号', 'Prose assumption / symbol'), pair.prose, 'pair-prose-' + index, value => pair.prose = value, false, 1000), () => this.t('正文假设 / 符号', 'Prose assumption / symbol')),
+                readerLabel(this.field(this.t('Lean 假设 / 符号', 'Lean assumption / symbol'), pair.lean, 'pair-lean-' + index, value => pair.lean = value, false, 1000), () => this.t('Lean 假设 / 符号', 'Lean assumption / symbol')),
+                readerLabel(this.field(this.t('对应说明', 'Correspondence note'), pair.note, 'pair-note-' + index, value => pair.note = value, true, 4000), () => this.t('对应说明', 'Correspondence note')),
+                readerLabel(action(this.t('移除', 'Remove'), 'remove-pair', () => { this.draft.correspondences.splice(index, 1); this.render(); }), () => this.t('移除', 'Remove'))); pairs.append(row);
         });
-        const add = action(this.t('添加假设 / 符号', 'Add assumption / symbol'), 'add-pair', () => {
+        const add = readerLabel(action(this.t('添加假设 / 符号', 'Add assumption / symbol'), 'add-pair', () => {
             this.touchLinkDraft();
             this.draft.correspondences.push({ kind: 'assumption', prose: '', lean: '', note: '' }); this.render();
-        }); add.disabled = this.busy || this.draft.correspondences.length >= 40;
-        this.describeActionState(add, this.t('最多记录 40 项假设或符号对应', 'At most 40 assumption or symbol correspondences')); pairs.append(add); editor.append(pairs);
-        const actions = el('div', '', 'reader-lean-audit-actions'), save = action(this.t('保存此位置关联', 'Save this source association'), 'save-link', () => {
+        }), () => this.t('添加假设 / 符号', 'Add assumption / symbol')); add.disabled = this.busy || this.draft.correspondences.length >= 40;
+        this.describeActionState(add, () => this.t('最多记录 40 项假设或符号对应', 'At most 40 assumption or symbol correspondences'), () => this.t('添加假设 / 符号', 'Add assumption / symbol')); pairs.append(add); editor.append(pairs);
+        const actions = el('div', '', 'reader-lean-audit-actions'), save = readerLabel(action(this.t('保存此位置关联', 'Save this source association'), 'save-link', () => {
             const draft = this.draft;
             void this.save({ action: draft.mode === 'create' ? 'create-link' : draft.mode === 'edit' ? 'edit-link' : 'recheck-link',
                 linkId: draft.linkId, prose: draft.prose, lean: draft.lean, reviewer: draft.reviewer, verdict: draft.verdict, note: draft.note,
                 correspondences: draft.correspondences, expectedRevision: draft.baseRevision, evidenceFingerprint: draft.evidenceFingerprint });
-        });
+        }), () => this.t('保存此位置关联', 'Save this source association'));
         save.disabled = this.busy || this.outdated || !this.draftCurrent(this.draft) || (this.draft.mode !== 'edit' && !this.selectionReady()); actions.append(save);
-        this.describeActionState(save, this.outdated || !this.draftCurrent(this.draft)
+        this.describeActionState(save, () => this.outdated || !this.draftCurrent(this.draft)
             ? this.t('草稿依据的材料或审阅版本已变化，请重新读取并核对', 'Draft material or review revisions changed. Reload and recheck')
-            : this.t('请先选择当前两侧原文', 'Select both current source ranges first'));
-        if (!this.draftCurrent(this.draft)) editor.append(el('p', this.t('此草稿基于旧审阅版本，已保留供参考。取消后重新打开当前记录或重新选择，才能再次保存。', 'This draft uses an older audit revision and is retained for reference. Cancel and reopen the current record or reselect before saving.'), 'reader-lean-audit-warning'));
-        if (this.draft.mode !== 'edit' && (this.draft.prose || this.draft.lean) && !this.selectionReady()) editor.append(el('p', this.t('请在当前证据和人工分项版本下重新选择两侧原文。', 'Select both ranges under the current evidence and human subclaim version.'), 'reader-lean-audit-hint'));
-        if (this.draft.mode !== 'create' || this.draft.baseRevision !== undefined) actions.append(action(this.t('取消当前草稿', 'Cancel current draft'), 'cancel-link', () => { this.draft = newDraft(); this.render(); }));
+            : this.t('请先选择当前两侧原文', 'Select both current source ranges first'), () => this.t('保存此位置关联', 'Save this source association'));
+        if (!this.draftCurrent(this.draft)) editor.append(readerLabel(el('p', this.t('此草稿基于旧审阅版本，已保留供参考。取消后重新打开当前记录或重新选择，才能再次保存。', 'This draft uses an older audit revision and is retained for reference. Cancel and reopen the current record or reselect before saving.'), 'reader-lean-audit-warning'), () => this.t('此草稿基于旧审阅版本，已保留供参考。取消后重新打开当前记录或重新选择，才能再次保存。', 'This draft uses an older audit revision and is retained for reference. Cancel and reopen the current record or reselect before saving.')));
+        if (this.draft.mode !== 'edit' && (this.draft.prose || this.draft.lean) && !this.selectionReady()) editor.append(readerLabel(el('p', this.t('请在当前证据和人工分项版本下重新选择两侧原文。', 'Select both ranges under the current evidence and human subclaim version.'), 'reader-lean-audit-hint'), () => this.t('请在当前证据和人工分项版本下重新选择两侧原文。', 'Select both ranges under the current evidence and human subclaim version.')));
+        if (this.draft.mode !== 'create' || this.draft.baseRevision !== undefined) actions.append(readerLabel(action(this.t('取消当前草稿', 'Cancel current draft'), 'cancel-link', () => { this.draft = newDraft(); this.render(); }), () => this.t('取消当前草稿', 'Cancel current draft')));
         editor.append(actions); return editor;
     }
     private renderLinks(): HTMLElement {
-        const section = el('section', '', 'reader-lean-audit-links'); section.append(el('h4', this.t('已保存的位置关联', 'Saved source associations')),
-            this.select(this.t('筛选关联', 'Filter links'), ['all', 'current', 'stale'], this.linkFilter, 'link-filter', value => this.t(({ all: '全部', current: '当前', stale: '待复核' })[value], value), value => { this.linkFilter = value; this.render(); }));
+        const section = el('section', '', 'reader-lean-audit-links'); section.append(readerLabel(el('h4', this.t('已保存的位置关联', 'Saved source associations')), () => this.t('已保存的位置关联', 'Saved source associations')),
+            readerLabel(this.select(this.t('筛选关联', 'Filter links'), ['all', 'current', 'stale'], this.linkFilter, 'link-filter', value => this.t(({ all: '全部', current: '当前', stale: '待复核' })[value], value), value => { this.linkFilter = value; this.render(); }), () => this.t('筛选关联', 'Filter links')));
         const links = this.payload!.links.filter(item => this.linkFilter === 'all' || item.freshness === this.linkFilter);
-        if (!links.length) section.append(el('p', this.t('没有匹配的位置关联。', 'No matching source associations.')));
+        if (!links.length) section.append(readerLabel(el('p', this.t('没有匹配的位置关联。', 'No matching source associations.')), () => this.t('没有匹配的位置关联。', 'No matching source associations.')));
         for (const projection of links) {
             const link = projection.link, entry = el('article', '', 'reader-lean-audit-link'); entry.dataset.leanAuditLink = link.id;
-            entry.append(el('strong', this.verdictLabel(link.verdict) + ' · ' + this.freshness(projection.freshness)), el('p', link.note),
-                el('p', this.t('正文：', 'Prose: ') + rangeLabel(link.prose)), el('pre', link.prose.quote),
+            entry.append(readerLabel(el('strong', this.verdictLabel(link.verdict) + ' · ' + this.freshness(projection.freshness)), () => this.verdictLabel(link.verdict) + ' · ' + this.freshness(projection.freshness)), el('p', link.note),
+                readerLabel(el('p', this.t('正文：', 'Prose: ') + rangeLabel(link.prose)), () => this.t('正文：', 'Prose: ') + rangeLabel(link.prose)), el('pre', link.prose.quote),
                 el('p', 'Lean: ' + rangeLabel(link.lean)), el('pre', link.lean.quote));
-            if (link.prose.subclaimId) entry.append(el('p', this.t('已保存分项：', 'Saved subclaim: ') + link.prose.subclaimId));
-            for (const pair of link.correspondences) entry.append(el('p', `${this.categoryLabel(pair.kind)}: ${pair.prose} ↔ ${pair.lean}. ${pair.note}`));
+            if (link.prose.subclaimId) entry.append(readerLabel(el('p', this.t('已保存分项：', 'Saved subclaim: ') + link.prose.subclaimId), () => this.t('已保存分项：', 'Saved subclaim: ') + link.prose.subclaimId));
+            for (const pair of link.correspondences) entry.append(readerLabel(el('p', `${this.categoryLabel(pair.kind)}: ${pair.prose} ↔ ${pair.lean}. ${pair.note}`), () => `${this.categoryLabel(pair.kind)}: ${pair.prose} ↔ ${pair.lean}. ${pair.note}`));
             if (projection.reasons.length) entry.append(el('p', projection.reasons.join('; '), 'reader-lean-audit-warning'));
             const buttons = el('div', '', 'reader-lean-audit-actions');
-            buttons.append(action(this.t('定位正文', 'Locate prose'), 'jump-prose', () => { void this.jumpProse(link); }),
-                action(this.t('定位 Lean', 'Locate Lean'), 'jump-lean', () => { void this.jumpLean(link, projection.freshness === 'stale'); }),
-                action(this.t('重新核对', 'Recheck'), 'recheck-link', () => this.editLink(link, true)));
-            const edit = action(this.t('修改说明', 'Edit notes'), 'edit-link', () => this.editLink(link, false)); edit.disabled = projection.freshness === 'stale' || this.busy; buttons.append(edit);
-            this.describeActionState(edit, this.t('来源或记录已变化，请先重新核对', 'Source or records changed. Recheck first'));
-            const issue = action(this.t('记录问题', 'Record issue'), 'create-issue', () => {
+            buttons.append(readerLabel(action(this.t('定位正文', 'Locate prose'), 'jump-prose', () => { void this.jumpProse(link); }), () => this.t('定位正文', 'Locate prose')),
+                readerLabel(action(this.t('定位 Lean', 'Locate Lean'), 'jump-lean', () => { void this.jumpLean(link, projection.freshness === 'stale'); }), () => this.t('定位 Lean', 'Locate Lean')),
+                readerLabel(action(this.t('重新核对', 'Recheck'), 'recheck-link', () => this.editLink(link, true)), () => this.t('重新核对', 'Recheck')));
+            const edit = readerLabel(action(this.t('修改说明', 'Edit notes'), 'edit-link', () => this.editLink(link, false)), () => this.t('修改说明', 'Edit notes')); edit.disabled = projection.freshness === 'stale' || this.busy; buttons.append(edit);
+            this.describeActionState(edit, () => this.t('来源或记录已变化，请先重新核对', 'Source or records changed. Recheck first'), () => this.t('修改说明', 'Edit notes'));
+            const issue = readerLabel(action(this.t('记录问题', 'Record issue'), 'create-issue', () => {
                 this.issueDraft = { mode: 'create', linkId: link.id, category: 'assumption', title: '', note: '', status: 'open', resolution: '', reviewer: link.reviewer,
                     baseRevision: this.payload!.expectedRevision, evidenceFingerprint: this.payload!.evidenceFingerprint }; this.render();
                 this.section.querySelector<HTMLElement>('[data-lean-audit-field="issue-title"]')?.focus();
-            }); issue.disabled = projection.freshness === 'stale' || this.busy; buttons.append(issue); entry.append(buttons); section.append(entry);
-            this.describeActionState(issue, this.t('来源或记录已变化，请先重新核对', 'Source or records changed. Recheck first'));
+            }), () => this.t('记录问题', 'Record issue')); issue.disabled = projection.freshness === 'stale' || this.busy; buttons.append(issue); entry.append(buttons); section.append(entry);
+            this.describeActionState(issue, () => this.t('来源或记录已变化，请先重新核对', 'Source or records changed. Recheck first'), () => this.t('记录问题', 'Record issue'));
         }
         return section;
     }
@@ -399,21 +404,21 @@ export class ReaderLeanAudit {
         } catch (error) { this.host.report(String(error), true); }
     }
     private renderIssues(): HTMLElement {
-        const section = el('section', '', 'reader-lean-audit-issues'); section.append(el('h4', this.t('问题与复核', 'Issues and rechecks')),
-            this.select(this.t('筛选问题', 'Filter issues'), ['all', 'unresolved', 'open', 'resolved', 'dismissed', 'stale'], this.issueFilter, 'issue-filter', value => this.t(({ all: '全部', unresolved: '未解决 / 待复核', open: '未解决', resolved: '已解决', dismissed: '已撤回', stale: '待复核' })[value], value), value => { this.issueFilter = value; this.render(); }));
+        const section = el('section', '', 'reader-lean-audit-issues'); section.append(readerLabel(el('h4', this.t('问题与复核', 'Issues and rechecks')), () => this.t('问题与复核', 'Issues and rechecks')),
+            readerLabel(this.select(this.t('筛选问题', 'Filter issues'), ['all', 'unresolved', 'open', 'resolved', 'dismissed', 'stale'], this.issueFilter, 'issue-filter', value => this.t(({ all: '全部', unresolved: '未解决 / 待复核', open: '未解决', resolved: '已解决', dismissed: '已撤回', stale: '待复核' })[value], value), value => { this.issueFilter = value; this.render(); }), () => this.t('筛选问题', 'Filter issues')));
         const issues = this.payload!.issues.filter(value => this.issueFilter === 'all' || (this.issueFilter === 'unresolved' ? value.unresolved
             : this.issueFilter === 'stale' ? value.freshness === 'stale' : value.issue.status === this.issueFilter));
-        if (!issues.length) section.append(el('p', this.t('没有匹配的问题。', 'No matching issues.')));
+        if (!issues.length) section.append(readerLabel(el('p', this.t('没有匹配的问题。', 'No matching issues.')), () => this.t('没有匹配的问题。', 'No matching issues.')));
         for (const projection of issues) {
             const issue = projection.issue, entry = el('article', '', 'reader-lean-audit-issue'); entry.dataset.leanAuditIssue = issue.id;
-            entry.append(el('strong', `${this.categoryLabel(issue.category)} · ${this.statusLabel(issue.status)} · ${this.freshness(projection.freshness)}`),
-                el('p', issue.title), el('p', issue.note), el('p', this.t('处理说明：', 'Resolution: ') + issue.resolution));
-            if (projection.unresolved && issue.status !== 'open') entry.append(el('p', this.t('先前处理结论已过期，仍计入待处理。', 'The previous disposition is stale and remains actionable.'), 'reader-lean-audit-warning'));
+            entry.append(readerLabel(el('strong', `${this.categoryLabel(issue.category)} · ${this.statusLabel(issue.status)} · ${this.freshness(projection.freshness)}`), () => `${this.categoryLabel(issue.category)} · ${this.statusLabel(issue.status)} · ${this.freshness(projection.freshness)}`),
+                el('p', issue.title), el('p', issue.note), readerLabel(el('p', this.t('处理说明：', 'Resolution: ') + issue.resolution), () => this.t('处理说明：', 'Resolution: ') + issue.resolution));
+            if (projection.unresolved && issue.status !== 'open') entry.append(readerLabel(el('p', this.t('先前处理结论已过期，仍计入待处理。', 'The previous disposition is stale and remains actionable.'), 'reader-lean-audit-warning'), () => this.t('先前处理结论已过期，仍计入待处理。', 'The previous disposition is stale and remains actionable.')));
             if (projection.reasons.length) entry.append(el('p', projection.reasons.join('; '), 'reader-lean-audit-warning'));
             const buttons = el('div', '', 'reader-lean-audit-actions');
-            const edit = action(this.t('修改 / 处理', 'Edit / resolve'), 'edit-issue', () => this.editIssue(issue, false)); edit.disabled = projection.freshness === 'stale' || this.busy;
-            this.describeActionState(edit, this.t('来源或记录已变化，请先明确复核', 'Source or records changed. Explicitly recheck first'));
-            buttons.append(edit, action(this.t('明确复核', 'Explicit recheck'), 'recheck-issue', () => this.editIssue(issue, true))); entry.append(buttons); section.append(entry);
+            const edit = readerLabel(action(this.t('修改 / 处理', 'Edit / resolve'), 'edit-issue', () => this.editIssue(issue, false)), () => this.t('修改 / 处理', 'Edit / resolve')); edit.disabled = projection.freshness === 'stale' || this.busy;
+            this.describeActionState(edit, () => this.t('来源或记录已变化，请先明确复核', 'Source or records changed. Explicitly recheck first'), () => this.t('修改 / 处理', 'Edit / resolve'));
+            buttons.append(edit, readerLabel(action(this.t('明确复核', 'Explicit recheck'), 'recheck-issue', () => this.editIssue(issue, true)), () => this.t('明确复核', 'Explicit recheck'))); entry.append(buttons); section.append(entry);
         }
         return section;
     }
@@ -423,36 +428,36 @@ export class ReaderLeanAudit {
     }
     private renderIssueEditor(): HTMLElement {
         const draft = this.issueDraft!, editor = el('section', '', 'reader-lean-audit-issue-editor');
-        editor.append(el('h4', this.t(draft.mode === 'recheck' ? '明确复核此问题' : '记录 / 处理问题', draft.mode === 'recheck' ? 'Explicitly recheck this issue' : 'Record / resolve an issue')),
-            el('p', this.t('关联：', 'Link: ') + draft.linkId),
-            this.select(this.t('问题类型', 'Issue category'), categories, draft.category, 'issue-category', value => this.categoryLabel(value), value => draft.category = value),
-            this.field(this.t('问题', 'Issue'), draft.title, 'issue-title', value => draft.title = value, false, 500),
-            this.field(this.t('说明', 'Notes'), draft.note, 'issue-note', value => draft.note = value, true),
-            this.select(this.t('人工处理状态', 'Human disposition'), statuses, draft.status, 'issue-status', value => this.statusLabel(value), value => draft.status = value),
-            this.field(this.t('处理 / 复核依据', 'Resolution / recheck rationale'), draft.resolution, 'issue-resolution', value => draft.resolution = value, true),
-            this.field(this.t('审阅者', 'Reviewer'), draft.reviewer, 'issue-reviewer', value => draft.reviewer = value, false, 300));
-        const save = action(this.t('保存问题决定', 'Save issue decision'), 'save-issue', () => {
+        editor.append(readerLabel(el('h4', this.t(draft.mode === 'recheck' ? '明确复核此问题' : '记录 / 处理问题', draft.mode === 'recheck' ? 'Explicitly recheck this issue' : 'Record / resolve an issue')), () => this.t(draft.mode === 'recheck' ? '明确复核此问题' : '记录 / 处理问题', draft.mode === 'recheck' ? 'Explicitly recheck this issue' : 'Record / resolve an issue')),
+            readerLabel(el('p', this.t('关联：', 'Link: ') + draft.linkId), () => this.t('关联：', 'Link: ') + draft.linkId),
+            readerLabel(this.select(this.t('问题类型', 'Issue category'), categories, draft.category, 'issue-category', value => this.categoryLabel(value), value => draft.category = value), () => this.t('问题类型', 'Issue category')),
+            readerLabel(this.field(this.t('问题', 'Issue'), draft.title, 'issue-title', value => draft.title = value, false, 500), () => this.t('问题', 'Issue')),
+            readerLabel(this.field(this.t('说明', 'Notes'), draft.note, 'issue-note', value => draft.note = value, true), () => this.t('说明', 'Notes')),
+            readerLabel(this.select(this.t('人工处理状态', 'Human disposition'), statuses, draft.status, 'issue-status', value => this.statusLabel(value), value => draft.status = value), () => this.t('人工处理状态', 'Human disposition')),
+            readerLabel(this.field(this.t('处理 / 复核依据', 'Resolution / recheck rationale'), draft.resolution, 'issue-resolution', value => draft.resolution = value, true), () => this.t('处理 / 复核依据', 'Resolution / recheck rationale')),
+            readerLabel(this.field(this.t('审阅者', 'Reviewer'), draft.reviewer, 'issue-reviewer', value => draft.reviewer = value, false, 300), () => this.t('审阅者', 'Reviewer')));
+        const save = readerLabel(action(this.t('保存问题决定', 'Save issue decision'), 'save-issue', () => {
             void this.save({ ...draft, expectedRevision: draft.baseRevision, action: draft.mode === 'create' ? 'create-issue' : draft.mode === 'recheck' ? 'recheck-issue' : 'update-issue' });
-        }); save.disabled = this.busy || this.outdated || !this.draftCurrent(draft);
-        this.describeActionState(save, this.t('问题草稿依据的材料或审阅版本已变化，请重新读取并核对', 'Issue draft material or review revisions changed. Reload and recheck'));
-        if (!this.draftCurrent(draft)) editor.append(el('p', this.t('此问题草稿基于旧审阅版本，已保留。取消后重新打开当前问题再核对。', 'This issue draft uses an older audit revision and is retained. Cancel and reopen the current issue before checking it again.'), 'reader-lean-audit-warning'));
-        editor.append(save, action(this.t('取消', 'Cancel'), 'cancel-issue', () => { this.issueDraft = undefined; if (this.active) this.issueDrafts.delete(this.key(this.active)); this.render(); })); return editor;
+        }), () => this.t('保存问题决定', 'Save issue decision')); save.disabled = this.busy || this.outdated || !this.draftCurrent(draft);
+        this.describeActionState(save, () => this.t('问题草稿依据的材料或审阅版本已变化，请重新读取并核对', 'Issue draft material or review revisions changed. Reload and recheck'), () => this.t('保存问题决定', 'Save issue decision'));
+        if (!this.draftCurrent(draft)) editor.append(readerLabel(el('p', this.t('此问题草稿基于旧审阅版本，已保留。取消后重新打开当前问题再核对。', 'This issue draft uses an older audit revision and is retained. Cancel and reopen the current issue before checking it again.'), 'reader-lean-audit-warning'), () => this.t('此问题草稿基于旧审阅版本，已保留。取消后重新打开当前问题再核对。', 'This issue draft uses an older audit revision and is retained. Cancel and reopen the current issue before checking it again.')));
+        editor.append(save, readerLabel(action(this.t('取消', 'Cancel'), 'cancel-issue', () => { this.issueDraft = undefined; if (this.active) this.issueDrafts.delete(this.key(this.active)); this.render(); }), () => this.t('取消', 'Cancel'))); return editor;
     }
     private renderHistory(): HTMLElement {
-        const details = el('details', '', 'reader-lean-audit-history'); details.append(el('summary', this.t('人工决定历史', 'Human decision history')));
-        details.append(el('p', this.t('历史有界保留；被移除的旧项数量明确显示。来源变化不会自动重写历史。', 'History retention is bounded; dropped counts are explicit. Source changes never rewrite past decisions.')));
+        const details = el('details', '', 'reader-lean-audit-history'); details.append(readerLabel(el('summary', this.t('人工决定历史', 'Human decision history')), () => this.t('人工决定历史', 'Human decision history')));
+        details.append(readerLabel(el('p', this.t('历史有界保留；被移除的旧项数量明确显示。来源变化不会自动重写历史。', 'History retention is bounded; dropped counts are explicit. Source changes never rewrite past decisions.')), () => this.t('历史有界保留；被移除的旧项数量明确显示。来源变化不会自动重写历史。', 'History retention is bounded; dropped counts are explicit. Source changes never rewrite past decisions.')));
         const manual = this.payload!.manualReview;
-        details.append(el('h4', this.t('整对象审阅历史', 'Object decision history')), el('p', `${this.t('已保留 / 已移除：', 'Retained / dropped: ')}${manual.history.length} / ${manual.historyDropped}`));
+        details.append(readerLabel(el('h4', this.t('整对象审阅历史', 'Object decision history')), () => this.t('整对象审阅历史', 'Object decision history')), readerLabel(el('p', `${this.t('已保留 / 已移除：', 'Retained / dropped: ')}${manual.history.length} / ${manual.historyDropped}`), () => `${this.t('已保留 / 已移除：', 'Retained / dropped: ')}${manual.history.length} / ${manual.historyDropped}`));
         for (const decision of manual.history) {
-            const row = el('details'); row.append(el('summary', `r${decision.revision} · ${decision.reviewedAt} · ${decision.reviewer} · ${this.verdictLabel(decision.verdict)}`), el('p', decision.scope), el('p', decision.note));
-            for (const claim of decision.subclaims) row.append(el('p', `${claim.id}: ${claim.text} · ${this.verdictLabel(claim.verdict)} · ${claim.note}`)); details.append(row);
+            const row = el('details'); row.append(readerLabel(el('summary', `r${decision.revision} · ${decision.reviewedAt} · ${decision.reviewer} · ${this.verdictLabel(decision.verdict)}`), () => `r${decision.revision} · ${decision.reviewedAt} · ${decision.reviewer} · ${this.verdictLabel(decision.verdict)}`), el('p', decision.scope), el('p', decision.note));
+            for (const claim of decision.subclaims) row.append(readerLabel(el('p', `${claim.id}: ${claim.text} · ${this.verdictLabel(claim.verdict)} · ${claim.note}`), () => `${claim.id}: ${claim.text} · ${this.verdictLabel(claim.verdict)} · ${claim.note}`)); details.append(row);
         }
         const record = this.payload!.record;
-        details.append(el('h4', this.t('位置关联与问题历史', 'Link and issue history')), el('p', `${this.t('已保留 / 已移除：', 'Retained / dropped: ')}${record?.history.length || 0} / ${record?.historyDropped || 0}`));
+        details.append(readerLabel(el('h4', this.t('位置关联与问题历史', 'Link and issue history')), () => this.t('位置关联与问题历史', 'Link and issue history')), readerLabel(el('p', `${this.t('已保留 / 已移除：', 'Retained / dropped: ')}${record?.history.length || 0} / ${record?.historyDropped || 0}`), () => `${this.t('已保留 / 已移除：', 'Retained / dropped: ')}${record?.history.length || 0} / ${record?.historyDropped || 0}`));
         for (const event of record?.history || []) {
             const row = el('details'); row.append(el('summary', `r${event.revision} · ${event.at} · ${event.reviewer} · ${event.action} · ${event.targetId}`));
-            if (event.before) row.append(el('strong', this.t('此前', 'Before')), el('pre', JSON.stringify(event.before, null, 2)));
-            row.append(el('strong', this.t('此次', 'After')), el('pre', JSON.stringify(event.after, null, 2))); details.append(row);
+            if (event.before) row.append(readerLabel(el('strong', this.t('此前', 'Before')), () => this.t('此前', 'Before')), el('pre', JSON.stringify(event.before, null, 2)));
+            row.append(readerLabel(el('strong', this.t('此次', 'After')), () => this.t('此次', 'After')), el('pre', JSON.stringify(event.after, null, 2))); details.append(row);
         }
         return details;
     }
@@ -466,18 +471,18 @@ export class ReaderLeanAudit {
         } catch (error) { if (this.matches(identity) && version === this.overviewVersion) this.host.report(String(error), true); }
     }
     private renderOverview(): HTMLElement {
-        const section = el('section', '', 'reader-lean-audit-overview'); section.append(el('h4', this.t('全项目审阅总览', 'Whole project review overview')));
-        if (!this.overview) { section.append(el('p', this.t('正在读取总览…', 'Loading overview…'))); return section; }
+        const section = el('section', '', 'reader-lean-audit-overview'); section.append(readerLabel(el('h4', this.t('全项目审阅总览', 'Whole project review overview')), () => this.t('全项目审阅总览', 'Whole project review overview')));
+        if (!this.overview) { section.append(readerLabel(el('p', this.t('正在读取总览…', 'Loading overview…')), () => this.t('正在读取总览…', 'Loading overview…'))); return section; }
         const counts = this.overview.counts;
-        section.append(el('p', this.t(`对象 ${counts.total} · 未审阅 ${counts.pending} · 人工结论待复核 ${counts.stale} · 未解决 / 待复核问题 ${counts.unresolvedIssues}`, `Objects ${counts.total} · unreviewed ${counts.pending} · stale human reviews ${counts.stale} · unresolved/stale issues ${counts.unresolvedIssues}`)),
-            this.select(this.t('筛选对象', 'Filter objects'), ['all', 'pending', 'stale', 'unresolved'], this.overviewFilter, 'overview-filter', value => this.t(({ all: '全部', pending: '未审阅', stale: '待复核', unresolved: '未解决问题' })[value], value), value => { this.overviewFilter = value; this.render(); }));
+        section.append(readerLabel(el('p', this.t(`对象 ${counts.total} · 未审阅 ${counts.pending} · 人工结论待复核 ${counts.stale} · 未解决 / 待复核问题 ${counts.unresolvedIssues}`, `Objects ${counts.total} · unreviewed ${counts.pending} · stale human reviews ${counts.stale} · unresolved/stale issues ${counts.unresolvedIssues}`)), () => this.t(`对象 ${counts.total} · 未审阅 ${counts.pending} · 人工结论待复核 ${counts.stale} · 未解决 / 待复核问题 ${counts.unresolvedIssues}`, `Objects ${counts.total} · unreviewed ${counts.pending} · stale human reviews ${counts.stale} · unresolved/stale issues ${counts.unresolvedIssues}`)),
+            readerLabel(this.select(this.t('筛选对象', 'Filter objects'), ['all', 'pending', 'stale', 'unresolved'], this.overviewFilter, 'overview-filter', value => this.t(({ all: '全部', pending: '未审阅', stale: '待复核', unresolved: '未解决问题' })[value], value), value => { this.overviewFilter = value; this.render(); }), () => this.t('筛选对象', 'Filter objects')));
         const list = el('ul');
         for (const item of this.overview.items.filter(item => this.overviewFilter === 'all' || (this.overviewFilter === 'pending' ? item.reviewFreshness === 'unreviewed'
             : this.overviewFilter === 'stale' ? item.reviewFreshness === 'stale' || item.staleLinks > 0 || item.staleIssues > 0 : item.unresolvedIssues > 0))) {
-            const row = el('li'); row.append(action(`${item.display} ${item.title} · ${item.filePath}:${item.line} · ${item.reviewFreshness} · ${this.t('问题', 'issues')} ${item.unresolvedIssues}`, 'open-object', () => { void this.host.openReview(item.id); })); list.append(row);
+            const row = el('li'); row.append(readerLabel(action(`${item.display} ${item.title} · ${item.filePath}:${item.line} · ${item.reviewFreshness} · ${this.t('问题', 'issues')} ${item.unresolvedIssues}`, 'open-object', () => { void this.host.openReview(item.id); }), () => `${item.display} ${item.title} · ${item.filePath}:${item.line} · ${item.reviewFreshness} · ${this.t('问题', 'issues')} ${item.unresolvedIssues}`)); list.append(row);
         }
         section.append(list);
-        if (this.overview.orphaned.length) section.append(el('p', this.t('已有记录但对象已不在当前队列：', 'Records outside the current object queue: ') + this.overview.orphaned.map(item => item.id).join(', '), 'reader-lean-audit-warning'));
+        if (this.overview.orphaned.length) section.append(readerLabel(el('p', this.t('已有记录但对象已不在当前队列：', 'Records outside the current object queue: ') + this.overview.orphaned.map(item => item.id).join(', '), 'reader-lean-audit-warning'), () => this.t('已有记录但对象已不在当前队列：', 'Records outside the current object queue: ') + this.overview.orphaned.map(item => item.id).join(', ')));
         return section;
     }
     private async exportReport(): Promise<void> {

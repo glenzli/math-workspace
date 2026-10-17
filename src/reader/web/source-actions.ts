@@ -1,3 +1,4 @@
+import { readerLabel, readerText, readerAttribute, readerTemporaryLabel, readerWords } from './reader-ui-labels';
 import type { ReaderFormula } from './formal-renderer';
 import { copyReaderText } from './reader-clipboard';
 import { readerIcon, type ReaderIconName } from './reader-icons';
@@ -69,6 +70,7 @@ export class ReaderSourceActions {
     private selectionTimer: number | undefined;
     private definitionRequestId = 0;
     private formulaReturnFocus: HTMLElement | undefined;
+    private readonly copiedLabels = new WeakMap<HTMLButtonElement, { timer: number; restore(): void }>();
     private readonly onPointerDown = (event: PointerEvent) => {
         const target = event.target as Node | null;
         if (this.article?.contains(target) || this.popover?.contains(target)) return;
@@ -209,7 +211,7 @@ export class ReaderSourceActions {
             this.dismiss();
             return;
         }
-        const labels = this.host.labels();
+        const labels = readerWords(() => this.host.labels());
         const definitions = isMeaningfulDefinitionQuery(selected.text)
             ? this.host.getDefinitions(selected.text)
             : [];
@@ -217,13 +219,13 @@ export class ReaderSourceActions {
             const actions = document.createElement('div');
             actions.className = 'reader-source-actions';
             if (selected.markdown) {
-                actions.append(this.iconButton('copy-source', labels.copySelectedMarkdown, async button => {
+                actions.append(readerLabel(this.iconButton('copy-source', labels.copySelectedMarkdown, async button => {
                     await this.copyAndMark(button, selected.markdown as string);
-                }));
+                }), () => this.host.labels().copySelectedMarkdown));
             }
-            actions.append(this.iconButton('copy-line', labels.copySourceLines, async button => {
+            actions.append(readerLabel(this.iconButton('copy-line', labels.copySourceLines, async button => {
                 await this.copyAndMark(button, selected.sourceLines);
-            }));
+            }), () => this.host.labels().copySourceLines));
             const referenceLocation: ReaderReferenceLocation = {
                 filePath: this.sourceDocument?.filePath || '',
                 startLine: selected.startLine,
@@ -234,9 +236,9 @@ export class ReaderSourceActions {
                 this.dismiss();
             }));
             if (definitions.length > 0) {
-                actions.append(this.iconButton('definition', labels.lookupDefinition, () => {
+                actions.append(readerLabel(this.iconButton('definition', labels.lookupDefinition, () => {
                     this.showDefinitionLookup(selected.text, selected.rect, definitions);
-                }));
+                }), () => this.host.labels().lookupDefinition));
             }
             popover.append(actions);
         }, true);
@@ -256,14 +258,14 @@ export class ReaderSourceActions {
     }
 
     private showFormulaActions(formula: ReaderFormula, rect: DOMRect, sourceRange?: { startLine: number; endLine: number; sourceLines: string }): void {
-        const labels = this.host.labels();
+        const labels = readerWords(() => this.host.labels());
         this.openPopover(rect, popover => {
             const actions = document.createElement('div');
             actions.className = 'reader-source-actions';
             actions.append(
-                this.iconButton('copy', labels.copyLatex, async button => {
+                readerLabel(this.iconButton('copy', labels.copyLatex, async button => {
                     await this.copyAndMark(button, formula.latex);
-                })
+                }), () => this.host.labels().copyLatex)
             );
             if (this.host.toggleFormulaLayout && (this.host.canAdaptFormula?.(formula) || this.host.isFormulaAdapted?.(formula))) {
                 const sourceDocument = this.sourceDocument;
@@ -284,6 +286,7 @@ export class ReaderSourceActions {
                         }
                     }
                 });
+                readerLabel(button, () => button.getAttribute('aria-busy') === 'true' ? this.host.labels().adaptingFormula || label() : label());
                 button.setAttribute('aria-pressed', String(adapted));
                 actions.append(button);
             }
@@ -307,12 +310,12 @@ export class ReaderSourceActions {
     }
 
     private showDefinitionLookup(query: string, rect: DOMRect, matches?: ReaderDefinitionMatch[]): void {
-        const labels = this.host.labels();
+        const labels = readerWords(() => this.host.labels());
         if (!isMeaningfulDefinitionQuery(query)) {
             this.openPopover(rect, popover => {
                 const message = document.createElement('p');
                 message.className = 'reader-source-message';
-                message.textContent = labels.refineDefinitionQuery;
+                readerText(message, () => this.host.labels().refineDefinitionQuery);
                 popover.append(message);
             });
             return;
@@ -322,7 +325,7 @@ export class ReaderSourceActions {
             this.openPopover(rect, popover => {
                 const message = document.createElement('p');
                 message.className = 'reader-source-message';
-                message.textContent = labels.noDefinitions;
+                readerText(message, () => this.host.labels().noDefinitions);
                 popover.append(message);
             });
             return;
@@ -355,7 +358,7 @@ export class ReaderSourceActions {
             this.openPopover(rect, popover => {
                 const message = document.createElement('p');
                 message.className = 'reader-source-message';
-                message.textContent = this.host.labels().noDefinitions;
+                readerText(message, () => this.host.labels().noDefinitions);
                 popover.append(message);
             });
             return;
@@ -370,10 +373,10 @@ export class ReaderSourceActions {
             const content = document.createElement('div');
             content.className = 'reader-inline-definition';
             content.innerHTML = this.host.renderDefinition(definition);
-            const locate = this.iconButton('locate', this.host.labels().locate, () => {
+            const locate = readerLabel(this.iconButton('locate', this.host.labels().locate, () => {
                 this.host.locateDefinition(match);
                 this.dismiss();
-            });
+            }), () => this.host.labels().locate);
             header.append(title, locate);
             popover.append(header, content);
         });
@@ -390,13 +393,13 @@ export class ReaderSourceActions {
     }
 
     private referenceButton(action: () => Promise<void>): HTMLButtonElement {
-        const labels = this.host.labels();
-        const button = this.iconButton('quote', labels.reference, action);
+        const labels = readerWords(() => this.host.labels());
+        const button = readerLabel(this.iconButton('quote', labels.reference, action), () => this.host.labels().reference);
         button.classList.add('reader-source-reference');
         if (!this.host.canReference()) {
             button.disabled = true;
-            button.dataset.tooltip = labels.referenceUnavailable;
-            button.setAttribute('aria-label', labels.referenceUnavailable);
+            readerAttribute(button, 'data-tooltip', () => this.host.labels().referenceUnavailable);
+            readerAttribute(button, 'aria-label', () => this.host.labels().referenceUnavailable);
         }
         return button;
     }
@@ -418,7 +421,7 @@ export class ReaderSourceActions {
                     const message = this.popover.querySelector<HTMLElement>('[role="alert"]') || document.createElement('p');
                     message.className = 'reader-source-message';
                     message.setAttribute('role', 'alert');
-                    message.textContent = this.host.labels().failed;
+                    readerText(message, () => this.host.labels().failed);
                     this.popover.append(message);
                 }
             } finally { button.disabled = false; }
@@ -433,14 +436,14 @@ export class ReaderSourceActions {
     }
 
     private markCopied(button: HTMLButtonElement): void {
-        const label = button.dataset.tooltip || button.getAttribute('aria-label') || '';
+        const previous = this.copiedLabels.get(button);
+        if (previous) { window.clearTimeout(previous.timer); previous.restore(); }
         button.classList.add('is-copied');
-        button.dataset.tooltip = this.host.labels().copied;
-        button.setAttribute('aria-label', this.host.labels().copied);
-        window.setTimeout(() => {
+        const restore = readerTemporaryLabel(button, () => this.host.labels().copied);
+        const timer = window.setTimeout(() => {
             button.classList.remove('is-copied');
-            button.dataset.tooltip = label;
-            button.setAttribute('aria-label', label);
+            restore(); this.copiedLabels.delete(button);
         }, 1200);
+        this.copiedLabels.set(button, { timer, restore });
     }
 }

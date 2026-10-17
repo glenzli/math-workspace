@@ -1,3 +1,4 @@
+import { readerUiLabels, installReaderTextNodes } from './reader-ui-harness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -26,7 +27,7 @@ class EventTarget {
         const target = init.target || this;
         const event = { target, type, defaultPrevented: false, stopped: false, ...init,
             preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; } };
-        const chain = []; for (let value = target; value; value = value.parent) chain.push(value);
+        const chain = []; for (let value = target; value; value = value.parent) { if (chain.length > 30) throw new Error('DOM cycle'); chain.push(value); }
         for (const capture of [true, false]) {
             for (const current of capture ? [...chain].reverse() : chain) {
                 event.currentTarget = current;
@@ -125,13 +126,15 @@ class Element extends EventTarget {
     }
 }
 
-export async function readerToolbarHarness() {
+installReaderTextNodes(Element);
+
+export async function readerToolbarHarness(options = {}) {
     const document = new EventTarget();
     document.createElement = tag => new Element(tag, document);
     document.documentElement = document.createElement('html');
     document.compatMode = 'CSS1Compat';
     document.createElementNS = (_, tag) => document.createElement(tag);
-    document.createTextNode = text => { const node = document.createElement('#text'); node.textContent = text; return node; };
+    document.createTextNode = text => { const node = document.createElement('#text'); node.nodeType = 3; node.textContent = text; return node; };
     document.body = document.createElement('body'); document.body.parent = document; document.activeElement = document.body;
     const previousDocument = globalThis.document; globalThis.document = document;
     const window = new EventTarget(); window.innerWidth = 320; window.innerHeight = 700;
@@ -151,7 +154,17 @@ export async function readerToolbarHarness() {
     const primaryActions = [], historyEvents = [], inlineCalls = [], handoffs = [], copies = [], createRequests = [];
     let canAssist = true, copyResult = true, requestHandler = async route => { throw new Error('Unexpected fixture route ' + route); };
     let inlineRenderer = source => source;
+    const preferenceListeners = new Set();
+    const preferenceState = { language: options.language || 'zh', theme: 'light', languagePreference: 'auto', themePreference: 'auto' };
+    const preferences = {
+        snapshot: () => ({ ...preferenceState }),
+        subscribe(callback) { preferenceListeners.add(callback); return () => preferenceListeners.delete(callback); },
+        setLanguage(value) { preferenceState.languagePreference = value; preferenceState.language = value === 'auto' ? options.language || 'zh' : value; for (const callback of preferenceListeners) callback(this.snapshot()); },
+        setTheme(value) { preferenceState.themePreference = value; preferenceState.theme = value === 'auto' ? 'light' : value; document.documentElement.setAttribute('data-reader-theme', preferenceState.theme); for (const callback of preferenceListeners) callback(this.snapshot()); }
+    };
     const modules = {
+        './reader-ui-labels': readerUiLabels,
+        './reader-preferences': { readerPreferences: preferences },
         lucide: require('lucide'),
         './reader-route': { isReaderEmbedded: () => true, readerFetch: (route, options) => { createRequests.push({ route, options }); return requestHandler(route, options); } },
         './reader-host': { expandReader() { primaryActions.push('expand'); }, readerHistory(mode, state, url) { historyEvents.push({ mode, state, url }); },
@@ -159,9 +172,9 @@ export async function readerToolbarHarness() {
         './reader-clipboard': { copyReaderText: async text => { copies.push(text); return copyResult; } },
         './reader-embed': { readerViewStateChanged() {} },
         './reader-figures': { mountReaderFigures: () => () => {} },
-        './reader-formula-layout': { mountReaderFormulaLayout: () => ({ dispose() {}, invalidate() {}, canAdapt: () => false, isAdapted: () => false, toggle: async () => {} }) },
+        './reader-formula-layout': { mountReaderFormulaLayout: () => ({ dispose() {}, invalidate() {}, setLanguage() {}, canAdapt: () => false, isAdapted: () => false, toggle: async () => {} }) },
         './reader-assets': { mountReaderAssets: () => () => {} },
-        './formal-renderer': { renderFormalInline: (_renderer, source, options) => { inlineCalls.push({ source, filePath: options.currentFilePath }); return inlineRenderer(source, options); }, renderFormalDocument: () => ({ html: '', formulas: [] }) },
+        './formal-renderer': { bindFormalInterfaceLabels() {}, renderFormalInline: (_renderer, source, options) => { inlineCalls.push({ source, filePath: options.currentFilePath }); return inlineRenderer(source, options); }, renderFormalDocument: () => ({ html: '', formulas: [] }), ...options.renderer },
         './reader-tooltip': { ReaderTooltip: Owner },
         './source-actions': { ReaderSourceActions: Owner },
         './recall-popover': { ReaderRecallPopover: Owner },
@@ -179,7 +192,7 @@ export async function readerToolbarHarness() {
         if (file === 'main.ts') source = source.replace(/\nstartReader\(\);\s*$/, '\n');
         const exports = {};
         vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText + expose,
-            { exports, require: name => modules[name] || {}, document, window, Element, HTMLElement: Element, Node: Element, URLSearchParams, console,
+            { exports, require: name => modules[name] || {}, document, window, Element, HTMLElement: Element, HTMLInputElement: Element, Node: Element, URLSearchParams, console, AbortController, Reflect,
                 localStorage: { setItem() {} }, requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
         modules[name] = exports; return exports;
     }
@@ -188,6 +201,7 @@ export async function readerToolbarHarness() {
     await load('reader-toolbar-menu.ts', './reader-toolbar-menu');
     await load('reader-toolbar-panel.ts', './reader-toolbar-panel');
     await load('reader-create-page.ts', './reader-create-page');
+    if (options.publication) await load('reader-publication.ts', './reader-publication');
     const { ReaderApplication, words } = await load('main.ts', './main', '\nexports.ReaderApplication = ReaderApplication; exports.words = words;');
     const app = Object.create(ReaderApplication.prototype); app.root = document.createElement('main'); document.body.append(app.root);
     app.state = { language: 'zh', projectId: 'project-a', revision: 1, pages: [], definitions: [] };
@@ -203,7 +217,7 @@ export async function readerToolbarHarness() {
     const click = element => { if (element.disabled) return; element.emit('pointerdown'); element.focus(); element.emit('click'); };
     const key = (key, options = {}) => { const event = document.activeElement.emit('keydown', { key, ...options });
         if (!event.defaultPrevented && ['Enter', ' '].includes(key) && document.activeElement.tagName === 'button' && !document.activeElement.disabled) document.activeElement.emit('click'); return event; };
-    return { app, document, window, words, icons, populated, primaryActions, historyEvents, inlineCalls, find, click, key,
+    return { app, document, window, words, icons, preferences, populated, primaryActions, historyEvents, inlineCalls, find, click, key,
         handoffs, copies, createRequests, setCanAssist: value => { canAssist = value; }, setCopyResult: value => { copyResult = value; },
         setRequestHandler: handler => { requestHandler = handler; },
         timers, flushTimers: () => { const queued = [...timers.values()]; timers.clear(); queued.forEach(timer => timer.run()); },
@@ -224,7 +238,7 @@ async function documentStageUiContract() {
     const exploratory = { filePath: 'draft/idea.md', title: 'Exploratory idea', documentMode: 'draft', lifecycle: { stage: 'stable', checkpoint: { label: 'Not a formal stage' } } };
     try {
         for (const language of ['zh', 'en']) {
-            app.state.language = language; app.updateToolbarLabels();
+            h.preferences.setLanguage(language); app.state.language = language; app.updateToolbarLabels();
             for (const [stage, labelKey] of stageOptions) {
                 const page = { filePath: 'book/01.md', title: 'First chapter', documentMode: 'formal',
                     lifecycle: { stage, checkpoint: { label: 'RC1 <careful>', hash: 'unchanged-checkpoint' }, changedSinceCheckpoint: true } };
@@ -358,7 +372,7 @@ async function titleNavigationContract() {
     const rowPaths = () => rows().map(button => button.dataset.chapterPath);
     try {
         for (const language of ['zh', 'en']) {
-            app.state.language = language; mount(current);
+            h.preferences.setLanguage(language); app.state.language = language; mount(current);
             const title = find('[data-title-navigation]'), status = app.pageTitle.querySelector('[data-document-status]'), integration = app.pageTitle.querySelector('.reader-page-integration');
             assert.equal(title.type, 'button'); assert.equal(title.getAttribute('aria-haspopup'), 'dialog');
             assert.equal(title.getAttribute('aria-expanded'), 'false'); assert.equal(title.getAttribute('aria-controls'), 'reader-chapter-navigation');
@@ -502,7 +516,6 @@ export async function testReaderToolbarMenu() {
     assert.deepEqual(menu.querySelectorAll('.reader-menu-heading').map(group => group.textContent), ['查阅', '审阅', '版本与出版', '显示']);
     assert.equal(menu.querySelectorAll('button').length, 9, 'Every secondary action exists once, with no hidden duplicate action wiring.');
     for (const button of menu.querySelectorAll('.reader-menu-item')) { assert.ok(button.querySelector('svg')); assert.ok(button.querySelector('.reader-tool-name').textContent); }
-
     trigger('reference').focus(); key('Enter'); assertOpen('reference');
     assert.equal(document.activeElement.dataset.panel, 'definitions');
     key('ArrowDown'); assert.equal(document.activeElement.dataset.panel, 'symbols');
@@ -518,10 +531,11 @@ export async function testReaderToolbarMenu() {
     assert.equal(document.activeElement.dataset.panel, 'propositions', 'Switching category focuses its first item.');
     key('End'); assert.equal(document.activeElement.dataset.panel, 'symbol-audit');
     click(trigger('review')); assert.equal(menu.hidden, true, 'The active category toggles closed.');
-    click(trigger('display')); key('End'); assert.equal(document.activeElement.dataset.fontSize, '1');
-    const shiftTab = key('Tab', { shiftKey: true }); assert.equal(shiftTab.defaultPrevented, false); assert.equal(document.activeElement, trigger('display'));
+    click(trigger('display')); key('End'); assert.equal(document.activeElement.id, 'reader-appearance');
+    const shiftTab = key('Tab', { shiftKey: true }); assert.equal(shiftTab.defaultPrevented, false);
+    assert.equal(menu.hidden, false, 'Native Tab between the preference selects keeps Display open.');
+    assert.equal(find('#reader-interface-language').tabIndex, 0); assert.equal(find('#reader-appearance').tabIndex, 0);
     click(trigger('reference')); click(app.article); assert.equal(menu.hidden, true); assert.equal(document.activeElement, app.article, 'Outside dismissal does not steal focus.');
-
     app.page = { page: { documentMode: 'draft' } }; app.updateDraftToolbarAvailability();
     app.state.projectId = ''; app.updateToolbarLabels(); click(trigger('reference'));
     assert.equal(document.activeElement, menu, 'An all-disabled category keeps an accessible Escape/Tab target.');
@@ -536,10 +550,9 @@ export async function testReaderToolbarMenu() {
     key('ArrowDown'); assert.equal(document.activeElement.id, 'reader-archive', 'Unavailable publication is skipped without entering a hidden group.');
     assert.equal(find('[data-panel="propositions"]').querySelector('.reader-tool-name').textContent, '命题审阅');
     assert.equal(find('[data-panel="propositions"]').getAttribute('aria-label'), h.words.zh.draftFormalToolsUnavailable);
-
     app.page = { page: { documentMode: 'formal' } }; app.state.projectId = 'project-a';
     for (const language of ['en', 'zh']) {
-        app.state.language = language; app.updateToolbarLabels();
+        h.preferences.setLanguage(language); app.state.language = language; app.updateToolbarLabels();
         for (const [category, label] of [['reference', 'toolsReference'], ['review', 'toolsReview'], ['edition', 'toolsEdition'], ['display', 'toolsDisplay']]) {
             assert.equal(trigger(category).getAttribute('aria-label'), h.words[language][label]);
             assert.equal(trigger(category).dataset.readerTooltip, h.words[language][label]);
@@ -570,7 +583,6 @@ export async function testReaderToolbarMenu() {
     for (const button of find('.reader-type-control').querySelectorAll('button')) {
         assert.ok(button.dataset.readerTooltip); assert.equal(button.dataset.tooltip, undefined, 'Font hover hints cannot create pseudo-element overflow inside the scrolling menu.');
     }
-
     for (const [view, category] of [['definitions', 'reference'], ['symbols', 'reference'], ['propositions', 'review'], ['symbol-audit', 'review']]) {
         if (trigger(category).getAttribute('aria-expanded') !== 'true') click(trigger(category));
         const action = find('[data-panel="' + view + '"]'); click(action);
@@ -599,7 +611,6 @@ export async function testReaderToolbarMenu() {
     app.navigateHistory = direction => h.primaryActions.push(direction < 0 ? 'back' : 'forward');
     click(find('#reader-back')); click(find('#reader-forward')); click(find('#reader-expand'));
     assert.deepEqual(h.primaryActions, ['back', 'forward', 'expand'], 'Back, forward and embedded fullscreen remain directly wired.');
-
     click(trigger('display'));
     app.state.pages = [{ filePath: 'book/02.md' }]; app.selectedPagePaths = []; app.pageRequestId = 0;
     let rejectPage; app.fetchJson = () => new Promise((_resolve, reject) => { rejectPage = reject; });

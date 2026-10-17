@@ -1,3 +1,4 @@
+import { readerUiLabels, installReaderTextNodes } from './reader-ui-harness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -42,10 +43,14 @@ class Element {
     focus() { this.focused = true; }
 }
 
+installReaderTextNodes(Element);
+
 async function harness() {
     const document = { createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag), createTextNode: value => { const node = new Element('#text'); node.textContent = value; return node; },
         addEventListener() {}, removeEventListener() {}, body: new Element('body') };
-    const modules = { lucide: require('lucide'), './reader-clipboard': { copyReaderText: async value => { copied.push(value); return true; } } }, copied = [];
+    let uiLanguage = 'zh';
+    const preferences = { snapshot: () => ({ language: uiLanguage, languagePreference: uiLanguage, themePreference: 'auto' }), setLanguage(value) { uiLanguage = value; }, setTheme() {} };
+    const modules = { './reader-ui-labels': readerUiLabels, './reader-preferences': { readerPreferences: preferences }, lucide: require('lucide'), './reader-clipboard': { copyReaderText: async value => { copied.push(value); return true; } } }, copied = [];
     const window = { innerWidth: 320, innerHeight: 700, listeners: {}, getSelection: () => undefined,
         getComputedStyle: element => element.style, addEventListener(name, callback) { (this.listeners[name] ||= []).push(callback); },
         removeEventListener(name, callback) { this.listeners[name] = (this.listeners[name] || []).filter(value => value !== callback); },
@@ -78,7 +83,7 @@ async function harness() {
     const { renderLeanAnchorBadge } = await load('src/reader/web/formal-renderer.ts', './formal-renderer', '\nexports.renderLeanAnchorBadge = renderLeanAnchorBadge;');
     const { ReaderPropositionReview } = await load('src/reader/web/reader-proposition-review.ts', './reader-proposition-review');
     const { archiveAction } = await load('src/reader/web/reader-archive.ts', './reader-archive', '\nexports.archiveAction = iconButton;');
-    return { document, window, copied, icons, ReaderTooltip, ReaderToolbarMenu, observers, notifyMutation, ReaderSourceActions, ReaderApplication, words, documentStatusBadge, documentStatusText, renderLeanAnchorBadge, ReaderPropositionReview, archiveAction };
+    return { document, window, copied, icons, preferences, ReaderTooltip, ReaderToolbarMenu, observers, notifyMutation, ReaderSourceActions, ReaderApplication, words, documentStatusBadge, documentStatusText, renderLeanAnchorBadge, ReaderPropositionReview, archiveAction };
 }
 
 function assertIconOnly(button, label, tooltip = 'tooltip') {
@@ -95,6 +100,7 @@ function documentStageContract(h) {
     const stages = [['draft', 'documentStageDraft'], ['revising', 'documentStageRevising'], ['stable', 'documentStageStable']];
     const shapes = [];
     for (const language of ['zh', 'en']) {
+        h.preferences.setLanguage(language);
         const words = h.words[language];
         for (const [stage, key] of stages) {
             const expectedIcon = new Element('span'); expectedIcon.append(h.icons.readerIcon('stage-' + stage));
@@ -135,6 +141,8 @@ function documentStageContract(h) {
 }
 
 async function toolbarAndIconContract(h) {
+    h.preferences.setLanguage('zh');
+    h.preferences.setLanguage('zh');
     const app = Object.create(h.ReaderApplication.prototype); app.root = new Element('main'); app.state = { language: 'zh', projectId: 'project-a' }; app.currentPath = 'book/01.md'; app.sourceLineNumbersVisible = false;
     const tools = new Element('div'); tools.className = 'reader-tools'; app.root.append(tools);
     for (const id of ['reader-back', 'reader-forward', 'reader-navigation-toggle', 'reader-expand', 'reader-lean-review']) {
@@ -142,7 +150,7 @@ async function toolbarAndIconContract(h) {
     }
     const contents = new Element('button'); contents.dataset.panel = 'contents'; tools.append(contents);
     for (const category of ['reference', 'review', 'edition', 'display']) { const trigger = new Element('button'); trigger.dataset.toolMenu = category; trigger.id = 'reader-' + category + '-tools'; tools.append(trigger); }
-    app.toolbarMenu = new h.ReaderToolbarMenu(app.root, () => app.dictionary(), () => {});
+    app.toolbarMenu = new h.ReaderToolbarMenu(app.root, () => app.dictionary(), () => {}, h.preferences);
     app.installToolbarIcons(); app.updateToolbarLabels();
     const lean = tools.querySelector('#reader-lean-review'); assertIconOnly(lean, 'Lean 对照', 'readerTooltip');
     assert.equal(lean.querySelector('path').getAttribute('d'), 'M12 3v18', 'Lean comparison uses a distinct equal-column symbol.');
@@ -155,7 +163,7 @@ async function toolbarAndIconContract(h) {
     for (const [category, label] of [['reference', '查阅'], ['review', '审阅'], ['edition', '版本与出版'], ['display', '显示']]) assertIconOnly(tools.querySelector('[data-tool-menu="' + category + '"]'), label, 'readerTooltip');
     for (const button of tools.children) { assert.ok(button.dataset.readerTooltip, 'Primary icons retain viewport tooltips.'); assertIconOnly(button, button.dataset.readerTooltip, 'readerTooltip'); assert.equal(button.dataset.tooltip, undefined); }
     for (const svg of tools.querySelectorAll('svg')) { assert.equal(svg.getAttribute('aria-hidden'), 'true'); assert.equal(svg.getAttribute('focusable'), 'false'); }
-    app.state.language = 'en'; app.updateToolbarLabels();
+    h.preferences.setLanguage('en'); app.state.language = 'en'; app.updateToolbarLabels();
     assertIconOnly(lean, 'Lean comparison', 'readerTooltip');
     assertSecondary('[data-panel="propositions"]', 'Proposition review');
     assertSecondary('[data-panel="symbol-audit"]', 'Symbol audit');
@@ -165,7 +173,7 @@ async function toolbarAndIconContract(h) {
     assert.equal(new Set(tools.children.map(button => JSON.stringify(iconShape(button)))).size, 7, 'Frequent actions and the four categories have distinct primary glyphs.');
     app.page = { page: { documentMode: 'draft' } }; app.updateDraftToolbarAvailability();
     assert.equal(lean.disabled, true); assertIconOnly(lean, h.words.en.draftFormalToolsUnavailable, 'readerTooltip');
-    app.state.language = 'zh'; app.updateToolbarLabels(); assertIconOnly(lean, h.words.zh.draftFormalToolsUnavailable, 'readerTooltip');
+    h.preferences.setLanguage('zh'); app.state.language = 'zh'; app.updateToolbarLabels(); assertIconOnly(lean, h.words.zh.draftFormalToolsUnavailable, 'readerTooltip');
     assert.equal(app.root.querySelector('[data-panel="propositions"]').querySelector('.reader-tool-name').textContent, '命题审阅', 'A draft restriction explains availability without replacing the tool name.');
     app.page = { page: { documentMode: 'formal' } }; app.updateDraftToolbarAvailability();
     assert.equal(lean.disabled, false); assertIconOnly(lean, 'Lean 对照', 'readerTooltip');
@@ -176,6 +184,7 @@ async function toolbarAndIconContract(h) {
 
 async function sourceAndArchiveActions(h) {
     for (const language of ['zh', 'en']) {
+        h.preferences.setLanguage(language);
         const words = h.words[language], quoted = [];
         const actions = new h.ReaderSourceActions({ labels: () => ({ ...words, locate: words.jump, failed: words.sourceActionFailed }), getDefinitions: () => [],
             canReference: () => true, reference: async (...args) => { quoted.push(args); } });
@@ -235,6 +244,7 @@ async function sourceAndArchiveActions(h) {
 async function anchorSemantics(h) {
     const status = { contract: 'current', build: 'unverified', dependencies: 'unverified' };
     for (const language of ['zh', 'en']) {
+        h.preferences.setLanguage(language);
         const html = h.renderLeanAnchorBadge('h-anchor', 2, status, language);
         assert.match(html, />Lean<\/button>/); assert.match(html, /data-reader-lean-anchor="h-anchor"/); assert.doesNotMatch(html, />L<|✓|✔/);
         assert.match(html, /未记录构建|build unverified/);

@@ -1,5 +1,6 @@
 import { readerIcon, replaceReaderButtonIcon, type ReaderIconName } from './reader-icons';
 import { positionReaderPopover } from './reader-popover';
+import type { LanguagePreference, ThemePreference } from './reader-preferences';
 
 export interface ReaderToolbarMenuLabels {
     toolsReference: string;
@@ -16,6 +17,19 @@ export interface ReaderToolbarMenuLabels {
     fontSize: string;
     decreaseFont: string;
     increaseFont: string;
+    interfaceLanguage: string;
+    appearance: string;
+    automatic: string;
+    chinese: string;
+    english: string;
+    light: string;
+    dark: string;
+}
+
+interface ReaderToolbarPreferences {
+    snapshot(): { languagePreference: LanguagePreference; themePreference: ThemePreference };
+    setLanguage(value: LanguagePreference): void;
+    setTheme(value: ThemePreference): void;
 }
 
 type Category = 'reference' | 'review' | 'edition' | 'display';
@@ -56,7 +70,14 @@ export class ReaderToolbarMenu {
             event.preventDefault(); event.stopPropagation(); this.close(true); return;
         }
         if (!this.menu.contains(event.target as Node)) return;
+        const select = (event.target as HTMLElement).tagName.toLowerCase() === 'select';
+        if (select && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
         if (event.key === 'Tab') {
+            if (select) {
+                const controls = [...this.active.group.querySelectorAll<HTMLSelectElement>('select')].filter(control => !control.disabled);
+                const index = controls.indexOf(event.target as HTMLSelectElement);
+                if (event.shiftKey ? index > 0 : index < controls.length - 1) return;
+            }
             // Resume the document's normal tab order from the visible trigger.
             this.close(true); return;
         }
@@ -64,7 +85,7 @@ export class ReaderToolbarMenu {
         event.preventDefault();
         const items = this.enabledItems();
         if (!items.length) return;
-        const current = items.indexOf(document.activeElement as HTMLButtonElement);
+        const current = items.indexOf(document.activeElement as HTMLButtonElement | HTMLSelectElement);
         const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
             : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
         this.focus(items[index]);
@@ -82,7 +103,8 @@ export class ReaderToolbarMenu {
     constructor(
         root: HTMLElement,
         private readonly labels: () => ReaderToolbarMenuLabels,
-        private readonly beforeOpen: () => void
+        private readonly beforeOpen: () => void,
+        private readonly preferences: ReaderToolbarPreferences
     ) {
         this.menu.id = 'reader-category-menu';
         this.menu.className = 'reader-toolbar-menu';
@@ -133,10 +155,15 @@ export class ReaderToolbarMenu {
         const decrease = this.fontButton('-1', 'A−'), increase = this.fontButton('1', 'A+');
         const value = document.createElement('output'); value.id = 'reader-font-size'; value.setAttribute('aria-live', 'polite');
         controls.append(decrease, value, increase); size.append(label, controls);
-        this.group('display', [lines, size]);
+        this.group('display', [lines, size,
+            this.preference('reader-interface-language', 'interfaceLanguage', [['auto', 'automatic'], ['zh', 'chinese'], ['en', 'english']],
+                value => this.preferences.setLanguage(value as LanguagePreference)),
+            this.preference('reader-appearance', 'appearance', [['auto', 'automatic'], ['light', 'light'], ['dark', 'dark']],
+                value => this.preferences.setTheme(value as ThemePreference))]);
         // Keep delegated Reader actions inside their original application root, outside the clipped toolbar.
         root.append(this.menu);
         this.updateLabels();
+        this.updatePreferences();
         this.menu.addEventListener('click', this.onAction, true);
         this.menu.addEventListener('focusout', this.onFocusOut);
         document.addEventListener('pointerdown', this.onPointerDown, true);
@@ -163,6 +190,24 @@ export class ReaderToolbarMenu {
         button.dataset.fontSize = delta; button.dataset.keepMenuOpen = 'true'; button.tabIndex = -1; button.setAttribute('role', 'menuitem'); return button;
     }
 
+    private preference(id: string, key: keyof ReaderToolbarMenuLabels,
+        choices: Array<[string, keyof ReaderToolbarMenuLabels]>, change: (value: string) => void): HTMLLabelElement {
+        const field = document.createElement('label'); field.className = 'reader-menu-preference';
+        const label = document.createElement('span'); label.dataset.preferenceLabel = key;
+        const select = document.createElement('select'); select.id = id; select.tabIndex = -1;
+        select.dataset.preferenceLabel = key;
+        for (const [value, name] of choices) {
+            const option = document.createElement('option'); option.value = value; option.dataset.preferenceLabel = name; select.append(option);
+        }
+        select.addEventListener('change', () => change(select.value)); field.append(label, select); return field;
+    }
+
+    updatePreferences(): void {
+        const snapshot = this.preferences.snapshot();
+        this.menu.querySelector<HTMLSelectElement>('#reader-interface-language')!.value = snapshot.languagePreference;
+        this.menu.querySelector<HTMLSelectElement>('#reader-appearance')!.value = snapshot.themePreference;
+    }
+
     updateLabels(): void {
         const labels = this.labels();
         for (const [key, name] of this.names) name.textContent = labels[key];
@@ -173,6 +218,11 @@ export class ReaderToolbarMenu {
             if (name.parentElement?.matches('button')) name.parentElement.setAttribute('aria-label', labels[key]);
         }
         this.menu.querySelector('.reader-type-control')?.setAttribute('aria-label', labels.fontSize);
+        this.menu.querySelectorAll<HTMLElement>('[data-preference-label]').forEach(element => {
+            const value = labels[element.dataset.preferenceLabel as keyof ReaderToolbarMenuLabels];
+            if (element.tagName.toLowerCase() === 'select') element.setAttribute('aria-label', value);
+            else element.textContent = value;
+        });
     }
 
     anchorFor(action: HTMLElement): HTMLElement {
@@ -184,19 +234,22 @@ export class ReaderToolbarMenu {
         return Array.from(this.categories.values()).some(category => category.trigger.contains(target));
     }
 
-    private enabledItems(): HTMLButtonElement[] {
-        return Array.from(this.active?.group.querySelectorAll<HTMLButtonElement>('button') || []).filter(button => !button.disabled);
+    private enabledItems(): Array<HTMLButtonElement | HTMLSelectElement> {
+        return Array.from(this.active?.group.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button, select') || []).filter(item => !item.disabled);
     }
 
-    private focus(item: HTMLButtonElement | undefined): void {
-        this.menu.querySelectorAll<HTMLButtonElement>('button').forEach(button => button.tabIndex = button === item ? 0 : -1);
+    private focus(item: HTMLButtonElement | HTMLSelectElement | undefined): void {
+        this.menu.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button, select').forEach(control => control.tabIndex = control === item || control.tagName.toLowerCase() === 'select' && !control.closest<HTMLElement>('.reader-menu-group')?.hidden ? 0 : -1);
         (item || this.menu).focus({ preventScroll: true }); item?.scrollIntoView({ block: 'nearest' });
     }
 
     refreshFocus(): void {
         if (!this.active || !this.menu.contains(document.activeElement)) return;
         const active = document.activeElement as HTMLButtonElement;
-        if (active.disabled) this.focus(this.enabledItems().at(-1));
+        if (active.disabled) {
+            const fontPeer = active.dataset.fontSize && this.active.group.querySelector<HTMLButtonElement>(`[data-font-size="${active.dataset.fontSize === '1' ? '-1' : '1'}"]`);
+            this.focus(fontPeer && !fontPeer.disabled ? fontPeer : this.enabledItems().at(-1));
+        }
     }
 
     private open(category: CategoryMenu | undefined, last = false): void {
@@ -220,7 +273,7 @@ export class ReaderToolbarMenu {
         if (!category) return;
         this.active = undefined; this.menu.hidden = true; category.group.hidden = true;
         category.trigger.setAttribute('aria-expanded', 'false'); category.trigger.classList.remove('is-active');
-        this.menu.querySelectorAll<HTMLButtonElement>('button').forEach(button => button.tabIndex = -1);
+        this.menu.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button, select').forEach(control => control.tabIndex = -1);
         if (restoreFocus && category.trigger.isConnected) category.trigger.focus({ preventScroll: true });
     }
 

@@ -1,3 +1,4 @@
+import { readerLabel, readerText, readerAttribute } from './reader-ui-labels';
 import { renderReaderFormula } from './formal-renderer';
 import { readerIcon } from './reader-icons';
 import type {
@@ -12,6 +13,7 @@ const LEGACY_DETERMINISTIC_REASON = 'A declared special symbol and another disti
 
 export interface ReaderSymbolAuditReportHost {
     language: Language;
+    uiLanguage?: () => Language;
     sourceTitle: (filePath: string) => string;
     locate: (filePath: string, line: number) => void;
     close: () => void;
@@ -162,29 +164,29 @@ function sourceLocation(binding: ReaderSymbolAuditBinding, host: ReaderSymbolAud
 }
 
 function bindingView(binding: ReaderSymbolAuditBinding, host: ReaderSymbolAuditReportHost): HTMLElement {
-    const words = reportWords[host.language];
+    const words = reportWords[host.uiLanguage?.() || host.language];
     const article = document.createElement('article');
     article.className = 'reader-symbol-audit-report-binding';
     const header = document.createElement('header');
     const kind = document.createElement('span');
     kind.className = 'reader-symbol-audit-report-kind is-' + binding.kind;
-    kind.textContent = binding.kind === 'special' ? words.special : words.temporary;
+    readerText(kind, () => binding.kind === 'special' ? reportWords[host.uiLanguage?.() || host.language].special : reportWords[host.uiLanguage?.() || host.language].temporary);
     const key = document.createElement('code');
     key.textContent = binding.bindingKey;
     header.append(kind, key);
     const meaning = paragraph(binding.meaning, 'reader-symbol-audit-report-meaning');
     const details = document.createElement('dl');
     details.className = 'reader-symbol-audit-report-binding-details';
-    if (binding.semanticType) details.append(metadata(words.semanticType, binding.semanticType));
-    if (binding.scope) details.append(metadata(words.scopeLabel, binding.scope));
-    if (binding.confidence) details.append(metadata(words.confidence, binding.confidence));
-    if (binding.evidence) details.append(metadata(words.evidence, binding.evidence));
+    if (binding.semanticType) details.append(readerLabel(metadata(words.semanticType, binding.semanticType), () => reportWords[host.uiLanguage?.() || host.language].semanticType));
+    if (binding.scope) details.append(readerLabel(metadata(words.scopeLabel, binding.scope), () => reportWords[host.uiLanguage?.() || host.language].scopeLabel));
+    if (binding.confidence) details.append(readerLabel(metadata(words.confidence, binding.confidence), () => reportWords[host.uiLanguage?.() || host.language].confidence));
+    if (binding.evidence) details.append(readerLabel(metadata(words.evidence, binding.evidence), () => reportWords[host.uiLanguage?.() || host.language].evidence));
     const locate = document.createElement('button');
     locate.type = 'button';
     locate.className = 'reader-symbol-audit-report-source';
     locate.append(readerIcon('locate'), document.createTextNode(sourceLocation(binding, host)));
     locate.title = binding.filePath;
-    locate.setAttribute('aria-label', `${words.locate} ${sourceLocation(binding, host)}`);
+    readerAttribute(locate, 'aria-label', () => `${reportWords[host.uiLanguage?.() || host.language].locate} ${sourceLocation(binding, host)}`);
     locate.addEventListener('click', () => host.locate(binding.filePath, binding.startLine));
     article.append(header, meaning);
     if (details.childElementCount) article.append(details);
@@ -197,7 +199,7 @@ function conflictView(
     host: ReaderSymbolAuditReportHost,
     index: number
 ): HTMLElement {
-    const words = reportWords[host.language];
+    const words = reportWords[host.uiLanguage?.() || host.language];
     const article = document.createElement('article');
     article.className = 'reader-symbol-audit-report-entry is-hard';
     const header = document.createElement('header');
@@ -245,7 +247,7 @@ function reconciliationView(
     host: ReaderSymbolAuditReportHost,
     index: number
 ): HTMLElement {
-    const words = reportWords[host.language];
+    const words = reportWords[host.uiLanguage?.() || host.language];
     const relationLabel = {
         'same-binding': words.sameBinding,
         specialization: words.specialization,
@@ -279,7 +281,7 @@ export class ReaderSymbolAuditReportView {
     render(container: HTMLElement, status: ReaderSymbolAuditStatus, host: ReaderSymbolAuditReportHost): void {
         const report = status.report;
         if (!report) return;
-        const words = reportWords[host.language];
+        const words = reportWords[host.uiLanguage?.() || host.language];
         const legacyReport = !Array.isArray(report.reconciliations);
         const reconciliations = report.reconciliations || [];
         const resolved = reconciliations.filter(item => (
@@ -296,66 +298,68 @@ export class ReaderSymbolAuditReportView {
         const back = document.createElement('button');
         back.type = 'button';
         back.className = 'reader-symbol-audit-report-back';
-        back.append(readerIcon('arrow-left'), document.createTextNode(words.close));
+        back.append(readerIcon('arrow-left'), readerText(document.createElement('span'), () => reportWords[host.uiLanguage?.() || host.language].close));
         back.addEventListener('click', host.close);
         const heroCopy = document.createElement('div');
         heroCopy.append(
-            paragraph(words.eyebrow, 'reader-symbol-audit-report-eyebrow'),
-            heading(1, words.title),
-            paragraph(words.cachedNotice, 'reader-symbol-audit-report-notice')
+            readerLabel(paragraph(words.eyebrow, 'reader-symbol-audit-report-eyebrow'), () => reportWords[host.uiLanguage?.() || host.language].eyebrow),
+            readerLabel(heading(1, words.title), () => reportWords[host.uiLanguage?.() || host.language].title),
+            readerLabel(paragraph(words.cachedNotice, 'reader-symbol-audit-report-notice'), () => reportWords[host.uiLanguage?.() || host.language].cachedNotice)
         );
         const state = document.createElement('span');
         state.className = 'reader-symbol-audit-report-state-pill is-' + status.reportState;
-        state.textContent = status.reportState === 'current' ? words.current : words.stale;
+        readerText(state, () => status.reportState === 'current' ? reportWords[host.uiLanguage?.() || host.language].current : reportWords[host.uiLanguage?.() || host.language].stale);
         hero.append(back, heroCopy, state);
 
         const summary = document.createElement('section');
         summary.className = 'reader-symbol-audit-report-summary';
         summary.append(
-            metric(legacyReport ? words.legacyCandidates : words.hardConflicts, report.hardConflicts.length, legacyReport ? 'review' : report.hardConflicts.length ? 'hard' : 'ok'),
-            metric(words.possibleConfusion, report.advisories.length, report.advisories.length ? 'review' : 'ok'),
-            metric(words.reconciled, resolved.length, resolved.length ? 'resolved' : 'ok'),
-            metric(words.bindings, report.bindingCount),
-            metric(words.externalBindings, report.externalSpecialBindingCount || 0)
+            readerLabel(metric(legacyReport ? words.legacyCandidates : words.hardConflicts, report.hardConflicts.length, legacyReport ? 'review' : report.hardConflicts.length ? 'hard' : 'ok'), () => legacyReport ? reportWords[host.uiLanguage?.() || host.language].legacyCandidates : reportWords[host.uiLanguage?.() || host.language].hardConflicts),
+            readerLabel(metric(words.possibleConfusion, report.advisories.length, report.advisories.length ? 'review' : 'ok'), () => reportWords[host.uiLanguage?.() || host.language].possibleConfusion),
+            readerLabel(metric(words.reconciled, resolved.length, resolved.length ? 'resolved' : 'ok'), () => reportWords[host.uiLanguage?.() || host.language].reconciled),
+            readerLabel(metric(words.bindings, report.bindingCount), () => reportWords[host.uiLanguage?.() || host.language].bindings),
+            readerLabel(metric(words.externalBindings, report.externalSpecialBindingCount || 0), () => reportWords[host.uiLanguage?.() || host.language].externalBindings)
         );
 
         const meta = document.createElement('dl');
         meta.className = 'reader-symbol-audit-report-meta';
         const created = new Date(report.createdAt);
         meta.append(
-            metadata(words.createdAt, Number.isNaN(created.getTime()) ? report.createdAt : created.toLocaleString()),
-            metadata(words.model, report.model || words.unknownModel),
-            metadata(words.effort, report.effort || words.unknownModel),
-            metadata(words.scope, words.files(status.scope.selectedFilePaths.length)),
-            metadata(words.cache, words.cacheValue(report.scannedFiles, report.reusedFiles))
+            readerLabel(metadata(words.createdAt, Number.isNaN(created.getTime()) ? report.createdAt : created.toLocaleString()), () => reportWords[host.uiLanguage?.() || host.language].createdAt),
+            readerLabel(readerLabel(metadata(words.model, report.model || words.unknownModel), () => report.model || reportWords[host.uiLanguage?.() || host.language].unknownModel), () => reportWords[host.uiLanguage?.() || host.language].model),
+            readerLabel(readerLabel(metadata(words.effort, report.effort || words.unknownModel), () => report.effort || reportWords[host.uiLanguage?.() || host.language].unknownModel), () => reportWords[host.uiLanguage?.() || host.language].effort),
+            readerLabel(readerLabel(metadata(words.scope, words.files(status.scope.selectedFilePaths.length)), () => reportWords[host.uiLanguage?.() || host.language].files(status.scope.selectedFilePaths.length)), () => reportWords[host.uiLanguage?.() || host.language].scope),
+            readerLabel(readerLabel(metadata(words.cache, words.cacheValue(report.scannedFiles, report.reusedFiles)), () => reportWords[host.uiLanguage?.() || host.language].cacheValue(report.scannedFiles, report.reusedFiles)), () => reportWords[host.uiLanguage?.() || host.language].cache)
         );
         const job = status.job;
         if (job && job.status !== 'running' && job.modelCalls > 0) {
-            meta.append(metadata(words.usage, job.tokenUsage
+            meta.append(readerLabel(readerLabel(metadata(words.usage, job.tokenUsage
                 ? words.usageValue(job.tokenUsage.totalTokens, job.tokenUsage.inputTokens, job.tokenUsage.outputTokens)
-                : words.usageUnavailable));
+                : words.usageUnavailable), () => job.tokenUsage
+                ? reportWords[host.uiLanguage?.() || host.language].usageValue(job.tokenUsage.totalTokens, job.tokenUsage.inputTokens, job.tokenUsage.outputTokens)
+                : reportWords[host.uiLanguage?.() || host.language].usageUnavailable), () => reportWords[host.uiLanguage?.() || host.language].usage));
         }
 
         const hardSection = document.createElement('section');
         hardSection.className = 'reader-symbol-audit-report-section';
         hardSection.append(
-            heading(2, legacyReport ? words.legacySection : words.hardSection),
-            paragraph(legacyReport ? words.legacyIntro : words.hardIntro, 'reader-symbol-audit-report-section-intro')
+            readerLabel(heading(2, legacyReport ? words.legacySection : words.hardSection), () => legacyReport ? reportWords[host.uiLanguage?.() || host.language].legacySection : reportWords[host.uiLanguage?.() || host.language].hardSection),
+            readerLabel(paragraph(legacyReport ? words.legacyIntro : words.hardIntro, 'reader-symbol-audit-report-section-intro'), () => legacyReport ? reportWords[host.uiLanguage?.() || host.language].legacyIntro : reportWords[host.uiLanguage?.() || host.language].hardIntro)
         );
-        if (!report.hardConflicts.length) hardSection.append(paragraph(words.noHard, 'reader-symbol-audit-report-empty is-ok'));
+        if (!report.hardConflicts.length) hardSection.append(readerLabel(paragraph(words.noHard, 'reader-symbol-audit-report-empty is-ok'), () => reportWords[host.uiLanguage?.() || host.language].noHard));
         else report.hardConflicts.forEach((conflict, index) => hardSection.append(conflictView(conflict, host, index)));
 
         const reviewSection = document.createElement('section');
         reviewSection.className = 'reader-symbol-audit-report-section';
-        reviewSection.append(heading(2, words.reviewSection), paragraph(words.reviewIntro, 'reader-symbol-audit-report-section-intro'));
-        if (!report.advisories.length) reviewSection.append(paragraph(words.noReview, 'reader-symbol-audit-report-empty is-ok'));
+        reviewSection.append(readerLabel(heading(2, words.reviewSection), () => reportWords[host.uiLanguage?.() || host.language].reviewSection), readerLabel(paragraph(words.reviewIntro, 'reader-symbol-audit-report-section-intro'), () => reportWords[host.uiLanguage?.() || host.language].reviewIntro));
+        if (!report.advisories.length) reviewSection.append(readerLabel(paragraph(words.noReview, 'reader-symbol-audit-report-empty is-ok'), () => reportWords[host.uiLanguage?.() || host.language].noReview));
         else report.advisories.forEach((advisory, index) => reviewSection.append(advisoryView(advisory, report, host, index)));
 
         const reconciledSection = document.createElement('details');
         reconciledSection.className = 'reader-symbol-audit-report-reconciled';
         const reconciledSummary = document.createElement('summary');
-        reconciledSummary.textContent = words.reconciledSection(resolved.length);
-        reconciledSection.append(reconciledSummary, paragraph(words.reconciledIntro, 'reader-symbol-audit-report-section-intro'));
+        readerText(reconciledSummary, () => reportWords[host.uiLanguage?.() || host.language].reconciledSection(resolved.length));
+        reconciledSection.append(reconciledSummary, readerLabel(paragraph(words.reconciledIntro, 'reader-symbol-audit-report-section-intro'), () => reportWords[host.uiLanguage?.() || host.language].reconciledIntro));
         resolved.forEach((reconciliation, index) => reconciledSection.append(reconciliationView(reconciliation, report, host, index)));
 
         page.append(hero, summary, meta, hardSection, reviewSection);

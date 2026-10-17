@@ -1,3 +1,5 @@
+import { readerPreferences } from './reader-preferences';
+import { readerLabel, readerText, readerAttribute, refreshReaderLabels, readerWords } from './reader-ui-labels';
 import { revealExerciseTarget } from './reader-exercises';
 import './styles.css';
 import { readerFetch, readerEvents, isReaderEmbedded } from './reader-route';
@@ -12,6 +14,7 @@ import { ReaderPublication } from './reader-publication';
 import { ReaderCreatePage } from './reader-create-page';
 import {
     createFormalRenderer,
+    bindFormalInterfaceLabels,
     renderFormalDocument,
     renderFormalInline,
     renderFormalMarkdown,
@@ -94,6 +97,14 @@ const words = {
         toolsReview: '审阅',
         toolsEdition: '版本与出版',
         toolsDisplay: '显示',
+        interfaceLanguage: '界面语言',
+        appearance: '外观',
+        automatic: '自动',
+        chinese: '中文',
+        english: 'English',
+        light: '浅色',
+        dark: '深色',
+        projectNavigation: '项目导航',
         versionHistory: '版本记录',
         pdfPublication: 'PDF 出版',
         sourceLineNumbers: '源码行号',
@@ -271,6 +282,14 @@ const words = {
         toolsReview: 'Review',
         toolsEdition: 'Versions & publication',
         toolsDisplay: 'Display',
+        interfaceLanguage: 'Interface language',
+        appearance: 'Appearance',
+        automatic: 'Auto',
+        chinese: '中文',
+        english: 'English',
+        light: 'Light',
+        dark: 'Dark',
+        projectNavigation: 'Project navigation',
         versionHistory: 'Version history',
         pdfPublication: 'PDF publication',
         sourceLineNumbers: 'Source line numbers',
@@ -557,7 +576,8 @@ function documentStageContent(stage: DocumentStage | undefined, language: Langua
     if (option) content.append(readerIcon(option.icon, 16));
     if (!compact) {
         const label = document.createElement('span'); label.className = 'reader-document-stage-label';
-        label.textContent = option ? words[language][option.label] : words[language].documentStageUnset;
+        readerText(label, () => { const locale = readerPreferences.snapshot().language;
+            return option ? words[locale][option.label] : words[locale].documentStageUnset; });
         content.append(label);
     }
     return content;
@@ -578,19 +598,21 @@ function documentStatusBadge(page: ReaderPage | undefined, language: Language, i
     element.className = 'reader-document-status' + (interactive ? ' is-interactive' : '') + (lifecycle?.checkpoint && lifecycle.changedSinceCheckpoint ? ' is-changed' : '');
     const status = documentStatusText(page, language);
     const description = words[language].documentStage + (language === 'en' ? ': ' : '：') + status;
-    element.dataset.readerTooltip = description;
+    const describe = () => { const locale = readerPreferences.snapshot().language;
+        return words[locale].documentStage + (locale === 'en' ? ': ' : '：') + documentStatusText(page, locale); };
+    readerAttribute(element, 'data-reader-tooltip', describe);
     if (!lifecycle?.stage && lifecycle?.checkpoint) element.append(readerIcon('stage-checkpoint', 16));
     if (lifecycle?.stage || interactive) element.append(documentStageContent(lifecycle?.stage, language, !interactive));
     if (interactive) {
         (element as HTMLButtonElement).type = 'button';
         element.dataset.documentStatus = 'true';
-        element.setAttribute('aria-label', description);
+        readerAttribute(element, 'aria-label', describe);
         if (lifecycle?.checkpoint) {
             const checkpoint = document.createElement('span'); checkpoint.className = 'reader-document-checkpoint';
             checkpoint.textContent = '· ' + lifecycle.checkpoint.label; element.append(checkpoint);
             if (lifecycle.changedSinceCheckpoint) {
                 const changed = document.createElement('span'); changed.className = 'reader-document-changed';
-                changed.textContent = '· ' + words[language].documentStageChanged; element.append(changed);
+                readerText(changed, () => '· ' + words[readerPreferences.snapshot().language].documentStageChanged); element.append(changed);
             }
         }
     } else {
@@ -608,7 +630,7 @@ function pageIntegrationGlyph(page: ReaderPage | undefined, language: Language):
     }
     const integration = pageIntegration(page);
     glyph.className = 'reader-page-integration is-' + integration.status;
-    glyph.dataset.readerTooltip = pageIntegrationTooltip(page, language);
+    readerAttribute(glyph, 'data-reader-tooltip', () => pageIntegrationTooltip(page, readerPreferences.snapshot().language));
     glyph.setAttribute('aria-hidden', 'true');
     glyph.append(readerIcon(`integration-${integration.status}`, 16));
     return glyph;
@@ -699,10 +721,15 @@ class ReaderApplication {
     private symbolAuditReportOpen = false;
     private realtimeEvents: ReaderEvents | undefined;
     private clearSourceLocationHighlight: (() => void) | undefined;
+    private disposePreferences: (() => void) | undefined;
 
     async start(): Promise<void> {
         this.buildShell();
         mountReaderEmbeddedView(this.main);
+        try { await this.startReading(); } catch (error) { this.disposePreferences?.(); throw error; }
+    }
+
+    private async startReading(): Promise<void> {
         await this.refreshState();
         this.installHandlers();
         if (!this.state?.available) {
@@ -723,7 +750,7 @@ class ReaderApplication {
             this.page = undefined;
             this.currentPath = '';
             this.pageTitle.replaceChildren();
-            this.article.textContent = this.state?.pages.length ? this.dictionary().noMainPages : this.dictionary().noMarkdownPages;
+            readerText(this.article, () => this.state?.pages.length ? this.dictionary().noMainPages : this.dictionary().noMarkdownPages);
             return;
         }
         this.selectedPagePaths = [initialPath];
@@ -764,7 +791,7 @@ class ReaderApplication {
         this.article = this.root.querySelector('#reader-article') as HTMLElement;
         this.pageTitle = this.root.querySelector('#reader-page-title') as HTMLElement;
         this.liveStatus = this.root.querySelector('#reader-live') as HTMLElement;
-        this.toolbarMenu = new ReaderToolbarMenu(this.root, () => this.dictionary(), () => this.prepareToolbarView('menu'));
+        this.toolbarMenu = new ReaderToolbarMenu(this.root, () => this.dictionary(), () => this.prepareToolbarView('menu'), readerPreferences);
         this.tooltip = new ReaderTooltip();
         this.tooltip.bind(this.root);
         window.addEventListener('pagehide', () => { this.formulaLayout?.dispose(); this.createPage?.close(false); });
@@ -842,11 +869,12 @@ class ReaderApplication {
         });
         this.leanReview = new ReaderLeanReview(this.main, {
             context: () => ({ projectId: this.state?.projectId || '', filePath: this.currentPath,
-                language: this.state?.language || 'zh', token: this.state?.requestToken || '', revision: this.state?.revision || 0 }),
+                language: this.uiLanguage, manuscriptLanguage: this.state?.language || 'zh', token: this.state?.requestToken || '', revision: this.state?.revision || 0 }),
             request: readerFetch,
             renderProse: source => renderFormalMarkdown(this.markdown, source.content, this.renderOptions(source.filePath)),
             mountProse: container => {
-                const figures = mountReaderFigures(container, this.state?.language || 'zh');
+                container.lang = this.state?.language || 'zh';
+                const figures = mountReaderFigures(container, () => this.uiLanguage);
                 const assets = mountReaderAssets(container);
                 return () => { figures(); assets(); };
             },
@@ -879,17 +907,17 @@ class ReaderApplication {
                     markdownOnly: dictionary.leanMarkdownOnly,
                     leanOnly: dictionary.leanOnly,
                     none: dictionary.leanNone,
-                    status: (kind, value) => leanStatusLabel(this.state?.language || 'zh', kind, value)
+                    status: (kind, value) => leanStatusLabel(this.uiLanguage, kind, value)
                 };
             }
         });
-        this.archive = new ReaderArchive(() => ({ language: this.state?.language || 'zh', currentPath: this.currentPath, token: this.state?.requestToken || '', project: this.state?.projectId || '' }));
+        this.archive = new ReaderArchive(() => ({ language: this.uiLanguage, manuscriptLanguage: this.state?.language || 'zh', currentPath: this.currentPath, token: this.state?.requestToken || '', project: this.state?.projectId || '' }));
         this.root.querySelector('#reader-archive')?.addEventListener('click', () => { this.prepareToolbarView('archive'); void this.archive.open(); });
-        this.publication = new ReaderPublication(() => ({ language: this.state?.language || 'zh', token: this.state?.requestToken || '', project: this.state?.projectId || '' }));
+        this.publication = new ReaderPublication(() => ({ language: this.uiLanguage, manuscriptLanguage: this.state?.language || 'zh', token: this.state?.requestToken || '', project: this.state?.projectId || '' }));
         this.root.querySelector('#reader-publication')?.addEventListener('click', () => { this.prepareToolbarView('publication'); void this.publication.open(); });
         this.createPage = new ReaderCreatePage(this.root.querySelector<HTMLButtonElement>('#reader-create-page')!, {
             context: () => ({ projectId: this.state?.projectId || null, requestToken: this.state?.requestToken,
-                language: this.state?.language || 'zh', currentPath: this.currentPath, revision: this.state?.revision }),
+                language: this.uiLanguage, manuscriptLanguage: this.state?.language || 'zh', currentPath: this.currentPath, revision: this.state?.revision }),
             request: readerFetch,
             beforeOpen: () => this.prepareToolbarView('create-page'),
             canAssist: canReferenceReaderInConversation,
@@ -927,11 +955,34 @@ class ReaderApplication {
         });
         this.symbolAudit = new ReaderSymbolAudit();
         this.symbolAuditReport = new ReaderSymbolAuditReportView();
+        let interfaceLanguage = this.uiLanguage;
+        const disposePreferences = readerPreferences.subscribe(snapshot => {
+            this.toolbarMenu.updatePreferences();
+            if (snapshot.language === interfaceLanguage) return;
+            interfaceLanguage = snapshot.language;
+            this.updateInterfaceLanguage();
+        });
+        this.disposePreferences = disposePreferences;
+        window.addEventListener('pagehide', event => { if (!event.persisted) disposePreferences(); });
+        this.updateToolbarLabels();
 
     }
 
+    private get uiLanguage(): Language { return readerPreferences.snapshot().language; }
+
     private dictionary() {
-        return words[this.state?.language || 'zh'];
+        return readerWords(() => words[this.uiLanguage]);
+    }
+
+    private updateInterfaceLanguage(): void {
+        this.updateToolbarLabels();
+        this.archive?.contextChanged();
+        this.publication?.contextChanged();
+        this.leanReview?.contextChanged();
+        this.formulaLayout?.setLanguage(this.uiLanguage);
+        if (this.symbolAuditReportOpen) { this.article.lang = this.uiLanguage; document.title = this.dictionary().symbolAuditOpenReport + ' — Math Workspace'; }
+        refreshReaderLabels(document.body);
+        this.toolbarPanel?.reposition();
     }
 
     private async fetchJson<T>(url: string): Promise<T> {
@@ -990,13 +1041,13 @@ class ReaderApplication {
         this.leanReview?.contextChanged();
         this.createPage?.contextChanged();
         const dictionary = this.dictionary();
-        (this.root.querySelector('#reader-page-filter') as HTMLInputElement).placeholder = dictionary.search;
+        readerAttribute((this.root.querySelector('#reader-page-filter') as HTMLInputElement), 'placeholder', () => this.dictionary().search);
         this.renderNavigation((this.root.querySelector('#reader-page-filter') as HTMLInputElement).value);
         this.updateToolbarLabels();
         readerViewStateChanged();
     }
 
-    private renderProjectLauncher(message = ''): void {
+    private renderProjectLauncher(message: string | (() => string) = ''): void {
         this.formulaLayout?.dispose();
         const shell = this.root.querySelector('.reader-shell') as HTMLElement;
         shell.classList.add('is-project-launcher');
@@ -1005,23 +1056,23 @@ class ReaderApplication {
         const panel = document.createElement('section');
         panel.className = 'reader-project-launcher';
         const title = document.createElement('h1');
-        title.textContent = dictionary.projectLauncherTitle;
+        readerText(title, () => this.dictionary().projectLauncherTitle);
         const description = document.createElement('p');
-        description.textContent = message || dictionary.projectLauncherDescription;
+        readerText(description, () => (typeof message === 'function' ? message() : message) || this.dictionary().projectLauncherDescription);
         const choose = document.createElement('button');
         choose.type = 'button';
         choose.className = 'reader-project-choose';
         choose.dataset.projectPicker = 'true';
-        choose.textContent = dictionary.chooseProject;
+        readerText(choose, () => this.dictionary().chooseProject);
         const recentHeading = document.createElement('h2');
-        recentHeading.textContent = dictionary.recentProjects;
+        readerText(recentHeading, () => this.dictionary().recentProjects);
         const recent = document.createElement('div');
         recent.className = 'reader-recent-projects';
         const projects = this.state?.recentProjects || [];
         if (!projects.length) {
             const empty = document.createElement('p');
             empty.className = 'reader-project-empty';
-            empty.textContent = dictionary.noRecentProjects;
+            readerText(empty, () => this.dictionary().noRecentProjects);
             recent.append(empty);
         } else {
             projects.forEach(project => {
@@ -1046,7 +1097,7 @@ class ReaderApplication {
             const state = await this.postJson<ReaderState>(url, value);
             this.applyState(state);
             if (!state.available) {
-                this.renderProjectLauncher(this.dictionary().projectSelectionCancelled);
+                this.renderProjectLauncher(() => this.dictionary().projectSelectionCancelled);
                 return;
             }
             this.root.querySelector('.reader-shell')?.classList.remove('is-project-launcher');
@@ -1066,16 +1117,21 @@ class ReaderApplication {
     private updateToolbarLabels(): void {
         const dictionary = this.dictionary();
         this.toolbarMenu?.updateLabels();
+        readerAttribute(this.root.querySelector('#reader-sidebar'), 'aria-label', () => this.dictionary().projectNavigation);
+        const filter = this.root.querySelector<HTMLInputElement>('#reader-page-filter');
+        if (filter) { readerAttribute(filter, 'placeholder', () => this.dictionary().search); readerAttribute(filter, 'aria-label', () => this.dictionary().search); }
+        const filterLabel = this.root.querySelector('.reader-filter .sr-only');
+        if (filterLabel) readerText(filterLabel, () => this.dictionary().search);
         this.createPage?.contextChanged();
-        this.root.querySelector('.reader-tools')?.setAttribute('aria-label', dictionary.readerTools);
+        readerAttribute(this.root.querySelector('.reader-tools'), 'aria-label', () => this.dictionary().readerTools);
         const expand = this.root.querySelector<HTMLElement>('#reader-expand');
-        if (expand) { const label = this.state?.language === 'en' ? 'Full screen' : '全屏阅读'; replaceReaderButtonIcon(expand, 'expand'); expand.dataset.readerTooltip = label; expand.setAttribute('aria-label', label); }
+        if (expand) { const label = this.uiLanguage === 'en' ? 'Full screen' : '全屏阅读'; replaceReaderButtonIcon(expand, 'expand'); expand.dataset.readerTooltip = label; expand.setAttribute('aria-label', label); }
         const back = this.root.querySelector('#reader-back') as HTMLElement;
         const forward = this.root.querySelector('#reader-forward') as HTMLElement;
         back.dataset.tooltip = dictionary.back;
-        back.setAttribute('aria-label', dictionary.back);
+        readerAttribute(back, 'aria-label', () => this.dictionary().back);
         forward.dataset.tooltip = dictionary.forward;
-        forward.setAttribute('aria-label', dictionary.forward);
+        readerAttribute(forward, 'aria-label', () => this.dictionary().forward);
         this.root.querySelectorAll<HTMLElement>('[data-panel]').forEach(button => {
             const panel = button.dataset.panel || '';
             const view = (panel === 'symbol-audit' ? 'symbolAudit' : panel) as keyof typeof dictionary;
@@ -1084,15 +1140,15 @@ class ReaderApplication {
             button.setAttribute('aria-label', label);
         });
         const fontSize = this.root.querySelector('.reader-type-control') as HTMLElement;
-        fontSize.setAttribute('aria-label', dictionary.fontSize);
+        readerAttribute(fontSize, 'aria-label', () => this.dictionary().fontSize);
         const decrease = this.root.querySelector<HTMLElement>('[data-font-size="-1"]') as HTMLElement;
         const increase = this.root.querySelector<HTMLElement>('[data-font-size="1"]') as HTMLElement;
         decrease.dataset.readerTooltip = dictionary.decreaseFont;
         delete decrease.dataset.tooltip;
-        decrease.setAttribute('aria-label', dictionary.decreaseFont);
+        readerAttribute(decrease, 'aria-label', () => this.dictionary().decreaseFont);
         increase.dataset.readerTooltip = dictionary.increaseFont;
         delete increase.dataset.tooltip;
-        increase.setAttribute('aria-label', dictionary.increaseFont);
+        readerAttribute(increase, 'aria-label', () => this.dictionary().increaseFont);
         this.updateNavigationToggle();
         this.updateSourceLineNumberToggle();
         this.updateDraftToolbarAvailability();
@@ -1315,10 +1371,10 @@ class ReaderApplication {
         const menu = document.createElement('section');
         menu.className = 'reader-nav-context-menu';
         menu.setAttribute('role', 'menu');
-        menu.setAttribute('aria-label', this.dictionary().documentStageBatch(filePaths.length));
+        readerAttribute(menu, 'aria-label', () => this.dictionary().documentStageBatch(filePaths.length));
         const title = document.createElement('div');
         title.className = 'reader-nav-context-menu-title';
-        title.textContent = this.dictionary().documentStageSelection(filePaths.length);
+        readerText(title, () => this.dictionary().documentStageSelection(filePaths.length));
         menu.append(title);
         const stageBranch = document.createElement('div');
         stageBranch.className = 'reader-nav-context-menu-branch';
@@ -1329,7 +1385,7 @@ class ReaderApplication {
         stageTrigger.setAttribute('aria-haspopup', 'menu');
         stageTrigger.setAttribute('aria-expanded', 'false');
         const stageLabel = document.createElement('span');
-        stageLabel.textContent = this.dictionary().documentStageMenu;
+        readerText(stageLabel, () => this.dictionary().documentStageMenu);
         stageTrigger.append(stageLabel, readerIcon('chevron-right', 13));
         const stageMenu = document.createElement('div');
         stageMenu.className = 'reader-nav-context-submenu';
@@ -1352,7 +1408,7 @@ class ReaderApplication {
             action.type = 'button';
             action.className = 'reader-nav-context-menu-item';
             action.setAttribute('role', 'menuitem');
-            action.append(documentStageContent(stage, this.state!.language));
+            action.append(documentStageContent(stage, this.uiLanguage));
             action.addEventListener('click', () => void this.saveNavigationStages(filePaths, stage));
             stageMenu.append(action);
         });
@@ -1443,13 +1499,13 @@ class ReaderApplication {
             const isDraftCollection = pages[0]?.documentMode === 'draft';
             const integrated = pages.filter(page => pageIntegration(page).status === 'managed').length;
             const draftCollectionId = pages[0]?.documentCollectionId;
-            const summaryText = isDraftCollection
+            const summaryText = () => isDraftCollection
                 ? this.dictionary().draftCollectionSummary(pages.length)
                 : this.dictionary().integrationGroupSummary(integrated, pages.length);
             const summary = document.createElement('span');
             summary.className = 'reader-nav-integration-summary';
-            summary.textContent = summaryText;
-            summary.title = summaryText;
+            readerText(summary, summaryText);
+            readerAttribute(summary, 'title', summaryText);
             const isCollapsed = Boolean(isDraftCollection && draftCollectionId && !normalized && !this.expandedDraftCollections.has(this.draftCollectionKey(draftCollectionId)));
             if (isDraftCollection && draftCollectionId) {
                 const toggle = document.createElement('button');
@@ -1457,7 +1513,7 @@ class ReaderApplication {
                 toggle.className = 'reader-nav-group-toggle' + (isCollapsed ? ' is-collapsed' : '');
                 toggle.dataset.draftCollectionToggle = draftCollectionId;
                 toggle.setAttribute('aria-expanded', String(!isCollapsed));
-                toggle.setAttribute('aria-label', isCollapsed ? this.dictionary().expandDraftCollection : this.dictionary().collapseDraftCollection);
+                readerAttribute(toggle, 'aria-label', () => isCollapsed ? this.dictionary().expandDraftCollection : this.dictionary().collapseDraftCollection);
                 toggle.append(readerIcon(isCollapsed ? 'chevron-down' : 'chevron-up', 13));
                 heading.append(headingText, summary, toggle);
             } else {
@@ -1492,11 +1548,12 @@ class ReaderApplication {
                 label.className = 'reader-nav-page-label';
                 label.innerHTML = renderFormalInline(this.markdown, title, this.renderOptions(page.filePath, {}));
                 button.append(label);
-                const status = documentStatusBadge(page, this.state!.language);
+                const status = documentStatusBadge(page, this.uiLanguage);
                 if (status) button.append(status);
-                button.append(pageIntegrationGlyph(page, this.state!.language));
-                button.setAttribute('aria-label', [title, status?.dataset.readerTooltip,
-                    pageIntegrationTooltip(page, this.state!.language)].filter(Boolean).join(' — '));
+                button.append(pageIntegrationGlyph(page, this.uiLanguage));
+                readerAttribute(button, 'aria-label', () => [title,
+                    status && words[this.uiLanguage].documentStage + (this.uiLanguage === 'en' ? ': ' : '：') + documentStatusText(page, this.uiLanguage),
+                    pageIntegrationTooltip(page, this.uiLanguage)].filter(Boolean).join(' — '));
                 group.append(button);
             });
             navigation.append(group);
@@ -1587,7 +1644,7 @@ class ReaderApplication {
         const titleLabel = document.createElement('span');
         titleLabel.className = 'reader-page-title-label';
         titleLabel.innerHTML = renderFormalInline(this.markdown, title, this.renderOptions(this.page.filePath, this.page.labels));
-        const documentStatus = documentStatusBadge(this.page.page, this.state.language, true);
+        const documentStatus = documentStatusBadge(this.page.page, this.uiLanguage, true);
         const navigation = this.titleNavigationScope();
         let titleTrigger: HTMLButtonElement | undefined;
         if (navigation) {
@@ -1596,8 +1653,9 @@ class ReaderApplication {
             titleTrigger.type = 'button';
             titleTrigger.className = 'reader-page-title-trigger';
             titleTrigger.dataset.titleNavigation = 'true';
-            titleTrigger.dataset.readerTooltip = title + ' — ' + navigation.title;
-            titleTrigger.setAttribute('aria-label', title + ' — ' + navigation.title);
+            const describe = () => title + ' — ' + (this.titleNavigationScope()?.title || navigation.title);
+            readerAttribute(titleTrigger, 'data-reader-tooltip', describe);
+            readerAttribute(titleTrigger, 'aria-label', describe);
             titleTrigger.setAttribute('aria-haspopup', 'dialog');
             titleTrigger.setAttribute('aria-controls', 'reader-chapter-navigation');
             titleTrigger.setAttribute('aria-expanded', 'false');
@@ -1605,13 +1663,14 @@ class ReaderApplication {
         }
         const titleParts: Node[] = [titleTrigger || titleLabel];
         if (documentStatus) titleParts.push(documentStatus);
-        titleParts.push(pageIntegrationGlyph(this.page.page, this.state.language));
+        titleParts.push(pageIntegrationGlyph(this.page.page, this.uiLanguage));
         this.pageTitle.replaceChildren(...titleParts);
         if (restoreTitleFocus) (titleTrigger || this.pageTitle.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
         const descriptor = this.page.page?.documentMode === 'draft'
             ? (this.page.page?.documentCollectionTitle || 'Draft collection')
-            : pageIntegrationTooltip(this.page.page, this.state.language);
-        this.pageTitle.setAttribute('aria-label', title + ' — ' + descriptor);
+            : pageIntegrationTooltip(this.page.page, this.uiLanguage);
+        readerAttribute(this.pageTitle, 'aria-label', () => title + ' — ' + (this.page?.page?.documentMode === 'draft'
+            ? (this.page.page.documentCollectionTitle || 'Draft collection') : pageIntegrationTooltip(this.page?.page, this.uiLanguage)));
         document.title = title + ' — Math Workspace';
         const rendered = renderFormalDocument(this.markdown, this.page.content, {
             currentFilePath: this.page.filePath,
@@ -1624,8 +1683,10 @@ class ReaderApplication {
         this.disposeFigures();
         this.disposeAssets();
         this.formulaLayout?.dispose();
+        this.article.lang = this.state.language;
         this.article.innerHTML = rendered.html;
-        this.disposeFigures = mountReaderFigures(this.article, this.state.language);
+        bindFormalInterfaceLabels(this.article, this.page.dependencyMarkers || {}, () => this.uiLanguage);
+        this.disposeFigures = mountReaderFigures(this.article, () => this.uiLanguage);
         this.disposeAssets = mountReaderAssets(this.article);
         this.mountArticleFormulaLayout();
         this.article.querySelectorAll<HTMLElement>('[data-source-start-line]').forEach(element => {
@@ -1652,7 +1713,7 @@ class ReaderApplication {
         this.formulaLayout?.dispose();
         const projectId = state.projectId, token = state.requestToken;
         const current = () => this.page === page && this.state?.projectId === projectId && this.state?.requestToken === token;
-        this.formulaLayout = mountReaderFormulaLayout(this.article, state.language, {
+        this.formulaLayout = mountReaderFormulaLayout(this.article, this.uiLanguage, {
             formulas: page.formulas || [],
             request: (route, options) => {
                 if (!current()) return Promise.reject(new Error('The formula page has changed.'));
@@ -1738,7 +1799,7 @@ class ReaderApplication {
         const titleKey = view === 'symbol-audit' ? 'symbolAudit' : view;
         const candidate = dictionary[titleKey as keyof typeof dictionary];
         const title = typeof candidate === 'string' ? candidate : view;
-        this.toolbarPanel.open(view, trigger, title, content => {
+        this.toolbarPanel.open(view, trigger, () => { const label = this.dictionary()[titleKey as keyof ReturnType<ReaderApplication['dictionary']>]; return typeof label === 'string' ? label : view; }, content => {
             if (view === 'contents') this.renderContents(content);
             if (view === 'definitions') this.renderDefinitions(content);
             if (view === 'symbols') this.renderSymbols(content);
@@ -1781,10 +1842,10 @@ class ReaderApplication {
         const navigation = this.titleNavigationScope();
         if (!navigation) return;
         this.prepareToolbarView('panel');
-        const content = this.toolbarPanel.open('chapters', trigger, navigation.title, container => {
+        const content = this.toolbarPanel.open('chapters', trigger, () => this.titleNavigationScope()?.title || navigation.title, container => {
             const list = document.createElement('nav');
             list.className = 'reader-chapter-list';
-            list.setAttribute('aria-label', navigation.title);
+            readerAttribute(list, 'aria-label', () => this.titleNavigationScope()?.title || navigation.title);
             navigation.pages.forEach(page => {
                 const button = document.createElement('button');
                 button.type = 'button';
@@ -1846,17 +1907,17 @@ class ReaderApplication {
         if (page.documentMode === 'draft') return;
         this.prepareToolbarView('panel');
         const dictionary = this.dictionary();
-        this.toolbarPanel.open('document-stage', trigger, dictionary.documentStage, content => {
+        this.toolbarPanel.open('document-stage', trigger, () => this.dictionary().documentStage, content => {
             const summary = document.createElement('p');
             summary.className = 'reader-document-stage-summary';
-            summary.textContent = documentStatusText(page, this.state!.language);
+            readerText(summary, () => documentStatusText(page, this.uiLanguage));
             const stages = document.createElement('div');
             stages.className = 'reader-document-stage-actions';
             DOCUMENT_STAGE_OPTIONS.forEach(({ stage }) => {
                 const button = document.createElement('button');
                 button.type = 'button';
                 button.className = 'reader-symbol-audit-button';
-                button.append(documentStageContent(stage, this.state!.language));
+                button.append(documentStageContent(stage, this.uiLanguage));
                 button.addEventListener('click', () => void this.saveDocumentStage({ stage }));
                 stages.append(button);
             });
@@ -1864,12 +1925,12 @@ class ReaderApplication {
             checkpoint.className = 'reader-document-stage-checkpoint';
             const input = document.createElement('input');
             input.className = 'reader-panel-search';
-            input.placeholder = dictionary.documentStageMilestoneHint;
+            readerAttribute(input, 'placeholder', () => this.dictionary().documentStageMilestoneHint);
             input.value = page.lifecycle?.checkpoint?.label || '';
             const record = document.createElement('button');
             record.type = 'button';
             record.className = 'reader-symbol-audit-button';
-            record.textContent = dictionary.documentStageRecord;
+            readerText(record, () => this.dictionary().documentStageRecord);
             record.addEventListener('click', () => void this.saveDocumentStage({ checkpointLabel: input.value }));
             checkpoint.append(input, record);
             content.append(summary, stages, checkpoint);
@@ -1877,7 +1938,7 @@ class ReaderApplication {
                 const clear = document.createElement('button');
                 clear.type = 'button';
                 clear.className = 'reader-document-stage-clear';
-                clear.textContent = dictionary.documentStageClear;
+                readerText(clear, () => this.dictionary().documentStageClear);
                 clear.addEventListener('click', () => void this.saveDocumentStage({ clearCheckpoint: true }));
                 content.append(clear);
             }
@@ -1970,7 +2031,7 @@ class ReaderApplication {
             });
             list.append(button);
         });
-        container.append(list.childElementCount ? list : this.emptyState(this.dictionary().noContents));
+        container.append(list.childElementCount ? list : readerLabel(this.emptyState(this.dictionary().noContents), () => this.dictionary().noContents));
     }
 
     private renderDefinitions(container: HTMLElement): void {
@@ -1981,7 +2042,7 @@ class ReaderApplication {
         const search = document.createElement('input');
         search.type = 'search';
         search.className = 'reader-panel-search';
-        search.placeholder = this.dictionary().searchDefinitions;
+        readerAttribute(search, 'placeholder', () => this.dictionary().searchDefinitions);
         const scopeButton = document.createElement('button');
         scopeButton.type = 'button';
         scopeButton.className = 'reader-definition-scope';
@@ -1989,13 +2050,15 @@ class ReaderApplication {
         results.className = 'reader-panel-list';
         const renderResults = () => {
             results.replaceChildren();
-            scopeButton.textContent = scope === 'chapter'
+            readerText(scopeButton, () => scope === 'chapter'
                 ? this.dictionary().searchAllDefinitions
-                : this.dictionary().showChapterDefinitions;
+                : this.dictionary().showChapterDefinitions);
             scopeButton.classList.toggle('is-active', scope === 'all');
             const matches = this.findDefinitions(search.value, 80, scope === 'chapter' ? this.chapterDefinitions() : undefined);
             if (matches.length === 0) {
-                results.append(this.emptyState(scope === 'chapter' && !search.value.trim()
+                results.append(readerLabel(this.emptyState(scope === 'chapter' && !search.value.trim()
+                    ? this.dictionary().noChapterDefinitions
+                    : this.dictionary().noDefinitions), () => scope === 'chapter' && !search.value.trim()
                     ? this.dictionary().noChapterDefinitions
                     : this.dictionary().noDefinitions));
                 return;
@@ -2036,11 +2099,11 @@ class ReaderApplication {
         const actions = document.createElement('div');
         actions.className = 'reader-detail-actions';
         actions.append(
-            this.panelIconButton('arrow-left', this.dictionary().definitions, () => this.renderDefinitions(container)),
-            this.panelIconButton('locate', this.dictionary().jump, () => {
+            readerLabel(this.panelIconButton('arrow-left', this.dictionary().definitions, () => this.renderDefinitions(container)), () => this.dictionary().definitions),
+            readerLabel(this.panelIconButton('locate', this.dictionary().jump, () => {
                 this.toolbarPanel.close();
                 this.locateDefinition(definition);
-            })
+            }), () => this.dictionary().jump)
         );
         const content = document.createElement('div');
         content.className = 'reader-panel-prose';
@@ -2096,7 +2159,7 @@ class ReaderApplication {
     private renderSymbols(container: HTMLElement): void {
         const symbols = this.page?.symbols || [];
         if (symbols.length === 0) {
-            container.append(this.emptyState(this.dictionary().noSymbols));
+            container.append(readerLabel(this.emptyState(this.dictionary().noSymbols), () => this.dictionary().noSymbols));
             return;
         }
         const grid = document.createElement('div');
@@ -2113,10 +2176,10 @@ class ReaderApplication {
             meaning.innerHTML = renderFormalMarkdown(this.markdown, symbol.meaning, this.renderOptions(this.currentPath));
             detail.append(display, meaning);
             if (symbol.sourceFilePath && symbol.sourceLine) {
-                detail.append(this.panelIconButton('locate', this.dictionary().jump, () => {
+                detail.append(readerLabel(this.panelIconButton('locate', this.dictionary().jump, () => {
                     this.toolbarPanel.close();
                     void this.openPage(symbol.sourceFilePath as string, 'push', '', false, { line: symbol.sourceLine as number });
-                }));
+                }), () => this.dictionary().jump));
             }
             this.toolbarPanel.reposition();
         };
@@ -2221,13 +2284,14 @@ class ReaderApplication {
         this.toolbarPanel.close();
         this.symbolAudit.dispose();
         this.symbolAuditReportOpen = true;
+        this.article.lang = this.uiLanguage;
         this.article.classList.add('is-symbol-audit-report');
         const title = this.dictionary().symbolAuditOpenReport;
         const titleLabel = document.createElement('span');
         titleLabel.className = 'reader-page-title-label';
-        titleLabel.textContent = title;
+        readerText(titleLabel, () => this.dictionary().symbolAuditOpenReport);
         this.pageTitle.replaceChildren(titleLabel);
-        this.pageTitle.setAttribute('aria-label', title);
+        readerAttribute(this.pageTitle, 'aria-label', () => this.dictionary().symbolAuditOpenReport);
         document.title = title + ' — Math Workspace';
         if (historyMode !== 'pop') {
             const url = '?path=' + encodeURIComponent(this.currentPath) + '&view=symbol-audit-report';
@@ -2236,7 +2300,8 @@ class ReaderApplication {
             else readerHistory('replace', state, url);
         }
         this.symbolAuditReport.render(this.article, status, {
-            language: this.state.language,
+            language: this.uiLanguage,
+            uiLanguage: () => this.uiLanguage,
             sourceTitle: filePath => {
                 const page = this.state?.pages.find(candidate => candidate.filePath === filePath);
                 return page?.displayHeading || page?.title || filePath.split('/').pop() || filePath;
@@ -2401,7 +2466,7 @@ class ReaderApplication {
             void this.refreshState().then(async () => {
                 if (requestId !== this.pageRequestId) return;
                 if (this.state?.revision === previousRevision) this.leanReview.metadataChanged(changedPaths);
-                this.liveStatus.textContent = this.dictionary().live;
+                readerText(this.liveStatus, () => this.dictionary().live);
                 window.setTimeout(() => { this.liveStatus.textContent = ''; }, 1200);
                 const next = this.state?.pages.some(page => page.filePath === current) ? current : this.defaultPagePath();
                 if (!next) return this.openInitialPage();
@@ -2440,7 +2505,9 @@ function startReader(): void {
         root.innerHTML = '<main class="reader-failure"><h1>Math Workspace</h1><pre>' + escapeHtml(message) + '</pre></main>';
         const retry = document.createElement('button');
         retry.className = 'tool-button';
-        retry.textContent = navigator.language.startsWith('zh') ? '重试' : 'Retry';
+        readerText(retry, () => readerPreferences.snapshot().language === 'zh' ? '重试' : 'Retry');
+        const dispose = readerPreferences.subscribe(() => refreshReaderLabels(retry));
+        retry.addEventListener('click', dispose, { once: true });
         retry.addEventListener('click', startReader); root.firstElementChild?.append(retry);
     });
 }

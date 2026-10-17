@@ -1,12 +1,13 @@
-type ReaderState = { projectRoot?: string; pagePath?: string; scrollTop?: number };
+type ReaderState = { projectRoot?: string; pagePath?: string; scrollTop?: number; uiPreferences?: string };
 import type { ReaderReferenceContent } from './reader-references';
 type HostWindow = Window & { openai?: {
     widgetState?: ReaderState; toolOutput?: { reader?: ReaderState & { launcher?: boolean } };
     setWidgetState?: (state: ReaderState) => void; requestDisplayMode?: (request: { mode: string }) => Promise<unknown>;
+    theme?: 'light' | 'dark'; locale?: string;
 } };
 const host = typeof window === 'undefined' ? undefined : window as HostWindow;
-const embedded = typeof document !== 'undefined' && document.documentElement.hasAttribute('data-math-workspace-app');
-const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+const embedded = typeof document !== 'undefined' && Boolean(document.documentElement?.hasAttribute?.('data-math-workspace-app'));
+const pending = new Map<number, { method: string; resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 let sequence = 0, parentOrigin = '*', stopped = false;
 let closing: Promise<unknown> | undefined;
 let recovering: Promise<void> | undefined;
@@ -21,6 +22,42 @@ let initial: ReaderState & { launcher?: boolean } | undefined;
 let receiveSeed: (() => void) | undefined;
 const viewKey = embedded ? crypto.randomUUID().replaceAll('-', '') : '';
 
+export interface ReaderHostContext { theme?: 'light' | 'dark'; locale?: string; }
+const hostContextListeners = new Set<(context: ReaderHostContext) => void>();
+const standardHostContext: ReaderHostContext = {};
+const legacyHostContext: ReaderHostContext = {};
+function patchHostContext(target: ReaderHostContext, context: unknown): void {
+    if (!context || typeof context !== 'object' || Array.isArray(context)) return;
+    const patch = context as Record<string, unknown>;
+    const previous = { ...legacyHostContext, ...standardHostContext };
+    if (typeof patch.locale === 'string' && patch.locale.trim()) target.locale = patch.locale;
+    if (patch.theme === 'light' || patch.theme === 'dark') target.theme = patch.theme;
+    const current = { ...legacyHostContext, ...standardHostContext };
+    if (current.locale !== previous.locale || current.theme !== previous.theme) {
+        hostContextListeners.forEach(listener => listener({ ...current }));
+    }
+}
+export function subscribeReaderHostContext(listener: (context: ReaderHostContext) => void): () => void {
+    hostContextListeners.add(listener);
+    listener({ ...legacyHostContext, ...standardHostContext });
+    return () => hostContextListeners.delete(listener);
+}
+export function readerHostPreferenceStorage(): Pick<Storage, 'getItem' | 'setItem'> | undefined {
+    if (!embedded || !host?.openai?.setWidgetState) return;
+    return { getItem: () => typeof saved.uiPreferences === 'string' ? saved.uiPreferences : null,
+        setItem: (_key, value) => {
+            const next = { ...saved, uiPreferences: value };
+            host.openai!.setWidgetState!(next);
+            saved = next;
+        } };
+}
+if (embedded) {
+    patchHostContext(legacyHostContext, host?.openai);
+    addEventListener('openai:set_globals', (event: Event) => {
+        if (!stopped) patchHostContext(legacyHostContext, (event as CustomEvent)?.detail?.globals);
+    });
+}
+
 export function isReaderApp(): boolean { return embedded; }
 export function isReaderPageRestored(): boolean { return restoredPage; }
 export function canReferenceReaderInConversation(): boolean { return embedded && referenceDraftAvailable && !stopped; }
@@ -30,7 +67,7 @@ function request(method: string, params: object = {}, allowStopped = false): Pro
     const id = ++sequence;
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => { pending.delete(id); reject(new Error('Math Workspace host did not respond.')); }, 25000);
-        pending.set(id, { resolve, reject, timer }); send({ id, method, params });
+        pending.set(id, { method, resolve, reject, timer }); send({ id, method, params });
     });
 }
 async function call(name: string, arguments_: object, allowStopped = false): Promise<any> {
@@ -51,12 +88,16 @@ if (embedded) addEventListener('message', event => {
         void closing.finally(() => {
             if (message.id !== undefined) send({ id: message.id, result: {} });
         });
+    } else if (message.method === 'ui/notifications/host-context-changed') {
+        // Context notifications follow initialization, which pins the parent's origin.
+        if (!stopped && parentOrigin !== '*') patchHostContext(standardHostContext, message.params);
     } else if (message.method === 'ui/notifications/tool-result') {
         initial = message.params?._meta?.reader || message.params?.structuredContent?.reader || {};
         receiveSeed?.();
     } else if (message.id !== undefined && pending.has(message.id)) {
         const work = pending.get(message.id)!; pending.delete(message.id); clearTimeout(work.timer);
         if (parentOrigin === '*') parentOrigin = event.origin;
+        if (!stopped && !message.error && work.method === 'ui/initialize') patchHostContext(standardHostContext, message.result?.hostContext);
         message.error ? work.reject(new Error(message.error.message)) : work.resolve(message.result);
     }
 });
@@ -76,7 +117,8 @@ export async function initializeReaderHost(): Promise<void> {
     const state = { ...resume, ...initial };
     restoredPage = !initial.pagePath && Boolean(resume.pagePath);
     if (initial.pagePath) state.scrollTop = undefined;
-    saved = { projectRoot: state.projectRoot, pagePath: state.pagePath, scrollTop: state.scrollTop };
+    saved = { projectRoot: state.projectRoot, pagePath: state.pagePath, scrollTop: state.scrollTop,
+        ...(saved.uiPreferences ? { uiPreferences: saved.uiPreferences } : {}) };
     await call('reader_view', { viewKey, launcher: initial?.launcher === true, ...(state.projectRoot ? { projectRoot: state.projectRoot } : {}) });
     const query = new URLSearchParams();
     if (state.pagePath) query.set('path', state.pagePath);

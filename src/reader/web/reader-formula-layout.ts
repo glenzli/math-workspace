@@ -29,6 +29,7 @@ export interface ReaderFormulaLayoutOptions {
 export interface ReaderFormulaLayout {
     dispose(): void;
     invalidate(): void;
+    setLanguage(language: FormulaLanguage): void;
     canAdapt(formula: ReaderFormula): boolean;
     isAdapted(formula: ReaderFormula): boolean;
     toggle(formula: ReaderFormula): Promise<void>;
@@ -240,6 +241,12 @@ export function mountReaderFormulaLayout(container: HTMLElement, language: Formu
     const eligible = (state: FormulaLayoutState) => state.formula?.display && !state.element.querySelector('.eqn-num');
     return {
         dispose,
+        setLanguage: value => {
+            language = value;
+            for (const state of states.values()) if (state.overflowing && state.attributes.get('aria-label') === null) {
+                state.element.setAttribute('aria-label', labels[language].overflow);
+            }
+        },
         invalidate: () => { if (!disposed) { states.forEach(reset); refresh(); } },
         canAdapt: formula => {
             const state = find(formula);

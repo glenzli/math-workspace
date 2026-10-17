@@ -1,3 +1,4 @@
+import { readerText, readerAttribute, readerWords } from './reader-ui-labels';
 import { readerRoute, readerFetch } from './reader-route';
 import { isReaderApp } from './reader-host';
 import { emptyReaderImage } from './reader-assets';
@@ -45,10 +46,11 @@ export function installInteractiveFigureRule(markdown: MarkdownIt, resolvePath: 
     });
 }
 
-export function mountReaderFigures(article: HTMLElement, language: 'zh' | 'en'): () => void {
+export function mountReaderFigures(article: HTMLElement, language: 'zh' | 'en' | (() => 'zh' | 'en')): () => void {
+    const locale = typeof language === 'function' ? language : () => language;
     const disposers: Array<() => void> = [];
     let closeViewer = () => {};
-    const expandText = language === 'en' ? 'Enlarge figure' : '放大图示';
+    const expandText = () => locale() === 'en' ? 'Enlarge figure' : '放大图示';
     for (const root of article.querySelectorAll<HTMLElement>('.reader-static-figure, .reader-interactive-figure')) {
         const poster = root.querySelector<HTMLImageElement>('img');
         const sizeFromPoster = () => {
@@ -61,15 +63,15 @@ export function mountReaderFigures(article: HTMLElement, language: 'zh' | 'en'):
         let toolbar = root.querySelector<HTMLElement>('.reader-figure-toolbar');
         if (!toolbar) { toolbar = document.createElement('span'); toolbar.className = 'reader-figure-toolbar'; root.prepend(toolbar); }
         const expand = document.createElement('button');
-        expand.type = 'button'; expand.dataset.figureExpand = ''; expand.textContent = expandText;
+        expand.type = 'button'; expand.dataset.figureExpand = ''; readerText(expand, expandText);
         const openViewer = () => {
             closeViewer();
             const style = getComputedStyle(article);
             const dialog = document.createElement('dialog'); dialog.className = 'reader-figure-viewer';
-            dialog.setAttribute('aria-label', root.dataset.figureTitle || poster?.alt || expandText);
+            readerAttribute(dialog, 'aria-label', () => root.dataset.figureTitle || poster?.alt || expandText());
             dialog.style.fontSize = style.fontSize; dialog.style.fontFamily = style.fontFamily;
             const close = document.createElement('button'); close.type = 'button';
-            close.textContent = language === 'en' ? 'Close' : '关闭'; close.className = 'reader-figure-viewer-close';
+            readerText(close, () => locale() === 'en' ? 'Close' : '关闭'); close.className = 'reader-figure-viewer-close';
             const viewport = document.createElement('div'); viewport.className = 'reader-figure-viewer-viewport';
             dialog.append(close, viewport); document.body.append(dialog);
             // Atomic moves preserve opaque iframe state. Older engines enlarge the poster instead.
@@ -116,9 +118,9 @@ export function mountReaderFigures(article: HTMLElement, language: 'zh' | 'en'):
         typographyObserver.observe(ancestor, { attributes: true, attributeFilter: ['style', 'class'] });
     }
     window.addEventListener('resize', syncTypography);
-    const text = language === 'en'
+    const text = readerWords(() => locale() === 'en'
         ? { static: 'Static figure', interactive: 'Interactive figure', loading: 'Loading…', failed: 'Figure unavailable; showing fallback image.' }
-        : { static: '静态图', interactive: '交互图', loading: '正在加载…', failed: '图示加载失败，已显示备用静态图。' };
+        : { static: '静态图', interactive: '交互图', loading: '正在加载…', failed: '图示加载失败，已显示备用静态图。' });
     for (const root of article.querySelectorAll<HTMLElement>('.reader-interactive-figure')) {
         const poster = root.querySelector<HTMLElement>('.reader-figure-poster')!;
         const stage = root.querySelector<HTMLElement>('.reader-figure-stage')!;
@@ -145,12 +147,12 @@ export function mountReaderFigures(article: HTMLElement, language: 'zh' | 'en'):
             active = false; clearTimer(); removeFrame(frame); removeFrame(displayedFrame);
             frame = undefined; displayedFrame = undefined;
             poster.hidden = false; stage.hidden = true;
-            toggle.textContent = text.interactive; toggle.setAttribute('aria-pressed', 'false');
+            readerText(toggle, () => text.interactive); toggle.setAttribute('aria-pressed', 'false');
         };
-        const failed = () => { showPoster(); status.textContent = text.failed; };
+        const failed = () => { showPoster(); readerText(status, () => text.failed); };
         const showMode = (interactive: boolean) => {
-            active = interactive; clearTimer(); status.textContent = text.loading;
-            toggle.textContent = interactive ? text.static : text.interactive;
+            active = interactive; clearTimer(); readerText(status, () => text.loading);
+            readerText(toggle, () => interactive ? text.static : text.interactive);
             toggle.setAttribute('aria-pressed', String(interactive));
             if (frame !== displayedFrame) removeFrame(frame);
             frame = document.createElement('iframe');
@@ -175,7 +177,7 @@ export function mountReaderFigures(article: HTMLElement, language: 'zh' | 'en'):
         const receive = (event: MessageEvent) => {
             if (!frame || event.source !== frame.contentWindow || event.data?.type !== 'math-workspace-figure') return;
             if (event.data.event === 'ready') {
-                clearTimer(); status.textContent = '';
+                clearTimer(); readerText(status, () => '');
                 if (displayedFrame !== frame) removeFrame(displayedFrame);
                 displayedFrame = frame; frame.classList.remove('reader-figure-loading');
                 poster.hidden = true; stage.hidden = false; sendTypography();

@@ -1,3 +1,4 @@
+import { readerText, readerAttribute } from './reader-ui-labels';
 import type { ReaderDependencyMarker, ReaderDependencyMarkerKind, ReaderDependencyNeighbor } from '../dependency-markers';
 import { closestReaderElement, positionReaderPopover } from './reader-popover';
 
@@ -121,25 +122,25 @@ export class ReaderDependencyPopover {
         const popover = document.createElement('section');
         popover.className = 'reader-dependency-popover';
         popover.setAttribute('role', 'dialog');
-        popover.setAttribute('aria-label', dependencyTitle);
+        readerAttribute(popover, 'aria-label', () => this.host.labels().dependencyTitle(dependency.kind));
         popover.addEventListener('pointerenter', this.onPopoverPointerEnter);
         popover.addEventListener('pointerleave', this.onPopoverPointerLeave);
 
         const header = document.createElement('header');
         const title = document.createElement('h2');
-        title.textContent = dependencyTitle;
+        readerText(title, () => this.host.labels().dependencyTitle(dependency.kind));
         header.append(title);
         popover.append(header);
         popover.append(
-            this.renderNeighbors(labels.upstream, Array.isArray(dependency.upstream) ? dependency.upstream : [], labels.noUpstream),
-            this.renderNeighbors(labels.downstream, Array.isArray(dependency.downstream) ? dependency.downstream : [], labels.noDownstream)
+            this.renderNeighbors(() => this.host.labels().upstream, Array.isArray(dependency.upstream) ? dependency.upstream : [], () => this.host.labels().noUpstream),
+            this.renderNeighbors(() => this.host.labels().downstream, Array.isArray(dependency.downstream) ? dependency.downstream : [], () => this.host.labels().noDownstream)
         );
 
         const otherReferences = Math.max(0, dependency.sourceReferenceCount - dependency.directDependencies);
         if (otherReferences > 0) {
             const note = document.createElement('p');
             note.className = 'reader-dependency-note';
-            note.textContent = labels.otherFormalReferences(otherReferences);
+            readerText(note, () => this.host.labels().otherFormalReferences(otherReferences));
             popover.append(note);
         }
 
@@ -148,11 +149,11 @@ export class ReaderDependencyPopover {
         positionReaderPopover(popover, marker.getBoundingClientRect(), { maxWidth: 420, gap: 8 });
     }
 
-    private renderNeighbors(title: string, neighbors: ReaderDependencyNeighbor[], emptyLabel: string): HTMLElement {
+    private renderNeighbors(title: () => string, neighbors: ReaderDependencyNeighbor[], emptyLabel: () => string): HTMLElement {
         const section = document.createElement('section');
         section.className = 'reader-dependency-group';
         const heading = document.createElement('h3');
-        heading.textContent = title;
+        readerText(heading, title);
         const count = document.createElement('span');
         count.textContent = String(neighbors.length);
         heading.append(count);
@@ -160,7 +161,7 @@ export class ReaderDependencyPopover {
         if (neighbors.length === 0) {
             const empty = document.createElement('p');
             empty.className = 'reader-dependency-empty';
-            empty.textContent = emptyLabel;
+            readerText(empty, emptyLabel);
             section.append(empty);
             return section;
         }

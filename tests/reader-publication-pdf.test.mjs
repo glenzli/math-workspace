@@ -1,3 +1,4 @@
+import { readerUiLabels, installReaderTextNodes } from './reader-ui-harness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -22,6 +23,8 @@ class Element {
     click() { if (!this.disabled) for (const listener of this.listeners.click || []) listener(); }
     find(tag) { return this.children.flatMap(child => [...(child.tagName === tag ? [child] : []), ...child.find(tag)]); }
 }
+
+installReaderTextNodes(Element);
 
 async function harness(language = 'en') {
     const document = { createElement: tag => new Element(tag) }, observations = [], urls = new Map(), revoked = [], requested = [];
@@ -53,7 +56,7 @@ async function harness(language = 'en') {
     const sandbox = { exports: {}, document, window: { devicePixelRatio: 4 }, Blob, TextDecoder, Uint8Array, AbortController, console,
         ResizeObserver: class { constructor(run) { this.run = run; observations.push(this); } observe(node) { this.node = node; } disconnect() { this.disconnected = true; } },
         URL: { createObjectURL: blob => { const value = 'blob:pdf-test-' + (++sequence); urls.set(value, blob); return value; }, revokeObjectURL: url => revoked.push(url) },
-        require: name => { assert.equal(name, './reader-icons'); return { readerIcon: glyph => { const value = document.createElement('svg'); value.dataset.glyph = glyph; return value; } }; } };
+        require: name => { if (name === './reader-ui-labels') return readerUiLabels; assert.equal(name, './reader-icons'); return { readerIcon: glyph => { const value = document.createElement('svg'); value.dataset.glyph = glyph; return value; } }; } };
     const source = await fs.readFile(path.join(root, 'src/reader/web/reader-publication-pdf.ts'), 'utf8');
     vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText, sandbox);
     const host = { language: () => language, request: async (route, options) => {

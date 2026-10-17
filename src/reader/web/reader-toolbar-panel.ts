@@ -1,5 +1,6 @@
 import { readerIcon } from './reader-icons';
 import { positionReaderPopover } from './reader-popover';
+import { readerAttribute, readerText } from './reader-ui-labels';
 
 export interface ReaderToolbarPanelLabels {
     close: string;
@@ -26,7 +27,7 @@ export class ReaderToolbarPanel {
         window.addEventListener('resize', this.onViewportChange);
     }
 
-    open(id: string, trigger: HTMLElement, title: string, populate: (content: HTMLElement) => void, anchor = trigger): HTMLElement | undefined {
+    open(id: string, trigger: HTMLElement, title: string | (() => string), populate: (content: HTMLElement) => void, anchor = trigger): HTMLElement | undefined {
         if (this.activeId === id && this.trigger === trigger) {
             this.close();
             return undefined;
@@ -36,17 +37,18 @@ export class ReaderToolbarPanel {
         const panel = document.createElement('section');
         panel.className = 'reader-toolbar-panel is-' + id;
         panel.setAttribute('role', 'dialog');
-        panel.setAttribute('aria-label', title);
+        const label = typeof title === 'function' ? title : () => title;
+        readerAttribute(panel, 'aria-label', label);
         panel.tabIndex = -1;
         const header = document.createElement('header');
         const heading = document.createElement('h2');
-        heading.textContent = title;
+        readerText(heading, label);
         const close = document.createElement('button');
         close.type = 'button';
         close.className = 'reader-panel-close';
         close.append(readerIcon('x'));
-        close.dataset.tooltip = this.labels().close;
-        close.setAttribute('aria-label', this.labels().close);
+        readerAttribute(close, 'data-tooltip', () => this.labels().close);
+        readerAttribute(close, 'aria-label', () => this.labels().close);
         close.addEventListener('click', () => this.close(true));
         header.append(heading, close);
         const content = document.createElement('div');

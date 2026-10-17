@@ -193,7 +193,8 @@ async function mainOwnershipContract() {
     let source = await fs.readFile(path.join(root, 'src/reader/web/main.ts'), 'utf8'); source = source.replace(/\nstartReader\(\);\s*$/, '\n');
     const exports = {}, captured = [], requests = [];
     const handle = () => ({ invalidations: 0, disposals: 0, invalidate() { this.invalidations++; }, dispose() { this.disposals++; } });
-    const modules = { './reader-route': { readerFetch: async (route, options) => { requests.push({ route, options }); return {}; } },
+    const modules = {
+        './reader-preferences': { readerPreferences: { snapshot: () => ({ language: 'en' }) } }, './reader-route': { readerFetch: async (route, options) => { requests.push({ route, options }); return {}; } },
         './reader-formula-layout': { mountReaderFormulaLayout: (...args) => { captured.push(args); return handle(); } } };
     vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText + '\nexports.ReaderApplication = ReaderApplication;',
         { exports, require: name => modules[name] || {}, Headers, document: {}, window: {} });

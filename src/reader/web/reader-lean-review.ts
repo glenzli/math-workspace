@@ -1,3 +1,4 @@
+import { readerLabel, readerText, readerAttribute, refreshReaderLabels, readerWords, readerIconDescription } from './reader-ui-labels';
 import type {
     DeclarationEvidence, LeanDefinitionResponse, LeanReviewEvidence, LeanReviewQueueItem, LeanReviewQueueResponse,
     LeanReviewResponse, LeanReviewSaveInput, ReviewChange, ReviewJob, ReviewRecord,
@@ -403,7 +404,11 @@ export class ReaderLeanReview {
         if (context.projectId !== this.active.projectId || (context.filePath && context.filePath !== this.active.filePath)) {
             this.close(false); return;
         }
-        if (previous.language !== context.language) this.render();
+        if (previous.language !== context.language) {
+            this.audit.refreshLanguage();
+            refreshReaderLabels(this.section); this.updateDraftStatus();
+            for (const versions of this.slotVersions.values()) if (versions[0] === previous.language) versions[0] = context.language;
+        }
         if (previous.revision !== context.revision) {
             if (this.pageQueueMode) void this.openPageQueue(this.returnFocus);
             else {
@@ -514,7 +519,7 @@ export class ReaderLeanReview {
         document.removeEventListener('keydown', this.onKeyDown);
     }
 
-    private words() { return copy[this.host.context().language]; }
+    private words() { return readerWords(() => copy[this.host.context().language]); }
     private currentDraft(): ReviewDraft | undefined { return this.active && this.drafts.get(draftKey(this.active.projectId, this.active.id)); }
     private matches(identity: RequestIdentity): boolean {
         const context = this.host.context();
@@ -615,17 +620,16 @@ export class ReaderLeanReview {
     private updateDraftStatus(): void {
         const draft = this.currentDraft(), w = this.words(); if (!draft) return;
         if (this.draftStatus) {
-            this.draftStatus.textContent = this.draftOutdated(draft) ? w.outdatedDraft : draft.dirty ? w.unsaved : this.payload?.review.record ? w.saved : w.unreviewed;
+            readerText(this.draftStatus, () => this.draftOutdated(draft) ? this.words().outdatedDraft : draft.dirty ? this.words().unsaved : this.payload?.review.record ? this.words().saved : this.words().unreviewed);
             this.draftStatus.classList.toggle('is-warning', this.draftOutdated(draft) || draft.dirty);
         }
         if (this.saveButton) {
             this.saveButton.disabled = this.busy || this.draftOutdated(draft);
             this.saveButton.setAttribute('aria-busy', String(this.saving));
-            describeReaderIconAction(this.saveButton, this.saving ? w.saving : w.save,
-                this.draftOutdated(draft) ? w.outdatedDraft : this.busy && !this.saving ? w.busyAction : '');
+            readerIconDescription(this.saveButton, () => this.saving ? this.words().saving : this.words().save, () => this.draftOutdated(draft) ? this.words().outdatedDraft : this.busy && !this.saving ? this.words().busyAction : '');
         }
         const summary = this.slots.get('review')?.querySelector('summary');
-        if (summary) summary.textContent = w.reviewRecords + ' · ' + (this.draftOutdated(draft) ? w.outdatedDraft : draft.dirty ? w.unsaved : this.payload?.review.record ? w.saved : w.unreviewed);
+        if (summary) readerText(summary, () => this.words().reviewRecords + ' · ' + (this.draftOutdated(draft) ? this.words().outdatedDraft : draft.dirty ? this.words().unsaved : this.payload?.review.record ? this.words().saved : this.words().unreviewed));
     }
 
     /** Stable slots keep the math DOM and editor mounted across queue, job and audit updates. */
@@ -646,11 +650,11 @@ export class ReaderLeanReview {
         const focusKey = this.section.contains(focused) ? focused?.dataset.leanFocus : undefined;
         const selection = focusKey && focused && ['INPUT', 'TEXTAREA'].includes(focused.tagName) ? [focused.selectionStart, focused.selectionEnd] : undefined;
         const w = this.words(), language = this.host.context().language, payload = this.payload;
-        this.section.setAttribute('aria-label', w.title);
+        readerAttribute(this.section, 'aria-label', () => this.words().title);
         this.updateSlot('header', [language, payload?.formal.display, payload?.formal.title], () => {
-            const header = element('header', '', 'reader-lean-review-header'), title = element('div'), heading = element('h2', w.title); heading.tabIndex = -1;
+            const header = element('header', '', 'reader-lean-review-header'), title = element('div'), heading = readerLabel(element('h2', w.title), () => this.words().title); heading.tabIndex = -1;
             title.append(heading, element('p', payload ? `${payload.formal.display || payload.formal.title} · ${this.active!.id}` : this.active!.id || this.active!.filePath));
-            header.append(title, button(w.close, () => this.close(), 'close')); return [header];
+            header.append(title, readerLabel(button(w.close, () => this.close(), 'close'), () => this.words().close)); return [header];
         });
         const statusSlot = this.slot('status');
         if (!this.status || !statusSlot.contains(this.status)) {
@@ -658,12 +662,12 @@ export class ReaderLeanReview {
         }
         this.status.textContent = this.message; this.status.classList.toggle('is-error', this.messageError);
         this.updateSlot('loading', [language, Boolean(payload), this.loading, this.messageError, this.emptyQueue], () => {
-            if (payload) return this.loading ? [element('p', w.refreshing, 'reader-lean-review-hint')] : [];
-            const state = element('p', this.messageError ? w.failed : this.emptyQueue ? w.queueNoObjects : w.loading, 'reader-lean-review-empty'); state.setAttribute('role', 'status');
-            return [state, ...(this.messageError || this.emptyQueue ? [button(w.retry, () => {
+            if (payload) return this.loading ? [readerLabel(element('p', w.refreshing, 'reader-lean-review-hint'), () => this.words().refreshing)] : [];
+            const state = readerLabel(element('p', this.messageError ? w.failed : this.emptyQueue ? w.queueNoObjects : w.loading, 'reader-lean-review-empty'), () => this.messageError ? this.words().failed : this.emptyQueue ? this.words().queueNoObjects : this.words().loading); state.setAttribute('role', 'status');
+            return [state, ...(this.messageError || this.emptyQueue ? [readerLabel(button(w.retry, () => {
                 this.message = ''; this.messageError = false;
                 if (this.pageQueueMode) void this.openPageQueue(this.returnFocus); else void this.load(this.active!);
-            }, 'retry')] : [])];
+            }, 'retry'), () => this.words().retry)] : [])];
         });
         if (payload) {
             const draft = this.currentDraft()!;
@@ -672,10 +676,10 @@ export class ReaderLeanReview {
             this.updateSlot('comparison-nav', [language, this.comparisonView], () => {
                 const navigation = element('div', '', 'reader-lean-review-comparison-nav');
                 for (const [value, label] of [['both', w.compare], ['prose', w.proseOnly], ['lean', w.leanOnly]] as const) {
-                    const control = button(label, () => { this.comparisonView = value; this.render(); }, 'view-' + value);
+                    const control = readerLabel(button(label, () => { this.comparisonView = value; this.render(); }, 'view-' + value), () => this.words()[value === 'both' ? 'compare' : value === 'prose' ? 'proseOnly' : 'leanOnly']);
                     control.setAttribute('aria-pressed', String(this.comparisonView === value)); navigation.append(control);
                 }
-                navigation.append(element('p', w.compareHint, 'reader-lean-review-hint')); return [navigation];
+                navigation.append(readerLabel(element('p', w.compareHint, 'reader-lean-review-hint'), () => this.words().compareHint)); return [navigation];
             });
             const columns = this.slot('columns'); columns.className = 'reader-lean-review-columns'; columns.dataset.comparisonView = this.comparisonView;
             const prose = this.slot('prose', columns); prose.className = 'reader-lean-review-prose-column'; prose.hidden = this.comparisonView === 'lean';
@@ -689,18 +693,18 @@ export class ReaderLeanReview {
             this.updateSlot('lean-evidence-content', [language, payload.evidence.fingerprint, this.selectedDeclaration, this.definition, this.definitionLoading, this.selectedDefinition, this.busy, this.job], () => [this.renderLean()], evidence);
             this.updateSlot('changes', [language, payload.evidence.fingerprint, payload.review.changes, draft.snapshot], () => {
                 const changes: HTMLElement[] = [];
-                if (payload.review.changes.length) changes.push(this.renderChanges(w.changes, payload.review.changes, payload.review.record?.snapshot));
-                if (draft.snapshot.fingerprint !== payload.evidence.fingerprint) changes.push(this.renderChanges(w.draftChanges, leanReviewDraftChanges(draft.snapshot, payload.evidence), draft.snapshot));
+                if (payload.review.changes.length) changes.push(readerLabel(this.renderChanges(w.changes, payload.review.changes, payload.review.record?.snapshot), () => this.words().changes));
+                if (draft.snapshot.fingerprint !== payload.evidence.fingerprint) changes.push(readerLabel(this.renderChanges(w.draftChanges, leanReviewDraftChanges(draft.snapshot, payload.evidence), draft.snapshot), () => this.words().draftChanges));
                 return changes;
             });
             const assistance = this.slot('assistance'); this.assistance.update(payload);
             if (!assistance.contains(this.assistance.mount())) assistance.append(this.assistance.mount());
             this.updateSlot('legacy-assistance', [language, payload.evidence.fingerprint, draft, draft.editVersion, this.host.canAssist()], () => {
-                const context = details(w.assistContext); context.append(this.renderAssistance()); return [context];
+                const context = readerLabel(details(w.assistContext), () => this.words().assistContext); context.append(this.renderAssistance()); return [context];
             });
             const review = this.secondarySlot('review', w.reviewRecords);
             this.updateSlot('review-content', [language, payload.evidence.fingerprint, payload.review.expectedRevision, draft, draft.editVersion, draft.acknowledgementRequired, draft.needsReload, this.selectedClaim], () => [this.renderReview()], review);
-            const audit = this.secondarySlot('audit', w.auditRecords);
+            const audit = readerLabel(this.secondarySlot('audit', w.auditRecords), () => this.words().auditRecords);
             this.audit.update(payload, this.auditSelection()); if (!audit.contains(this.audit.mount())) audit.append(this.audit.mount());
         }
         this.updateDraftStatus();
@@ -720,16 +724,16 @@ export class ReaderLeanReview {
     }
     private renderLeanHeader(): HTMLElement {
         const w = this.words(), section = element('header', '', 'reader-lean-review-pane-header'), declarations = this.payload!.evidence.declarations;
-        section.append(element('h3', w.declarations));
-        if (!declarations.length) { section.append(element('p', w.noDeclarations, 'reader-lean-review-empty')); return section; }
-        const select = element('select'); select.setAttribute('aria-label', w.declarations); select.dataset.leanFocus = 'declaration';
+        section.append(readerLabel(element('h3', w.declarations), () => this.words().declarations));
+        if (!declarations.length) { section.append(readerLabel(element('p', w.noDeclarations, 'reader-lean-review-empty'), () => this.words().noDeclarations)); return section; }
+        const select = element('select'); readerAttribute(select, 'aria-label', () => this.words().declarations); select.dataset.leanFocus = 'declaration';
         for (const declaration of declarations) { const option = element('option', `${declaration.projectKey} · ${declaration.qualifiedName}`); option.value = declaration.key; select.append(option); }
         select.value = this.selectedDeclaration;
         select.addEventListener('change', () => { this.selectedDeclaration = select.value; this.resetDefinition(); this.render(); this.openSelectedSource(false); });
         section.append(select);
         const views = element('div', '', 'reader-lean-review-actions');
         for (const [value, label] of [['source', w.currentSource], ['evidence', w.recordedEvidence]] as const) {
-            const control = button(label, () => { this.leanView = value; this.render(); if (value === 'source') this.openSelectedSource(false); }, 'lean-' + value);
+            const control = readerLabel(button(label, () => { this.leanView = value; this.render(); if (value === 'source') this.openSelectedSource(false); }, 'lean-' + value), () => this.words()[value === 'source' ? 'currentSource' : 'recordedEvidence']);
             control.setAttribute('aria-pressed', String(this.leanView === value)); views.append(control);
         }
         section.append(views); return section;
@@ -778,48 +782,49 @@ export class ReaderLeanReview {
     private renderEvidenceStatus(): HTMLElement {
         const payload = this.payload!, w = this.words(), section = element('section', '', 'reader-lean-review-evidence');
         const machine = element('div'), human = element('div');
-        machine.append(element('h3', w.machine), element('p', ({ current: w.evidenceCurrent, stale: w.evidenceStale, unavailable: w.evidenceUnavailable, partial: w.evidencePartial })[payload.evidence.state], 'reader-lean-review-state is-' + payload.evidence.state));
+        machine.append(readerLabel(element('h3', w.machine), () => this.words().machine), readerLabel(element('p', ({ current: w.evidenceCurrent, stale: w.evidenceStale, unavailable: w.evidenceUnavailable, partial: w.evidencePartial })[payload.evidence.state], 'reader-lean-review-state is-' + payload.evidence.state), () => ({ current: this.words().evidenceCurrent, stale: this.words().evidenceStale, unavailable: this.words().evidenceUnavailable, partial: this.words().evidencePartial })[payload.evidence.state]));
         const actions = element('div', '', 'reader-lean-review-actions');
-        const refresh = button(w.refresh, () => { void this.startJob('refresh'); }, 'refresh');
+        const refresh = readerLabel(button(w.refresh, () => { void this.startJob('refresh'); }, 'refresh'), () => this.words().refresh);
         refresh.disabled = this.busy || ['queued', 'running'].includes(this.job?.status || '');
-        describeReaderIconAction(refresh, w.refresh, refresh.disabled ? w.busyAction + ' · ' + w.refreshHint : w.refreshHint);
+        readerIconDescription(refresh, () => this.words().refresh, () => refresh.disabled ? this.words().busyAction + ' · ' + this.words().refreshHint : this.words().refreshHint);
         actions.append(refresh);
-        if (this.job && ['queued', 'running'].includes(this.job.status)) actions.append(button(w.cancel, () => { void this.cancelJob(); }, 'cancel'));
+        if (this.job && ['queued', 'running'].includes(this.job.status)) actions.append(readerLabel(button(w.cancel, () => { void this.cancelJob(); }, 'cancel'), () => this.words().cancel));
         if (this.job) actions.append(element('span', this.jobText(this.job), 'reader-lean-review-job'));
         machine.append(actions);
-        human.append(element('h3', w.human), element('p', payload.review.record ? w.verdicts[payload.review.record.verdict] : w.unreviewed),
-            element('p', ({ current: w.reviewCurrent, stale: w.reviewStale, unreviewed: w.unreviewed })[payload.review.freshness], 'reader-lean-review-freshness is-' + payload.review.freshness));
+        human.append(readerLabel(element('h3', w.human), () => this.words().human), readerLabel(element('p', payload.review.record ? w.verdicts[payload.review.record.verdict] : w.unreviewed), () => payload.review.record ? this.words().verdicts[payload.review.record.verdict] : this.words().unreviewed),
+            readerLabel(element('p', ({ current: w.reviewCurrent, stale: w.reviewStale, unreviewed: w.unreviewed })[payload.review.freshness], 'reader-lean-review-freshness is-' + payload.review.freshness), () => ({ current: this.words().reviewCurrent, stale: this.words().reviewStale, unreviewed: this.words().unreviewed })[payload.review.freshness]));
         if (payload.review.record) human.append(element('span', payload.review.record.reviewer + ' · ' + new Date(payload.review.record.reviewedAt).toLocaleString(this.host.context().language)));
-        section.append(machine, human, element('p', w.boundaryHint, 'reader-lean-review-boundary'));
+        section.append(machine, human, readerLabel(element('p', w.boundaryHint, 'reader-lean-review-boundary'), () => this.words().boundaryHint));
         if (payload.evidence.diagnostics.length) section.append(this.diagnostics(payload.evidence.diagnostics));
         return section;
     }
     private renderQueue(): HTMLElement {
-        const w = this.words(), queue = details(w.queue + ' · ' + (this.queueLoading ? w.queueRefreshing : this.queueError ? w.queueFailed : w.queueSummary(this.queue.filter(item => item.reviewFreshness === 'unreviewed').length,
+        const w = this.words(), queue = readerLabel(details(w.queue + ' · ' + (this.queueLoading ? w.queueRefreshing : this.queueError ? w.queueFailed : w.queueSummary(this.queue.filter(item => item.reviewFreshness === 'unreviewed').length,
+            this.queue.filter(item => item.reviewFreshness === 'stale').length, this.queue.filter(item => !item.anchored).length))), () => this.words().queue + ' · ' + (this.queueLoading ? this.words().queueRefreshing : this.queueError ? this.words().queueFailed : this.words().queueSummary(this.queue.filter(item => item.reviewFreshness === 'unreviewed').length,
             this.queue.filter(item => item.reviewFreshness === 'stale').length, this.queue.filter(item => !item.anchored).length)));
         queue.className = 'reader-lean-review-queue'; queue.open = this.queueOpen;
         queue.setAttribute('aria-busy', String(this.queueLoading));
         queue.addEventListener('toggle', () => { this.queueOpen = queue.open; });
-        const select = element('select'); select.setAttribute('aria-label', w.queue); select.dataset.leanFocus = 'queue-filter';
+        const select = element('select'); readerAttribute(select, 'aria-label', () => this.words().queue); select.dataset.leanFocus = 'queue-filter';
         for (const [value, label] of [['pending', w.queuePending], ['all', w.queueAll], ['unanchored', w.queueUnanchored]]) {
-            const option = element('option', label); option.value = value; select.append(option);
+            const option = readerLabel(element('option', label), () => this.words()[value === 'pending' ? 'queuePending' : value === 'all' ? 'queueAll' : 'queueUnanchored']); option.value = value; select.append(option);
         }
         select.value = this.queueFilter;
         select.addEventListener('change', () => { this.queueFilter = select.value; this.render(); });
         const items = this.queue.filter(item => this.queueFilter === 'all' || (this.queueFilter === 'unanchored' ? !item.anchored : item.reviewFreshness !== 'current'));
         const index = items.findIndex(item => item.id === this.active!.id), navigation = element('div', '', 'reader-lean-review-actions');
-        const previous = button(w.previousObject, () => { if (index > 0) void this.openQueueItem(items[index - 1]); }, 'previous-object'); previous.disabled = index <= 0;
-        const next = button(w.nextObject, () => { const nextItem = items[index + 1]; if (nextItem) void this.openQueueItem(nextItem); }, 'next-object'); next.disabled = index >= items.length - 1;
-        if (previous.disabled) describeReaderIconAction(previous, w.previousObject, w.firstObject);
-        if (next.disabled) describeReaderIconAction(next, w.nextObject, w.lastObject);
+        const previous = readerLabel(button(w.previousObject, () => { if (index > 0) void this.openQueueItem(items[index - 1]); }, 'previous-object'), () => this.words().previousObject); previous.disabled = index <= 0;
+        const next = readerLabel(button(w.nextObject, () => { const nextItem = items[index + 1]; if (nextItem) void this.openQueueItem(nextItem); }, 'next-object'), () => this.words().nextObject); next.disabled = index >= items.length - 1;
+        if (previous.disabled) readerIconDescription(previous, () => this.words().previousObject, () => this.words().firstObject);
+        if (next.disabled) readerIconDescription(next, () => this.words().nextObject, () => this.words().lastObject);
         navigation.append(select, previous, next); queue.append(navigation);
-        if (this.queueError) queue.append(element('p', w.queueFailed));
-        else if (!items.length) queue.append(element('p', w.queueEmpty));
+        if (this.queueError) queue.append(readerLabel(element('p', w.queueFailed), () => this.words().queueFailed));
+        else if (!items.length) queue.append(readerLabel(element('p', w.queueEmpty), () => this.words().queueEmpty));
         else {
             const list = element('ul');
             for (const item of items) {
-                const entry = element('li'), open = button(`${item.display || item.title || item.id} · ${this.queueLoading ? w.queueRefreshing : this.queueError ? w.queueFailed : item.reviewFreshness === 'stale' ? w.reviewStale : item.reviewFreshness === 'current' ? w.verdicts[item.verdict || 'undecided'] : w.unreviewed}${!item.anchored ? ' · ' + w.unanchored : ''}`,
-                    () => { void this.openQueueItem(item); });
+                const entry = element('li'), open = readerLabel(button(`${item.display || item.title || item.id} · ${this.queueLoading ? w.queueRefreshing : this.queueError ? w.queueFailed : item.reviewFreshness === 'stale' ? w.reviewStale : item.reviewFreshness === 'current' ? w.verdicts[item.verdict || 'undecided'] : w.unreviewed}${!item.anchored ? ' · ' + w.unanchored : ''}`,
+                    () => { void this.openQueueItem(item); }), () => `${item.display || item.title || item.id} · ${this.queueLoading ? this.words().queueRefreshing : this.queueError ? this.words().queueFailed : item.reviewFreshness === 'stale' ? this.words().reviewStale : item.reviewFreshness === 'current' ? this.words().verdicts[item.verdict || 'undecided'] : this.words().unreviewed}${!item.anchored ? ' · ' + this.words().unanchored : ''}`);
                 open.dataset.leanObject = item.id; open.setAttribute('aria-current', item.id === this.active!.id ? 'true' : 'false'); entry.append(open); list.append(entry);
             }
             queue.append(list);
@@ -845,18 +850,18 @@ export class ReaderLeanReview {
     }
     private renderProse(): HTMLElement {
         const w = this.words(), evidence = this.payload!.evidence, section = element('section');
-        const header = element('header', '', 'reader-lean-review-pane-header'); header.append(element('h3', w.prose));
-        const snippets = [{ key: 'statement', title: w.statement, source: evidence.statement },
-            ...evidence.proofs.map((source, index) => ({ key: 'proof:' + index, title: `${w.proofs} ${index + 1}`, source })),
-            ...evidence.contexts.map((source, index) => ({ key: 'context:' + index, title: `${w.contexts} ${index + 1}`, source }))];
+        const header = element('header', '', 'reader-lean-review-pane-header'); header.append(readerLabel(element('h3', w.prose), () => this.words().prose));
+        const snippets = [{ key: 'statement', title: () => this.words().statement, source: evidence.statement },
+            ...evidence.proofs.map((source, index) => ({ key: 'proof:' + index, title: () => `${this.words().proofs} ${index + 1}`, source })),
+            ...evidence.contexts.map((source, index) => ({ key: 'context:' + index, title: () => `${this.words().contexts} ${index + 1}`, source }))];
         if (this.selectedProse !== 'all' && !snippets.some(item => item.key === this.selectedProse)) this.selectedProse = 'statement';
-        const select = element('select'); select.setAttribute('aria-label', w.prose); select.dataset.leanFocus = 'prose-part';
-        for (const item of [...snippets, { key: 'all', title: w.allProse }]) { const option = element('option', item.title); option.value = item.key; select.append(option); }
+        const select = element('select'); readerAttribute(select, 'aria-label', () => this.words().prose); select.dataset.leanFocus = 'prose-part';
+        for (const item of [...snippets, { key: 'all', title: () => this.words().allProse }]) { const option = readerLabel(element('option', item.title()), item.title); option.value = item.key; select.append(option); }
         select.value = this.selectedProse; header.append(select);
-        const scroll = element('div', '', 'reader-lean-review-prose-scroll'); scroll.tabIndex = 0; scroll.setAttribute('aria-label', w.prose);
+        const scroll = element('div', '', 'reader-lean-review-prose-scroll'); scroll.tabIndex = 0; readerAttribute(scroll, 'aria-label', () => this.words().prose);
         // Render every mathematical snippet faithfully once; selection is navigation, not a rendering shortcut.
         for (const item of snippets) {
-            const card = this.proseSnippet(item.source, item.title); card.dataset.leanProsePart = item.key;
+            const card = readerLabel(this.proseSnippet(item.source, item.title()), item.title); card.dataset.leanProsePart = item.key;
             card.hidden = this.selectedProse !== 'all' && this.selectedProse !== item.key; scroll.append(card);
         }
         select.addEventListener('change', () => {
@@ -868,15 +873,15 @@ export class ReaderLeanReview {
     }
     private proseSnippet(source: SourceSnippet, title: string): HTMLElement {
         const w = this.words(), section = element('section', '', 'reader-lean-review-source-card');
-        const header = element('header'); header.append(element('strong', title), button(w.locate, () => this.host.locate(source), 'locate-prose'));
+        const header = element('header'); header.append(element('strong', title), readerLabel(button(w.locate, () => this.host.locate(source), 'locate-prose'), () => this.words().locate));
         section.append(header, element('p', sourceLabel(source), 'reader-lean-review-location'));
         const content = element('div', '', 'reader-article reader-lean-review-prose'); content.innerHTML = this.host.renderProse(source);
         content.querySelectorAll('[data-reader-lean-anchor], [data-reader-dependency]').forEach(marker => marker.remove());
         // The full page remains mounted for returning to reading; avoid duplicate DOM anchors.
         content.querySelectorAll('[id]').forEach(item => item.removeAttribute('id'));
         section.append(content);
-        if (source.truncated) section.append(element('p', w.truncated, 'reader-lean-review-warning'));
-        const raw = details(w.raw); raw.append(code(source.content)); section.append(raw);
+        if (source.truncated) section.append(readerLabel(element('p', w.truncated, 'reader-lean-review-warning'), () => this.words().truncated));
+        const raw = readerLabel(details(w.raw), () => this.words().raw); raw.append(code(source.content)); section.append(raw);
         if (this.host.mountProse) this.proseDisposers.push(this.host.mountProse(content));
         return section;
     }
@@ -886,51 +891,52 @@ export class ReaderLeanReview {
             const declaration = declarations.find(item => item.key === this.selectedDeclaration)!;
             section.append(this.declarationCard(declaration), this.renderDefinitions(declaration));
         }
-        const environment = details(w.environments); environment.className = 'reader-lean-review-environments';
+        const environment = readerLabel(details(w.environments), () => this.words().environments); environment.className = 'reader-lean-review-environments';
         for (const project of this.payload!.evidence.projects) {
             const card = element('section'); card.append(element('h4', project.projectKey));
             const list = element('dl', '', 'reader-lean-status-list');
-            for (const [label, value] of [[w.toolchain, project.toolchain], [w.target, project.target || '—'], [w.build, ({ passed: w.buildPassed, failed: w.buildFailed, stale: w.buildStale, unverified: w.buildUnverified })[project.build.state]]]) {
-                list.append(element('dt', label), element('dd', value));
+            for (const [key, value] of [['toolchain', () => project.toolchain], ['target', () => project.target || '—'], ['build', () => ({ passed: w.buildPassed, failed: w.buildFailed, stale: w.buildStale, unverified: w.buildUnverified })[project.build.state]]] as const) {
+                list.append(readerLabel(element('dt', w[key]), () => this.words()[key]), readerLabel(element('dd', value()), value));
             }
-            card.append(list, element('p', w.freshnessPolicy));
-            if (project.build.output) { const output = details(w.buildOutput); output.append(code(project.build.output)); card.append(output); }
+            card.append(list, readerLabel(element('p', w.freshnessPolicy), () => this.words().freshnessPolicy));
+            if (project.build.output) { const output = readerLabel(details(w.buildOutput), () => this.words().buildOutput); output.append(code(project.build.output)); card.append(output); }
             if (project.diagnostic) card.append(this.diagnostics([project.diagnostic])); environment.append(card);
         }
         section.append(environment); return section;
     }
     private declarationCard(declaration: DeclarationEvidence): HTMLElement {
         const w = this.words(), section = element('section', '', 'reader-lean-review-declaration');
-        section.append(element('h4', declaration.qualifiedName), element('p', `${declaration.kind} · ${declaration.projectKey} · ${{ available: w.available, unavailable: w.unavailable, stale: w.stale }[declaration.evidenceState]}`, 'reader-lean-review-location'));
-        const source = details(w.source); source.open = true;
-        source.append(declaration.source ? element('p', sourceLabel(declaration.source), 'reader-lean-review-location') : element('p', w.sourceUnavailable));
+        section.append(element('h4', declaration.qualifiedName), readerLabel(element('p', `${declaration.kind} · ${declaration.projectKey} · ${{ available: w.available, unavailable: w.unavailable, stale: w.stale }[declaration.evidenceState]}`, 'reader-lean-review-location'), () => `${declaration.kind} · ${declaration.projectKey} · ${{ available: this.words().available, unavailable: this.words().unavailable, stale: this.words().stale }[declaration.evidenceState]}`));
+        const source = readerLabel(details(w.source), () => this.words().source); source.open = true;
+        source.append(declaration.source ? element('p', sourceLabel(declaration.source), 'reader-lean-review-location') : readerLabel(element('p', w.sourceUnavailable), () => this.words().sourceUnavailable));
         if (declaration.source) source.append(leanSourceSnapshot(declaration.source.content, declaration.source.startLine));
-        const fullSource = button(w.fullSource, () => { void this.openSource({ projectKey: declaration.projectKey,
+        const fullSource = readerLabel(button(w.fullSource, () => { void this.openSource({ projectKey: declaration.projectKey,
             filePath: declaration.source?.filePath || declaration.compiledSource?.filePath || '', title: declaration.qualifiedName,
             range: declaration.source ? { start: { line: declaration.source.startLine - 1, character: 0 }, end: { line: declaration.source.endLine, character: 0 } } : undefined,
-            fallback: declaration.source }); }, 'full-source');
+            fallback: declaration.source }); }, 'full-source'), () => this.words().fullSource);
         fullSource.disabled = !declaration.source?.filePath && !declaration.compiledSource?.filePath;
-        if (fullSource.disabled) describeReaderIconAction(fullSource, w.fullSource, w.sourceUnavailable);
+        if (fullSource.disabled) readerIconDescription(fullSource, () => this.words().fullSource, () => this.words().sourceUnavailable);
         fullSource.dataset.leanSourceDeclaration = declaration.key; source.append(fullSource);
-        if (declaration.source?.truncated) source.append(element('p', w.truncated, 'reader-lean-review-warning'));
-        if (declaration.source?.rangeKind === 'context') source.append(element('p', w.sourceContextWarning, 'reader-lean-review-warning'));
-        const type = declaration.elaboratedType ? leanSourceSnapshot(declaration.elaboratedType) : code(w.typeUnavailable); type.classList.add('reader-lean-review-full-type');
-        section.append(source, element('h4', w.fullType), element('p', w.typeHint, 'reader-lean-review-hint'), type);
-        if (declaration.evidenceState !== 'available' || declaration.truncated) section.append(element('p', declaration.truncated ? w.truncated : declaration.evidenceState === 'stale' ? w.stale : w.typeUnavailable, 'reader-lean-review-warning'));
-        if (declaration.value) { const value = details(w.definitionBody); value.append(leanSourceSnapshot(declaration.value)); section.append(value); }
+        if (declaration.source?.truncated) source.append(readerLabel(element('p', w.truncated, 'reader-lean-review-warning'), () => this.words().truncated));
+        if (declaration.source?.rangeKind === 'context') source.append(readerLabel(element('p', w.sourceContextWarning, 'reader-lean-review-warning'), () => this.words().sourceContextWarning));
+        const type = declaration.elaboratedType ? leanSourceSnapshot(declaration.elaboratedType) : readerLabel(code(w.typeUnavailable), () => this.words().typeUnavailable); type.classList.add('reader-lean-review-full-type');
+        section.append(source, readerLabel(element('h4', w.fullType), () => this.words().fullType), readerLabel(element('p', w.typeHint, 'reader-lean-review-hint'), () => this.words().typeHint), type);
+        if (declaration.evidenceState !== 'available' || declaration.truncated) section.append(readerLabel(element('p', declaration.truncated ? w.truncated : declaration.evidenceState === 'stale' ? w.stale : w.typeUnavailable, 'reader-lean-review-warning'), () => declaration.truncated ? this.words().truncated : declaration.evidenceState === 'stale' ? this.words().stale : this.words().typeUnavailable));
+        if (declaration.value) { const value = readerLabel(details(w.definitionBody), () => this.words().definitionBody); value.append(leanSourceSnapshot(declaration.value)); section.append(value); }
         else if (!['theorem', 'lemma', 'axiom'].includes(declaration.kind)) {
-            section.append(element('p', !declaration.source || declaration.source.rangeKind === 'context' || declaration.source.truncated
-                ? w.definitionSourceIncomplete : w.definitionValueUnavailable, 'reader-lean-review-warning'));
+            section.append(readerLabel(element('p', !declaration.source || declaration.source.rangeKind === 'context' || declaration.source.truncated
+                ? w.definitionSourceIncomplete : w.definitionValueUnavailable, 'reader-lean-review-warning'), () => !declaration.source || declaration.source.rangeKind === 'context' || declaration.source.truncated
+                ? this.words().definitionSourceIncomplete : this.words().definitionValueUnavailable));
         }
-        const trust = details(w.trust); trust.append(element('h4', w.axioms));
-        if (declaration.evidenceState !== 'available') trust.append(element('p', w.axiomsUnavailable, 'reader-lean-review-warning'));
-        else if (!declaration.axioms.length) trust.append(element('p', w.noAxioms));
+        const trust = readerLabel(details(w.trust), () => this.words().trust); trust.append(readerLabel(element('h4', w.axioms), () => this.words().axioms));
+        if (declaration.evidenceState !== 'available') trust.append(readerLabel(element('p', w.axiomsUnavailable, 'reader-lean-review-warning'), () => this.words().axiomsUnavailable));
+        else if (!declaration.axioms.length) trust.append(readerLabel(element('p', w.noAxioms), () => this.words().noAxioms));
         else trust.append(this.names(declaration.axioms));
-        trust.append(element('h4', w.proofDependencies));
-        if (declaration.evidenceState !== 'available') trust.append(element('p', w.unavailable));
-        else if (!declaration.proofDependencies.length) trust.append(element('p', w.noProofDependencies));
+        trust.append(readerLabel(element('h4', w.proofDependencies), () => this.words().proofDependencies));
+        if (declaration.evidenceState !== 'available') trust.append(readerLabel(element('p', w.unavailable), () => this.words().unavailable));
+        else if (!declaration.proofDependencies.length) trust.append(readerLabel(element('p', w.noProofDependencies), () => this.words().noProofDependencies));
         else trust.append(this.names(declaration.proofDependencies.slice(0, 60)));
-        if (declaration.proofDependencies.length > 60) trust.append(element('p', w.omittedDependencies, 'reader-lean-review-warning'));
+        if (declaration.proofDependencies.length > 60) trust.append(readerLabel(element('p', w.omittedDependencies, 'reader-lean-review-warning'), () => this.words().omittedDependencies));
         if (declaration.diagnostic) trust.append(this.diagnostics([declaration.diagnostic]));
         section.append(trust); return section;
     }
@@ -942,8 +948,8 @@ export class ReaderLeanReview {
     private diagnostics(messages: string[]): HTMLElement { const list = element('ul', '', 'reader-lean-review-diagnostics'); messages.forEach(message => list.append(element('li', message))); return list; }
     private resetDefinition(): void { this.definitionRequest++; this.selectedDefinition = undefined; this.definition = undefined; this.definitionLoading = false; this.definitionTrail = []; }
     private renderDefinitions(declaration: DeclarationEvidence): HTMLElement {
-        const w = this.words(), section = element('section', '', 'reader-lean-review-definitions'); section.append(element('h4', w.definition));
-        if (!declaration.typeDependencies.length) section.append(element('p', declaration.evidenceState === 'available' ? w.noDefinitions : w.definitionUnavailable));
+        const w = this.words(), section = element('section', '', 'reader-lean-review-definitions'); section.append(readerLabel(element('h4', w.definition), () => this.words().definition));
+        if (!declaration.typeDependencies.length) section.append(readerLabel(element('p', declaration.evidenceState === 'available' ? w.noDefinitions : w.definitionUnavailable), () => declaration.evidenceState === 'available' ? this.words().noDefinitions : this.words().definitionUnavailable));
         const list = element('div', '', 'reader-lean-review-definition-list');
         for (const name of declaration.typeDependencies.slice(0, 40)) {
             const open = button(name, () => { void this.loadDefinition(declaration.projectKey, name); });
@@ -951,34 +957,34 @@ export class ReaderLeanReview {
             open.setAttribute('aria-pressed', String(this.selectedDefinition?.name === name && this.selectedDefinition.projectKey === declaration.projectKey)); list.append(open);
         }
         section.append(list);
-        if (declaration.typeDependencies.length > 40) section.append(element('p', w.omittedDefinitions, 'reader-lean-review-warning'));
+        if (declaration.typeDependencies.length > 40) section.append(readerLabel(element('p', w.omittedDefinitions, 'reader-lean-review-warning'), () => this.words().omittedDefinitions));
         if (this.selectedDefinition) {
             const content = element('div', '', 'reader-lean-review-definition-content');
             const path = element('p', this.definitionTrail.map(item => item.name).join(' › '), 'reader-lean-review-location'); content.append(path);
-            if (this.definitionTrail.length > 1) content.append(button(w.definitionBack, () => {
+            if (this.definitionTrail.length > 1) content.append(readerLabel(button(w.definitionBack, () => {
                 this.definitionTrail.pop(); const previous = this.definitionTrail[this.definitionTrail.length - 1];
                 void this.loadDefinition(previous.projectKey, previous.name, 'back');
-            }, 'definition-back'));
-            if (this.definitionLoading) content.append(element('p', w.definitionLoading));
+            }, 'definition-back'), () => this.words().definitionBack));
+            if (this.definitionLoading) content.append(readerLabel(element('p', w.definitionLoading), () => this.words().definitionLoading));
             else if (this.definition?.definition) {
                 const definition = this.definition.definition; content.append(this.declarationCard(definition));
                 const names = [...new Set([...definition.typeDependencies, ...definition.proofDependencies])].filter(name => name !== definition.qualifiedName);
                 if (names.length) {
-                    content.append(element('h4', w.definitionRelated));
+                    content.append(readerLabel(element('h4', w.definitionRelated), () => this.words().definitionRelated));
                     const related = element('div', '', 'reader-lean-review-definition-list');
                     for (const name of names.slice(0, 40)) {
                         const open = button(name, () => { void this.loadDefinition(definition.projectKey, name, 'follow'); });
                         open.dataset.leanRelatedDefinition = name; related.append(open);
                     }
                     content.append(related);
-                    if (names.length > 40) content.append(element('p', w.omittedDefinitions, 'reader-lean-review-warning'));
+                    if (names.length > 40) content.append(readerLabel(element('p', w.omittedDefinitions, 'reader-lean-review-warning'), () => this.words().omittedDefinitions));
                 }
             }
             else {
-                content.append(element('p', w.definitionUnavailable));
+                content.append(readerLabel(element('p', w.definitionUnavailable), () => this.words().definitionUnavailable));
                 const selected = this.selectedDefinition;
-                const read = button(w.readDefinition, () => { void this.startJob('expand', selected); }, 'expand'); read.disabled = this.busy || ['queued', 'running'].includes(this.job?.status || '');
-                if (read.disabled) describeReaderIconAction(read, w.readDefinition, w.busyAction); content.append(read);
+                const read = readerLabel(button(w.readDefinition, () => { void this.startJob('expand', selected); }, 'expand'), () => this.words().readDefinition); read.disabled = this.busy || ['queued', 'running'].includes(this.job?.status || '');
+                if (read.disabled) readerIconDescription(read, () => this.words().readDefinition, () => this.words().busyAction); content.append(read);
             }
             if (this.definition?.diagnostic) content.append(this.diagnostics([this.definition.diagnostic])); section.append(content);
         }
@@ -1002,16 +1008,16 @@ export class ReaderLeanReview {
     private renderChanges(title: string, changes: ReviewChange[], before?: LeanReviewEvidence): HTMLElement {
         const w = this.words(), section = details(`${title} · ${changes.length}`); section.className = 'reader-lean-review-changes';
         for (const change of changes) {
-            const entry = element('section'); entry.append(element('h4', `${w.changedKinds[change.kind]} · ${change.label}`));
+            const entry = element('section'); entry.append(readerLabel(element('h4', `${w.changedKinds[change.kind]} · ${change.label}`), () => `${this.words().changedKinds[change.kind]} · ${change.label}`));
             for (const value of leanReviewDiffEntries(change, before, this.payload?.evidence)) {
-                if (value.previous === undefined) entry.append(element('p', w.missingPrevious, 'reader-lean-review-location'));
-                if (value.current === undefined) entry.append(element('p', w.removed, 'reader-lean-review-location'));
-                if (value.previousSource || value.currentSource) entry.append(element('p',
+                if (value.previous === undefined) entry.append(readerLabel(element('p', w.missingPrevious, 'reader-lean-review-location'), () => this.words().missingPrevious));
+                if (value.current === undefined) entry.append(readerLabel(element('p', w.removed, 'reader-lean-review-location'), () => this.words().removed));
+                if (value.previousSource || value.currentSource) entry.append(readerLabel(element('p',
                     `${value.previousSource ? sourceLabel(value.previousSource) : w.missingPrevious} → ${value.currentSource ? sourceLabel(value.currentSource) : w.removed}`,
-                    'reader-lean-review-location'));
+                    'reader-lean-review-location'), () => `${value.previousSource ? sourceLabel(value.previousSource) : this.words().missingPrevious} → ${value.currentSource ? sourceLabel(value.currentSource) : this.words().removed}`));
                 entry.append(renderLeanSourceDiff(value.previous || '', value.current || '', { previous: w.previous, current: w.current, noNewline: w.noFinalNewline },
                     value.previousSource?.startLine || 1, value.currentSource?.startLine || 1));
-                if (value.truncated) entry.append(element('p', w.truncated, 'reader-lean-review-warning'));
+                if (value.truncated) entry.append(readerLabel(element('p', w.truncated, 'reader-lean-review-warning'), () => this.words().truncated));
             }
             section.append(entry);
         }
@@ -1028,66 +1034,66 @@ export class ReaderLeanReview {
 
     private renderReview(): HTMLElement {
         const w = this.words(), draft = this.currentDraft()!, section = element('section', '', 'reader-lean-review-editor');
-        section.append(element('h3', w.reviewTitle), element('p', w.reviewHint, 'reader-lean-review-hint'));
+        section.append(readerLabel(element('h3', w.reviewTitle), () => this.words().reviewTitle), readerLabel(element('p', w.reviewHint, 'reader-lean-review-hint'), () => this.words().reviewHint));
         this.draftStatus = element('p', '', 'reader-lean-review-draft-status'); this.draftStatus.setAttribute('role', 'status'); section.append(this.draftStatus);
         if (this.draftOutdated(draft)) {
             const actions = element('div', '', 'reader-lean-review-actions');
-            const acknowledge = button(w.acknowledge, () => this.acknowledge(), 'acknowledge'); acknowledge.disabled = draft.needsReload;
-            if (acknowledge.disabled) describeReaderIconAction(acknowledge, w.acknowledge, w.conflict);
-            actions.append(button(w.retry, () => { void this.load(this.active!); }, 'reload'), acknowledge);
-            if (this.payload!.review.record) actions.append(button(w.restore, () => { this.drafts.set(draftKey(this.active!.projectId, this.active!.id), this.newDraft(this.payload!)); this.selectedClaim = this.currentDraft()!.subclaims[0]?.id || ''; this.render(); }, 'restore'));
+            const acknowledge = readerLabel(button(w.acknowledge, () => this.acknowledge(), 'acknowledge'), () => this.words().acknowledge); acknowledge.disabled = draft.needsReload;
+            if (acknowledge.disabled) readerIconDescription(acknowledge, () => this.words().acknowledge, () => this.words().conflict);
+            actions.append(readerLabel(button(w.retry, () => { void this.load(this.active!); }, 'reload'), () => this.words().retry), acknowledge);
+            if (this.payload!.review.record) actions.append(readerLabel(button(w.restore, () => { this.drafts.set(draftKey(this.active!.projectId, this.active!.id), this.newDraft(this.payload!)); this.selectedClaim = this.currentDraft()!.subclaims[0]?.id || ''; this.render(); }, 'restore'), () => this.words().restore));
             section.append(actions);
         }
         const row = element('div', '', 'reader-lean-review-form-row');
-        row.append(this.verdictSelect(w.verdict, draft.verdict, 'verdict', value => { draft.verdict = value; this.changed(); }),
-            this.textField(w.reviewer, draft.reviewer, 'reviewer', value => { draft.reviewer = value; this.changed(); }, false));
-        section.append(row, this.textField(w.scope, draft.scope, 'scope', value => { draft.scope = value; this.changed(); }, true, w.scopePlaceholder),
-            this.textField(w.note, draft.note, 'note', value => { draft.note = value; this.changed(); }, true));
+        row.append(readerLabel(this.verdictSelect(w.verdict, draft.verdict, 'verdict', value => { draft.verdict = value; this.changed(); }), () => this.words().verdict),
+            readerLabel(this.textField(w.reviewer, draft.reviewer, 'reviewer', value => { draft.reviewer = value; this.changed(); }, false), () => this.words().reviewer));
+        section.append(row, readerLabel(this.textField(w.scope, draft.scope, 'scope', value => { draft.scope = value; this.changed(); }, true, () => this.words().scopePlaceholder), () => this.words().scope),
+            readerLabel(this.textField(w.note, draft.note, 'note', value => { draft.note = value; this.changed(); }, true), () => this.words().note));
         const claims = element('div', '', 'reader-lean-review-subclaims'), navigation = element('div', '', 'reader-lean-review-claim-list');
         for (const [index, claim] of draft.subclaims.entries()) {
-            const open = button(`${index + 1}. ${claim.text || w.claimText} · ${w.verdicts[claim.verdict]}${claim.declarationKeys.length ? '' : ' · ' + w.noMapping}`, () => {
+            const open = readerLabel(button(`${index + 1}. ${claim.text || w.claimText} · ${w.verdicts[claim.verdict]}${claim.declarationKeys.length ? '' : ' · ' + w.noMapping}`, () => {
                 this.selectedClaim = claim.id;
                 const mapped = claim.declarationKeys.find(key => this.payload!.evidence.declarations.some(declaration => declaration.key === key));
                 if (mapped && mapped !== this.selectedDeclaration) { this.selectedDeclaration = mapped; this.resetDefinition(); this.openSelectedSource(false); }
                 this.render();
-            });
+            }), () => `${index + 1}. ${claim.text || this.words().claimText} · ${this.words().verdicts[claim.verdict]}${claim.declarationKeys.length ? '' : ' · ' + this.words().noMapping}`);
             open.dataset.leanClaim = claim.id; open.setAttribute('aria-pressed', String(claim.id === this.selectedClaim)); navigation.append(open);
         }
-        if (!draft.subclaims.length) navigation.append(element('p', w.noClaims));
-        const addClaim = button(w.addClaim, () => {
+        if (!draft.subclaims.length) navigation.append(readerLabel(element('p', w.noClaims), () => this.words().noClaims));
+        const addClaim = readerLabel(button(w.addClaim, () => {
             if (draft.subclaims.length >= 80) return;
             const claim: ReviewSubclaim = { id: 'claim-' + crypto.randomUUID(), text: '', note: '', verdict: 'undecided', declarationKeys: [] };
             draft.subclaims.push(claim); this.selectedClaim = claim.id; this.changed(); this.render();
             this.section.querySelector<HTMLElement>('[data-lean-focus="claim-text"]')?.focus();
-        }, 'add-claim'); addClaim.disabled = draft.subclaims.length >= 80; describeReaderIconAction(addClaim, w.addClaim, addClaim.disabled ? w.maximumClaims : ''); navigation.append(addClaim);
+        }, 'add-claim'), () => this.words().addClaim); addClaim.disabled = draft.subclaims.length >= 80; readerIconDescription(addClaim, () => this.words().addClaim, () => addClaim.disabled ? this.words().maximumClaims : ''); navigation.append(addClaim);
         claims.append(navigation);
         const claim = draft.subclaims.find(item => item.id === this.selectedClaim);
         if (claim) claims.append(this.renderClaim(claim));
         section.append(claims);
         const linked = new Set(draft.subclaims.flatMap(claim => claim.declarationKeys));
-        section.append(element('p', w.unmapped(this.payload!.evidence.declarations.filter(declaration => !linked.has(declaration.key)).length), 'reader-lean-review-hint'));
-        const footer = element('div', '', 'reader-lean-review-actions'); this.saveButton = button(w.save, () => { void this.save(); }, 'save');
-        footer.append(this.saveButton, element('span', w.draftHint)); section.append(footer); return section;
+        section.append(readerLabel(element('p', w.unmapped(this.payload!.evidence.declarations.filter(declaration => !linked.has(declaration.key)).length), 'reader-lean-review-hint'), () => this.words().unmapped(this.payload!.evidence.declarations.filter(declaration => !linked.has(declaration.key)).length)));
+        const footer = element('div', '', 'reader-lean-review-actions'); this.saveButton = readerLabel(button(w.save, () => { void this.save(); }, 'save'), () => this.words().save);
+        footer.append(this.saveButton, readerLabel(element('span', w.draftHint), () => this.words().draftHint)); section.append(footer); return section;
     }
-    private textField(labelText: string, value: string, key: string, update: (value: string) => void, multiline: boolean, placeholder = ''): HTMLLabelElement {
+    private textField(labelText: string, value: string, key: string, update: (value: string) => void, multiline: boolean, placeholder: string | (() => string) = ''): HTMLLabelElement {
         const label = element('label', '', 'reader-lean-review-field'); label.append(element('span', labelText));
         const input = multiline ? element('textarea') : element('input'); input.value = value; input.dataset.leanFocus = key;
-        input.placeholder = placeholder; input.maxLength = key === 'reviewer' ? 300 : key === 'note' ? 16000 : 8000;
+        readerAttribute(input, 'placeholder', typeof placeholder === 'function' ? placeholder : () => placeholder); input.maxLength = key === 'reviewer' ? 300 : key === 'note' ? 16000 : 8000;
         if (!multiline) (input as HTMLInputElement).type = 'text';
         input.addEventListener('input', () => update(input.value)); label.append(input); return label;
     }
     private verdictSelect(labelText: string, value: ReviewVerdict, key: string, update: (value: ReviewVerdict) => void): HTMLLabelElement {
         const label = element('label', '', 'reader-lean-review-field'), select = element('select'); label.append(element('span', labelText));
         select.dataset.leanFocus = key;
-        verdicts.forEach(verdict => { const option = element('option', this.words().verdicts[verdict]); option.value = verdict; select.append(option); });
+        verdicts.forEach(verdict => { const option = readerLabel(element('option', this.words().verdicts[verdict]), () => this.words().verdicts[verdict]); option.value = verdict; select.append(option); });
         select.value = value; select.addEventListener('change', () => update(select.value as ReviewVerdict)); label.append(select); return label;
     }
     private renderClaim(claim: ReviewSubclaim): HTMLElement {
         const w = this.words(), draft = this.currentDraft()!, editor = element('div', '', 'reader-lean-review-claim-editor');
-        editor.append(this.textField(w.claimText, claim.text, 'claim-text', value => { claim.text = value; this.changed(); }, true, w.claimPlaceholder),
-            this.verdictSelect(w.verdict, claim.verdict, 'claim-verdict', value => { claim.verdict = value; this.changed(); }),
-            this.textField(w.claimNote, claim.note, 'claim-note', value => { claim.note = value; this.changed(); }, true));
-        const mapping = element('fieldset', '', 'reader-lean-review-mapping'); mapping.append(element('legend', w.mapping));
+        editor.append(readerLabel(this.textField(w.claimText, claim.text, 'claim-text', value => { claim.text = value; this.changed(); }, true, () => this.words().claimPlaceholder), () => this.words().claimText),
+            readerLabel(this.verdictSelect(w.verdict, claim.verdict, 'claim-verdict', value => { claim.verdict = value; this.changed(); }), () => this.words().verdict),
+            readerLabel(this.textField(w.claimNote, claim.note, 'claim-note', value => { claim.note = value; this.changed(); }, true), () => this.words().claimNote));
+        const mapping = element('fieldset', '', 'reader-lean-review-mapping'); mapping.append(readerLabel(element('legend', w.mapping), () => this.words().mapping));
         for (const declaration of this.payload!.evidence.declarations) {
             const label = element('label'), checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.checked = claim.declarationKeys.includes(declaration.key);
             checkbox.dataset.leanMapping = declaration.key;
@@ -1097,17 +1103,17 @@ export class ReaderLeanReview {
             });
             label.append(checkbox, element('code', `${declaration.projectKey} · ${declaration.qualifiedName}`)); mapping.append(label);
         }
-        if (!this.payload!.evidence.declarations.length) mapping.append(element('p', w.noMapping));
+        if (!this.payload!.evidence.declarations.length) mapping.append(readerLabel(element('p', w.noMapping), () => this.words().noMapping));
         const missing = claim.declarationKeys.filter(key => !this.payload!.evidence.declarations.some(declaration => declaration.key === key));
         for (const key of missing) {
             const warning = element('div', '', 'reader-lean-review-missing-mapping');
-            const remove = button(w.unmapMissing, () => { claim.declarationKeys = claim.declarationKeys.filter(item => item !== key); this.changed(); this.render(); }, 'unmap-missing');
+            const remove = readerLabel(button(w.unmapMissing, () => { claim.declarationKeys = claim.declarationKeys.filter(item => item !== key); this.changed(); this.render(); }, 'unmap-missing'), () => this.words().unmapMissing);
             remove.dataset.leanMissingMapping = key;
-            warning.append(element('p', w.missingMapping + ': ' + key, 'reader-lean-review-warning'), remove); mapping.append(warning);
+            warning.append(readerLabel(element('p', w.missingMapping + ': ' + key, 'reader-lean-review-warning'), () => this.words().missingMapping + ': ' + key), remove); mapping.append(warning);
         }
-        editor.append(mapping, button(w.removeClaim, () => {
+        editor.append(mapping, readerLabel(button(w.removeClaim, () => {
             draft.subclaims = draft.subclaims.filter(item => item.id !== claim.id); this.selectedClaim = draft.subclaims[0]?.id || ''; this.changed(); this.render();
-        }, 'remove-claim')); return editor;
+        }, 'remove-claim'), () => this.words().removeClaim)); return editor;
     }
     private acknowledge(): void {
         const draft = this.currentDraft(), payload = this.payload; if (!draft || !payload || draft.needsReload) return;
@@ -1206,14 +1212,14 @@ export class ReaderLeanReview {
     private renderAssistance(): HTMLElement {
         const w = this.words(), section = element('section', '', 'reader-lean-review-assistance');
         const context = leanReviewAssistance(this.payload!, this.currentDraft()!, this.host.context().language);
-        const preview = details(w.assistContext); preview.append(code(context.text)); this.assistancePreview = preview;
+        const preview = readerLabel(details(w.assistContext), () => this.words().assistContext); preview.append(code(context.text)); this.assistancePreview = preview;
         preview.addEventListener('toggle', () => {
             if (preview.open && this.payload && this.currentDraft()) preview.querySelector('code')!.textContent = leanReviewAssistance(this.payload, this.currentDraft()!, this.host.context().language).text;
         });
-        if (context.truncated) preview.append(element('p', w.boundedContext, 'reader-lean-review-warning'));
-        section.append(element('p', w.assistHint, 'reader-lean-review-hint'), preview,
-            button(this.host.canAssist() ? w.assist : w.copyAssist, () => { void this.assist(); }, 'assist', this.host.canAssist() ? 'quote' : 'copy'));
-        if (this.host.canAssist()) section.append(button(w.copyAssist, () => { void this.assist(true); }, 'copy-assist'));
+        if (context.truncated) preview.append(readerLabel(element('p', w.boundedContext, 'reader-lean-review-warning'), () => this.words().boundedContext));
+        section.append(readerLabel(element('p', w.assistHint, 'reader-lean-review-hint'), () => this.words().assistHint), preview,
+            readerLabel(button(this.host.canAssist() ? w.assist : w.copyAssist, () => { void this.assist(); }, 'assist', this.host.canAssist() ? 'quote' : 'copy'), () => this.host.canAssist() ? this.words().assist : this.words().copyAssist));
+        if (this.host.canAssist()) section.append(readerLabel(button(w.copyAssist, () => { void this.assist(true); }, 'copy-assist'), () => this.words().copyAssist));
         return section;
     }
     private async assist(copyOnly = false): Promise<void> {

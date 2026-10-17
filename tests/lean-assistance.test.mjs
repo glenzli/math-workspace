@@ -1,3 +1,4 @@
+import { installReaderTextNodes } from './reader-ui-harness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -161,6 +162,8 @@ class AssistanceElement {
     click() { if (!this.disabled) for (const callback of this.listeners.get('click') || []) callback({ target: this }); }
     find(action) { if (this.dataset.leanAssistanceAction === action) return this; for (const child of this.children) { const found = child.find(action); if (found) return found; } }
 }
+installReaderTextNodes(AssistanceElement);
+
 const settleAssistance = async () => { for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)); };
 function uiContext(id = A) {
     const binding = { id, projectToken: 'a'.repeat(64), evidenceFingerprint: 'f'.repeat(64), reviewRevision: 0, auditRevision: 0, candidateRevision: 1 };
@@ -171,13 +174,13 @@ function uiContext(id = A) {
 }
 async function assistanceHarness() {
     const { default: vm } = await import('node:vm');
-    const bundle = await build({ entryPoints: [path.join(repoRoot, 'src/reader/web/reader-lean-assistance.ts')], bundle: true, platform: 'browser', format: 'cjs',
+    const bundle = await build({ stdin: { contents: 'export * from "./reader-lean-assistance"; export { refreshReaderLabels } from "./reader-ui-labels";', resolveDir: path.join(repoRoot, 'src/reader/web') }, bundle: true, platform: 'browser', format: 'cjs',
         write: false, loader: { '.css': 'empty' }, logLevel: 'silent' });
     const document = { createElement(tag) { return new AssistanceElement(tag, this); }, createElementNS(_namespace, tag) { return this.createElement(tag); } }; document.body = document.createElement('body');
     const context = { projectId: 'a'.repeat(64), language: 'zh', requestToken: 'token', revision: 0, pagePath: 'book/01.md' };
     const module = { exports: {} }, copies = [], adopted = [], sent = [], reports = [], requests = [], draft = new Set();
     vm.runInNewContext(bundle.outputFiles[0].text, { module, exports: module.exports, document, navigator: { clipboard: { writeText: async text => copies.push(text) } }, console });
-    const { ReaderLeanAssistance, leanAssistanceHandoff } = module.exports;
+    const { ReaderLeanAssistance, leanAssistanceHandoff, refreshReaderLabels } = module.exports;
     let current = uiContext(), override, allowAssist = true;
     const panel = new ReaderLeanAssistance({ context: () => context, request: async (route, init) => {
         requests.push({ route, init }); if (override) { const pending = override(route, init); if (pending) return pending; }
@@ -192,7 +195,7 @@ async function assistanceHarness() {
     const review = () => ({ id: current.binding.id, projectToken: current.binding.projectToken, evidence: { fingerprint: current.binding.evidenceFingerprint }, review: { expectedRevision: current.binding.reviewRevision } });
     const find = action => { const node = region.find(action); assert.ok(node, action); return node; };
     return { panel, region, context, copies, adopted, sent, reports, requests, review, find, draft, leanAssistanceHandoff,
-        get current() { return current; }, set current(value) { current = value; }, setOverride: value => override = value, setAssist: value => allowAssist = value };
+        refreshLanguage: () => refreshReaderLabels(region), get current() { return current; }, set current(value) { current = value; }, setOverride: value => override = value, setAssist: value => allowAssist = value };
 }
 
 export async function testReaderLeanAssistance() {
@@ -204,6 +207,13 @@ export async function testReaderLeanAssistance() {
     const glyph = name => h.find(name).children[0].children.map(node => [node.tagName, [...node.attributes]]);
     assert.equal(new Set(['assumptions', 'statement', 'proof', 'changes'].map(name => JSON.stringify(glyph(name)))).size, 4, 'Each review task has a distinct glyph.');
     iconAction('assumptions', /发送后开始核对/); iconAction('adopt', /加入未决定草稿/);
+    const statementAction = h.find('statement'), adoptAction = h.find('adopt'), requestsBeforeLanguage = h.requests.length, nodesBeforeLanguage = [...h.region.childNodes];
+    h.context.language = 'en'; h.refreshLanguage();
+    assert.equal(h.find('statement'), statementAction); assert.equal(h.find('adopt'), adoptAction);
+    assert.ok(nodesBeforeLanguage.every((node, index) => h.region.childNodes[index] === node), 'Language changes preserve the mounted candidate tree.');
+    assert.match(statementAction.getAttribute('aria-label'), /Compare statements/); assert.match(adoptAction.getAttribute('aria-label'), /Add to undecided draft/);
+    assert.match(h.region.textContent, /Construction may be an input assumption/); assert.equal(h.requests.length, requestsBeforeLanguage);
+    h.context.language = 'zh'; h.refreshLanguage(); iconAction('assumptions', /发送后开始核对/);
     h.find('assumptions').click(); await settleAssistance();
     assert.equal(h.sent.length, 1); const handoff = h.sent[0][0].resource.text;
     assert.match(handoff, /read_lean_review_context/); assert.match(handoff, /submit_lean_review_candidates/);
@@ -214,6 +224,9 @@ export async function testReaderLeanAssistance() {
     assert.equal(h.adopted[0].item.verdict, undefined, 'The AI candidate has no verdict.');
     assert.equal(h.find('adopt').disabled, true);
     iconAction('adopt', /已加入草稿.*尚未保存人工结论/);
+    const addedAction = h.find('adopt'), requestsBeforeAddedLocale = h.requests.length;
+    h.context.language = 'en'; h.refreshLanguage(); assert.equal(h.find('adopt'), addedAction); iconAction('adopt', /^Added to draft.*No human decision/);
+    assert.equal(h.requests.length, requestsBeforeAddedLocale); h.context.language = 'zh'; h.refreshLanguage();
     h.draft.delete('candidate-1'); h.panel.update(h.review());
     assert.equal(h.find('adopt').disabled, false, 'Deleting or resetting the local draft immediately re-enables adoption.');
     h.find('adopt').click(); await settleAssistance(); assert.equal(h.adopted.length, 2);

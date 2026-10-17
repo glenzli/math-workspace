@@ -1,3 +1,4 @@
+import { readerUiLabels, installReaderTextNodes } from './reader-ui-harness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -49,6 +50,8 @@ class Element {
     focus() { this.ownerDocument.activeElement = this; }
     setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
 }
+installReaderTextNodes(Element);
+
 async function harness() {
     const document = { createElement(tag) { return new Element(tag, this); }, createElementNS(_namespace, tag) { return this.createElement(tag); } }; document.body = new Element('body', document);
     const context = { projectId: project, requestToken: 'local-token', language: 'zh', revision: 1 };
@@ -93,7 +96,7 @@ async function harness() {
         { exports: icons, document, require: () => lucide });
     const source = await fs.readFile(path.join(repoRoot, 'src/reader/web/reader-lean-audit.ts'), 'utf8');
     const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-    vm.runInNewContext(compiled, { exports, document, URL, Blob, setTimeout, require: name => name === './reader-icons' ? icons : name.endsWith('.css') ? {} : { copyReaderText: async text => { copied.push(text); return true; } } });
+    vm.runInNewContext(compiled, { exports, document, URL, Blob, setTimeout, require: name => name === './reader-ui-labels' ? readerUiLabels : name === './reader-icons' ? icons : name.endsWith('.css') ? {} : { copyReaderText: async text => { copied.push(text); return true; } } });
     const panel = new exports.ReaderLeanAudit({ context: () => context, request, report: (text, warning) => reports.push({ text, warning }),
         openReview: id => opened.push(id), locateProse: source => proseJumps.push(source), openSource: source => codeJumps.push(source),
         canAssist: () => true, assist: async content => assists.push(content), download: (name, content) => downloads.push({ name, content }) });
@@ -110,6 +113,14 @@ export async function testReaderLeanAudit() {
     const iconAction = (name, expected) => { const button = h.find(name), description = button.getAttribute('aria-label'); assert.equal(button.textContent, '');
         assert.equal(button.children[0].tagName, 'SVG'); assert.match(description, expected); assert.equal(button.getAttribute('title'), description); assert.equal(button.dataset.readerTooltip, description); return button; };
     iconAction('save-link', /请先选择当前两侧原文/); iconAction('capture-lean', /非空范围/); iconAction('reload', /重新读取/);
+    const saveBeforeLanguage = h.find('save-link'), captureBeforeLanguage = h.find('capture-lean'), nodesBeforeLanguage = [...h.region.childNodes], requestsBeforeLanguage = h.requests.length;
+    h.context.language = 'en'; h.panel.refreshLanguage();
+    assert.equal(h.find('save-link'), saveBeforeLanguage); assert.equal(h.find('capture-lean'), captureBeforeLanguage);
+    assert.ok(nodesBeforeLanguage.every((node, index) => h.region.childNodes[index] === node));
+    iconAction('save-link', /^Save this source association.*Select both current source ranges first/);
+    iconAction('capture-lean', /^Use current source viewer selection.*Select a nonempty range/);
+    assert.equal(h.requests.length, requestsBeforeLanguage, 'A locale refresh only relabels current audit controls.');
+    h.context.language = 'zh'; h.panel.refreshLanguage(); iconAction('save-link', /^保存此位置关联.*请先选择当前两侧原文/);
     h.select('prose', 'certificate can be constructed'); h.select('lean', 'certificate.proof');
     h.field('link-reviewer', '作者'); h.field('link-verdict', 'difference'); h.field('link-note', '仅使用输入证书，未构造证书。');
     h.find('add-pair').click(); h.field('pair-prose-0', '构造证书'); h.field('pair-lean-0', 'certificate : Certificate n');

@@ -4,7 +4,7 @@ vasm:
   intent: "Introduce Math Workspace through its manuscript, Lean review, Codex collaboration, and selected-chapter publication workflows."
   compile:
     format: informational
-    targetLangs: ["en", "zh-CN"]
+    targetLangs: ["zh-CN", "en"]
 ---
 
 # Math Workspace
@@ -20,6 +20,8 @@ Math Workspace 是面向长篇数学书稿的本地写作与审阅工作区。�
 ## 阅读与写作
 
 Reader 提供书、卷、章节导航，当前页目录，定义与符号查询，以及从引用回到原文的定位。正文中的编号由当前结构生成，稳定标识负责让文件重排后的引用仍然指向原对象。
+
+“显示”菜单可选择中文、英文界面和浅色、深色外观，也可自动跟随 Codex 或浏览器。界面语言与书稿语言独立，不改变书稿编号或 PDF 的语言。
 
 命题关系图保留用于分析的颜色，读取正文明确声明的依赖。符号审计由用户显式启动，作为建议报告展示。结构校验、符号建议与数学正确性分别处理。
 

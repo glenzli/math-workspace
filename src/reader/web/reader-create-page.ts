@@ -3,7 +3,7 @@ import { copyReaderText } from './reader-clipboard';
 import { describeReaderIconAction, readerIconAction } from './reader-icons';
 
 export interface ReaderCreatePageContext {
-    projectId: string | null; requestToken?: string; language: string; currentPath: string; revision?: number;
+    projectId: string | null; requestToken?: string; language: string; manuscriptLanguage?: string; currentPath: string; revision?: number;
 }
 export interface ReaderCreatePageHost {
     context(): ReaderCreatePageContext;
@@ -110,7 +110,7 @@ export class ReaderCreatePage {
         }
         title.addEventListener('input', () => this.queuePlan());
         kind.addEventListener('change', () => {
-            if (kind.value === 'continued' && !title.value.trim()) title.value = this.t('未完待续', 'To be continued');
+            if (kind.value === 'continued' && !title.value.trim()) title.value = (this.host.context().manuscriptLanguage || this.host.context().language) === 'zh' ? '未完待续' : 'To be continued';
             void this.loadPlan();
         });
         scope.addEventListener('change', () => { void this.loadPlan(); });

@@ -68,7 +68,7 @@ async function creationDialogContract() {
         scope.value = '.'; scope.emit('change'); await drain();
         assert.equal(new URLSearchParams(h.createRequests.at(-1).route.split('?')[1]).get('container'), '.', 'A root scope choice stays explicit.');
         scope.value = 'book1/vol-1'; scope.emit('change'); await drain();
-        const titleNode = h.title(); h.app.state.language = 'en'; h.app.updateToolbarLabels();
+        const titleNode = h.title(); h.preferences.setLanguage('en'); h.app.updateToolbarLabels();
         assert.equal(h.title(), titleNode); assert.equal(titleNode.value, 'A bilingual title');
         assert.equal(dialog.querySelector('h1').textContent, 'New page');
         assert.deepEqual(kind.querySelectorAll('option').map(option => option.textContent), ['Chapter', 'Front matter', 'Back matter', 'To be continued']);
@@ -134,7 +134,7 @@ async function staleExistingAndCopyContract() {
         await h.launch(); await h.enter('Scoped continued');
         h.model.planOverrides = { stateToken: 'b'.repeat(64), filePath: 'book1/vol-1/03-next.md' }; h.click(h.find('[data-create-submit]')); await drain();
         assert.equal(h.handoffs.length, 0); assert.match(h.find('[data-create-status]').textContent, /文件位置已变化/);
-        h.app.state.language = 'en'; h.app.createPage.contextChanged(); assert.match(h.find('[data-create-status]').textContent, /file location changed/);
+        h.preferences.setLanguage('en'); h.app.createPage.contextChanged(); assert.match(h.find('[data-create-status]').textContent, /file location changed/);
         h.model.planOverrides = { exists: true, existingFile: 'book1/vol-1/to-be-continued.md' };
         h.find('#reader-create-kind').value = 'continued'; h.find('#reader-create-kind').emit('change'); await drain();
         assert.equal(h.find('[data-create-submit]').disabled, true); assert.equal(h.find('[data-create-existing]').hidden, false);
@@ -153,7 +153,7 @@ async function staleExistingAndCopyContract() {
         h.model.planOverrides.stateToken = 'c'.repeat(64); h.click(h.find('[data-create-submit]')); await drain();
         assert.equal(h.copies.length, 2, 'A fresh state token can proceed when the reviewed target is unchanged.');
         assert.ok(h.copies.at(-1).includes('c'.repeat(64)));
-        h.app.state.language = 'zh'; h.app.createPage.contextChanged(); assert.match(h.find('[data-create-status]').textContent, /创建请求已复制/);
+        h.preferences.setLanguage('zh'); h.app.createPage.contextChanged(); assert.match(h.find('[data-create-status]').textContent, /创建请求已复制/);
         h.setCopyResult(false); h.click(h.find('[data-create-submit]')); await drain();
         assert.equal(h.find('[data-create-request]').hidden, false); assert.match(h.find('[data-create-request]').value, /"args"/);
         const before = h.createRequests.length; h.app.state.revision++; h.app.createPage.contextChanged(); await drain();
@@ -218,8 +218,12 @@ async function readOnlyApiContract() {
     } finally { await server?.close(); await fs.rm(temporary, { recursive: true, force: true }); }
 }
 
+export async function testReaderCreatePageUi() {
+    await creationDialogContract(); await lateResponseContract(); await staleExistingAndCopyContract();
+}
+
 export async function testReaderCreatePage() {
-    await creationDialogContract(); await lateResponseContract(); await staleExistingAndCopyContract(); await readOnlyApiContract();
+    await testReaderCreatePageUi(); await readOnlyApiContract();
     console.log('Reader create page: read-only scopes/plans, local ACL, compact bilingual dialog, structured CLI handoff, debounce and stale lifecycle passed.');
 }
 

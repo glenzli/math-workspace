@@ -1,3 +1,4 @@
+import { readerUiLabels, installReaderTextNodes } from './reader-ui-harness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -49,6 +50,8 @@ class Element {
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
+installReaderTextNodes(Element);
+
 async function harness(language = 'en') {
     const document = { clicked: [], activeElement: null };
     document.createElement = tag => new Element(tag, document); document.body = new Element('body', document);
@@ -66,7 +69,7 @@ async function harness(language = 'en') {
     vm.runInNewContext(compiled, { exports, document, HTMLElement: Element, console, Blob,
         URL: { createObjectURL: blob => { downloads.push(blob); return 'blob:archive'; }, revokeObjectURL() {} },
         setTimeout: action => { timers.push(action); return timers.length; },
-        require: name => ({ './reader-route': { readerFetch }, './formal-renderer': { createFormalRenderer: () => ({}), renderFormalMarkdown: () => '' },
+        require: name => ({ './reader-ui-labels': readerUiLabels, './reader-route': { readerFetch }, './formal-renderer': { createFormalRenderer: () => ({}), renderFormalMarkdown: () => '' },
             './reader-icons': { readerIcon: icon => { const node = document.createElement('svg'); node.dataset.icon = icon; return node; } } })[name] });
     const reader = new exports.ReaderArchive(() => context);
     return { reader, context, document, requests, downloads, timers, setResponse: action => { respond = action; } };

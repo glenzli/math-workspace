@@ -275,7 +275,11 @@ The command prints a URL bound only to `127.0.0.1`. Open it in Codex's local bro
 - optional source-block starting line numbers remembered in the local browser;
 - live refresh after source changes.
 
-The upper-right toolbar keeps frequent Lean comparison and Contents actions directly available as compact icon buttons with hover text. Related tools have separate menus: Reference contains Definitions and Symbols, Review contains Proposition review and Symbol audit, Versions & publication contains Version history and PDF publication, and Display contains source line numbers and text size. Embedded panels also keep Full screen available in the toolbar. Only one menu opens at a time. Menus support arrow keys, Home and End. Escape closes the menu and returns focus to its category button.
+The upper-right toolbar keeps frequent Lean comparison and Contents actions directly available as compact icon buttons with hover text. Related tools have separate menus: Reference contains Definitions and Symbols, Review contains Proposition review and Symbol audit, Versions & publication contains Version history and PDF publication, and Display contains interface language, appearance, source line numbers, and text size. Embedded panels also keep Full screen available in the toolbar. Only one menu opens at a time. Menus support arrow keys, Home and End. Escape closes the menu and returns focus to its category button.
+
+**Display → Language** offers **Auto**, **中文**, and **English**; **Display → Appearance** offers **Auto**, **Light**, and **Dark**. Automatic language selection uses the first supported Chinese or English locale from Codex or another MCP host, then the browser, and falls back to English. Automatic appearance follows the host when available, then the system. Manual choices take precedence and can be saved for later use; if the environment cannot save them, they remain effective for the current session.
+
+Interface and manuscript languages are independent. The `language` field in `.math-workspace/config.json` controls manuscript labels and displayed numbering and supplies the default PDF language; publication profiles or explicit PDF options can override that default. Changing interface language or appearance does not rewrite manuscript sources or project configuration, or change these publication settings. Light and dark modes retain the semantic colors for Lean associations, warnings, errors, and dependencies.
 
 In Display, Source line numbers shows each locatable source block's starting line in the article gutter. It helps map rendered content back to Markdown without pretending that visual wraps are source lines or changing article layout. The view is off by default and its preference stays in the current browser.
 
@@ -1221,7 +1225,11 @@ npm run workspace -- serve
 - 可切换并在本机记忆的源码块起始行号；
 - 源文件改动后的实时刷新。
 
-右上角直接提供“Lean 对照”和“目录”，以及“查阅”“审阅”“版本与出版”“显示”四个分类图标；插件内嵌阅读器还可直接全屏。“查阅”提供定义和符号，“审阅”提供命题审阅和符号审计，“版本与出版”提供版本记录和 PDF 出版，“显示”提供源码行号和字号调整。分类图标通过悬停提示和无障碍名称说明用途，菜单内显示功能名称。菜单支持方向键切换、Home / End 跳到首尾，以及 Escape 关闭并返回对应分类入口。
+右上角直接提供“Lean 对照”和“目录”，以及“查阅”“审阅”“版本与出版”“显示”四个分类图标；插件内嵌阅读器还可直接全屏。“查阅”提供定义和符号，“审阅”提供命题审阅和符号审计，“版本与出版”提供版本记录和 PDF 出版，“显示”提供界面语言、外观、源码行号和字号调整。分类图标通过悬停提示和无障碍名称说明用途，菜单内显示功能名称。菜单支持方向键切换、Home / End 跳到首尾，以及 Escape 关闭并返回对应分类入口。
+
+“显示 → 语言”提供“自动”“中文”“English”，“显示 → 外观”提供“自动”“浅色”“深色”。自动语言依次采用 Codex 或其他 MCP 宿主、浏览器提供的中文或英文，均不匹配时使用英文；自动外观优先跟随宿主，未提供时跟随系统。手动选择优先于自动检测，保存后可供下次使用；环境不支持保存时，选择仍在当前会话中生效。
+
+界面语言与书稿语言独立。`.math-workspace/config.json` 中的 `language` 控制书稿的正式标签与编号展示，并提供 PDF 的默认语言；出版方案或显式 PDF 选项可覆盖该默认值。切换界面语言与外观不改写原稿或项目配置，也不改变这些出版设置。浅色与深色模式保留 Lean 关联、警告、错误和依赖关系的语义颜色。
 
 在“显示”切换源码行号，可在正文左侧显示每个可定位源码块的起始行。它用于从渲染结果回到 Markdown 位置，不把视觉换行伪装成源码行，也不改变正文排版；默认关闭，选择只保存在当前浏览器。
 

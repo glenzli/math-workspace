@@ -1,3 +1,4 @@
+import { readerLabel, readerText, refreshReaderLabels, readerWords, readerIconDescription } from './reader-ui-labels';
 import type { LeanDefinitionLocation, LeanPosition, LeanRange, LeanSourceFile } from '../../lean/lean-language';
 import type { SourceSnippet } from '../../lean/lean-review';
 import { copyReaderText } from './reader-clipboard';
@@ -115,7 +116,7 @@ export class ReaderLeanSource {
             return;
         }
         if (revision !== this.lastRevision && this.target) { this.lastRevision = revision; void this.open(this.target, false, true); }
-        else { this.editor?.setLanguage(this.host.context().language, this.words().title + ' · ' + this.words().readonly); this.renderChrome(); this.renderSemantic(this.semantic.state); }
+        else { this.editor?.setLanguage(this.host.context().language, this.words().title + ' · ' + this.words().readonly); refreshReaderLabels(this.root); }
     }
     currentSelection(): { projectKey: string; filePath: string; sourceHash: string; sourceUri: string; range: LeanRange } | undefined {
         const source = this.source; return source && this.range && !this.root.hidden ? {
@@ -205,63 +206,63 @@ export class ReaderLeanSource {
 
     private showFallback(source?: SourceSnippet): void {
         const w = this.words(); this.content.replaceChildren();
-        if (source) this.content.append(node('p', w.snapshot + ` · ${source.filePath}:${source.startLine}–${source.endLine}`), leanSourceSnapshot(source.content, source.startLine));
+        if (source) this.content.append(readerLabel(node('p', w.snapshot + ` · ${source.filePath}:${source.startLine}–${source.endLine}`), () => this.words().snapshot + ` · ${source.filePath}:${source.startLine}–${source.endLine}`), leanSourceSnapshot(source.content, source.startLine));
     }
-    private words() { return labels[this.host.context().language]; }
+    private words() { return readerWords(() => labels[this.host.context().language]); }
     private renderChrome(): void {
         if (this.root.hidden) return;
-        const w = this.words(), title = node('div'); title.append(node('h3', w.title), node('p', `${this.target?.title || this.target?.filePath || ''} · ${w.readonly}`, 'reader-lean-review-location'));
+        const w = this.words(), title = node('div'); title.append(readerLabel(node('h3', w.title), () => this.words().title), readerLabel(node('p', `${this.target?.title || this.target?.filePath || ''} · ${w.readonly}`, 'reader-lean-review-location'), () => `${this.target?.title || this.target?.filePath || ''} · ${this.words().readonly}`));
         const controls = node('div', '', 'reader-lean-review-actions');
-        if (this.history.length) controls.append(control(w.back, () => { const previous = this.history.pop(); if (previous) void this.open(previous, false); }, 'back'));
-        controls.append(control(w.close, () => { this.close(); this.host.closed?.(); }, 'close')); this.header.replaceChildren(title, controls);
-        this.status.textContent = this.loading ? w.loading : this.message || (this.source ? `${w.current} · ${w.origin[this.source.origin]} · ${this.source.lineCount} ${w.lines}` : w.unavailable);
+        if (this.history.length) controls.append(readerLabel(control(w.back, () => { const previous = this.history.pop(); if (previous) void this.open(previous, false); }, 'back'), () => this.words().back));
+        controls.append(readerLabel(control(w.close, () => { this.close(); this.host.closed?.(); }, 'close'), () => this.words().close)); this.header.replaceChildren(title, controls);
+        readerText(this.status, () => this.loading ? this.words().loading : this.message || (this.source ? `${this.words().current} · ${this.words().origin[this.source.origin]} · ${this.source.lineCount} ${this.words().lines}` : this.words().unavailable));
         this.status.classList.toggle('is-warning', Boolean(this.message || (!this.loading && !this.source)));
         this.toolbar.replaceChildren();
         if (this.source) {
             const source = this.source;
             for (const [label, key, action] of [
-                [w.find, 'find', () => this.editor?.find()], [w.fold, 'fold', () => this.editor?.fold()], [w.unfold, 'unfold', () => this.editor?.unfold()],
-                [w.focus, 'focus', () => { if (this.linkedRange && !this.message) this.editor?.focusRange(this.linkedRange); }],
-                [w.copy, 'copy', () => { void this.copy(source.content); }],
-                [w.copyRange, 'copy-range', () => { if (this.range) void this.copy(leanRangeText(source.content, this.range)); }]
-            ] as const) this.toolbar.append(control(label, action, key));
-            const metadata = node('details', '', 'reader-lean-source-metadata'); metadata.append(node('summary', w.fingerprint), node('code', source.sourceHash)); this.toolbar.append(metadata);
+                ['find', 'find', () => this.editor?.find()], ['fold', 'fold', () => this.editor?.fold()], ['unfold', 'unfold', () => this.editor?.unfold()],
+                ['focus', 'focus', () => { if (this.linkedRange && !this.message) this.editor?.focusRange(this.linkedRange); }],
+                ['copy', 'copy', () => { void this.copy(source.content); }],
+                ['copyRange', 'copy-range', () => { if (this.range) void this.copy(leanRangeText(source.content, this.range)); }]
+            ] as const) this.toolbar.append(readerLabel(control(w[label], action, key), () => this.words()[label]));
+            const metadata = node('details', '', 'reader-lean-source-metadata'); metadata.append(readerLabel(node('summary', w.fingerprint), () => this.words().fingerprint), node('code', source.sourceHash)); this.toolbar.append(metadata);
         }
-        const reload = control(w.reload, () => { if (this.target) void this.open(this.target, false, false, { force: true }); }, 'reload'); reload.disabled = this.loading;
-        if (reload.disabled) describeReaderIconAction(reload, w.reload, w.loading); this.toolbar.append(reload);
+        const reload = readerLabel(control(w.reload, () => { if (this.target) void this.open(this.target, false, false, { force: true }); }, 'reload'), () => this.words().reload); reload.disabled = this.loading;
+        if (reload.disabled) readerIconDescription(reload, () => this.words().reload, () => this.words().loading); this.toolbar.append(reload);
     }
     private async copy(value: string): Promise<void> { this.host.report(await copyReaderText(value) ? this.words().copied : this.words().copyFailed); }
 
     private renderSemantic(state: LeanSemanticState): void {
         if (this.root.hidden) return;
-        const w = this.words(), header = node('div', '', 'reader-lean-review-actions'); header.append(node('h4', w.semantics));
-        const start = control(state.state === 'available' ? w.refresh : w.start, () => {
+        const w = this.words(), header = node('div', '', 'reader-lean-review-actions'); header.append(readerLabel(node('h4', w.semantics), () => this.words().semantics));
+        const start = readerLabel(control(state.state === 'available' ? w.refresh : w.start, () => {
             this.semanticEnabled = true;
             if (state.state !== 'available' && this.position) this.semantic.select(this.position);
             void this.semantic.open();
-        }, 'semantics', state.state === 'available' ? 'reload' : 'play');
+        }, 'semantics', state.state === 'available' ? 'reload' : 'play'), () => state.state === 'available' ? this.words().refresh : this.words().start);
         start.disabled = !this.source || state.state === 'opening';
-        if (start.disabled) describeReaderIconAction(start, state.state === 'available' ? w.refresh : w.start, state.state === 'opening' ? w.opening : w.unavailable); header.append(start);
-        if (state.state === 'available' || state.state === 'opening') header.append(control(w.stop, () => { this.semanticEnabled = false; this.semantic.close(); }, 'stop-semantics'));
-        const status = node('p', state.state === 'opening' ? w.opening : state.state === 'available' ? (state.complete ? w.available : w.processing) : state.state === 'unavailable' ? w.semanticUnavailable : w.idle);
+        if (start.disabled) readerIconDescription(start, () => state.state === 'available' ? this.words().refresh : this.words().start, () => state.state === 'opening' ? this.words().opening : this.words().unavailable); header.append(start);
+        if (state.state === 'available' || state.state === 'opening') header.append(readerLabel(control(w.stop, () => { this.semanticEnabled = false; this.semantic.close(); }, 'stop-semantics'), () => this.words().stop));
+        const status = readerLabel(node('p', state.state === 'opening' ? w.opening : state.state === 'available' ? (state.complete ? w.available : w.processing) : state.state === 'unavailable' ? w.semanticUnavailable : w.idle), () => state.state === 'opening' ? this.words().opening : state.state === 'available' ? (state.complete ? this.words().available : this.words().processing) : state.state === 'unavailable' ? this.words().semanticUnavailable : this.words().idle);
         status.setAttribute('role', 'status');
-        this.live.replaceChildren(header, status, node('p', w.semanticHint, 'reader-lean-review-hint'));
+        this.live.replaceChildren(header, status, readerLabel(node('p', w.semanticHint, 'reader-lean-review-hint'), () => this.words().semanticHint));
         if (state.reason) this.live.append(node('p', state.reason, 'reader-lean-review-warning'));
         if (state.state !== 'available') return;
-        this.live.append(node('p', w.select, 'reader-lean-review-hint'));
+        this.live.append(readerLabel(node('p', w.select, 'reader-lean-review-hint'), () => this.words().select));
         if (state.position) {
-            const position = node('p', `${w.position} ${state.position.line + 1}:${state.position.character + 1}`, 'reader-lean-review-location'); position.dataset.leanSourcePosition = `${state.position.line}:${state.position.character}`;
-            this.live.append(position, control(w.definition, () => { void this.followDefinition(); }, 'definition'));
+            const position = readerLabel(node('p', `${w.position} ${state.position.line + 1}:${state.position.character + 1}`, 'reader-lean-review-location'), () => `${this.words().position} ${state.position.line + 1}:${state.position.character + 1}`); position.dataset.leanSourcePosition = `${state.position.line}:${state.position.character}`;
+            this.live.append(position, readerLabel(control(w.definition, () => { void this.followDefinition(); }, 'definition'), () => this.words().definition));
             const columns = node('div', '', 'reader-lean-source-semantic-columns'), goals = node('section'), hover = node('details'); hover.open = true;
-            goals.append(node('h4', w.goals));
+            goals.append(readerLabel(node('h4', w.goals), () => this.words().goals));
             const goalText = state.goals?.join('\n\n') || (state.renderedGoals ? readableLeanMarkdown(state.renderedGoals) : undefined);
-            const pre = node('pre', goalText || (state.goals === undefined ? w.unreadGoals : w.noGoals), 'reader-lean-source-goals'); pre.dataset.leanSourceGoals = 'true'; goals.append(pre);
-            if (state.termGoal) goals.append(node('h4', w.termGoal), node('pre', readableLeanMarkdown(state.termGoal)));
-            hover.append(node('summary', w.hover), state.hover ? node('pre', readableLeanMarkdown(leanHoverText(state.hover.contents))) : node('p', state.hover === undefined ? w.unreadGoals : w.noHover));
+            const pre = readerLabel(node('pre', goalText || (state.goals === undefined ? w.unreadGoals : w.noGoals), 'reader-lean-source-goals'), () => goalText || (state.goals === undefined ? this.words().unreadGoals : this.words().noGoals)); pre.dataset.leanSourceGoals = 'true'; goals.append(pre);
+            if (state.termGoal) goals.append(readerLabel(node('h4', w.termGoal), () => this.words().termGoal), node('pre', readableLeanMarkdown(state.termGoal)));
+            hover.append(readerLabel(node('summary', w.hover), () => this.words().hover), state.hover ? node('pre', readableLeanMarkdown(leanHoverText(state.hover.contents))) : readerLabel(node('p', state.hover === undefined ? w.unreadGoals : w.noHover), () => state.hover === undefined ? this.words().unreadGoals : this.words().noHover));
             columns.append(goals, hover); this.live.append(columns);
         }
-        const diagnostics = node('details'); diagnostics.append(node('summary', `${w.diagnostics} · ${state.diagnostics.length}`));
-        if (!state.diagnostics.length) diagnostics.append(node('p', state.complete ? w.noDiagnostics : w.processing));
+        const diagnostics = node('details'); diagnostics.append(readerLabel(node('summary', `${w.diagnostics} · ${state.diagnostics.length}`), () => `${this.words().diagnostics} · ${state.diagnostics.length}`));
+        if (!state.diagnostics.length) diagnostics.append(readerLabel(node('p', state.complete ? w.noDiagnostics : w.processing), () => state.complete ? this.words().noDiagnostics : this.words().processing));
         const list = node('ul', '', 'reader-lean-source-diagnostics');
         for (const diagnostic of state.diagnostics) {
             const item = node('li'), locate = control(`${diagnostic.range.start.line + 1}:${diagnostic.range.start.character + 1} · ${diagnostic.message}`, () => this.editor?.focusPosition(diagnostic.range.start), 'diagnostic');
@@ -277,7 +278,7 @@ export class ReaderLeanSource {
         if (request !== this.navigationRequest || generation !== this.generation || source !== this.source || this.root.hidden) return;
         if (!locations?.length) { this.host.report(this.words().noDefinition); return; }
         if (locations.length === 1) { await this.openDefinition(locations[0]); return; }
-        const choices = node('section', '', 'reader-lean-source-definition-choices'); choices.append(node('h4', this.words().definitions));
+        const choices = node('section', '', 'reader-lean-source-definition-choices'); choices.append(readerLabel(node('h4', this.words().definitions), () => this.words().definitions));
         locations.forEach(location => choices.append(control(`${location.filePath}:${location.range.start.line + 1}`, () => { void this.openDefinition(location); }, 'definition-target')));
         this.live.append(choices);
     }

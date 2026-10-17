@@ -1,3 +1,4 @@
+import { readerText } from './reader-ui-labels';
 import type { ReaderLabel } from './formal-renderer';
 import { closestReaderElement, positionReaderPopover } from './reader-popover';
 
@@ -92,7 +93,7 @@ export class ReaderRecallPopover {
         popover.addEventListener('pointerenter', this.onPopoverPointerEnter);
         popover.addEventListener('pointerleave', this.onPopoverPointerLeave);
         const header = document.createElement('header');
-        header.textContent = recall.display || recall.title || this.host.labels().recall;
+        readerText(header, () => recall.display || recall.title || this.host.labels().recall);
         const content = document.createElement('div');
         content.innerHTML = this.host.renderRecall(recall);
         popover.append(header, content);

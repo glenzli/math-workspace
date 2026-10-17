@@ -1,3 +1,4 @@
+import { readerText, readerLabel, readerAttribute, refreshReaderLabels, readerWords } from './reader-ui-labels';
 import { readerFetch } from './reader-route';
 import { readerIcon, type ReaderIconName } from './reader-icons';
 import { ReaderPublicationPdf } from './reader-publication-pdf';
@@ -6,7 +7,7 @@ import type {
     PublicationProfile, PublicationProfileRecord, PublicationStatus, PublicationManifest, PublicationUploadPlan, PublicationPage
 } from '../../publication/types';
 
-interface PublicationContext { language: 'zh' | 'en'; token: string; project: string }
+interface PublicationContext { language: 'zh' | 'en'; manuscriptLanguage?: 'zh' | 'en'; token: string; project: string }
 interface PublicationJob {
     id: string; action: string; state: 'running' | 'completed' | 'failed'; phase: string;
     result?: any; error?: string;
@@ -181,7 +182,7 @@ export class ReaderPublication {
     private readonly blobs = new Set<string>();
     private readonly handledJobs = new Set<string>();
     constructor(private readonly context: () => PublicationContext) {}
-    private words() { return copy[this.context().language]; }
+    private words() { return readerWords(() => copy[this.context().language]); }
     private current(generation: number): boolean {
         const context = this.context();
         return !!this.dialog && generation === this.generation && this.project === context.project && this.token === context.token;
@@ -189,7 +190,7 @@ export class ReaderPublication {
     contextChanged(): void {
         const context = this.context();
         if (this.dialog && (context.project !== this.project || context.token !== this.token)) this.close();
-        else if (this.dialog && context.language !== this.locale) { this.locale = context.language; this.render(); }
+        else if (this.dialog && context.language !== this.locale) { this.locale = context.language; refreshReaderLabels(this.dialog); }
     }
     close(): void {
         const returnFocus = this.dialog ? this.returnFocus : undefined;
@@ -210,9 +211,9 @@ export class ReaderPublication {
         }
         this.controller = new AbortController();
         const w = this.words(), dialog = node('dialog', '', 'reader-publication');
-        dialog.setAttribute('aria-label', w.title);
+        readerAttribute(dialog, 'aria-label', () => this.words().title);
         const header = node('header', '', 'publication-header');
-        header.append(node('h1', w.title), icon(w.close, 'x', () => this.close()));
+        header.append(readerLabel(node('h1', w.title), () => this.words().title), readerLabel(icon(w.close, 'x', () => this.close()), () => this.words().close));
         this.live = node('p', '', 'publication-live'); this.live.setAttribute('role', 'status'); this.live.setAttribute('aria-live', 'polite');
         this.content = node('div', '', 'publication-body'); dialog.append(header, this.live, this.content);
         this.dialog = dialog; document.body.append(dialog); dialog.addEventListener('cancel', event => { event.preventDefault(); this.close(); });
@@ -231,8 +232,8 @@ export class ReaderPublication {
     private report(message: string, failed = false): void {
         if (!this.live) return;
         if (failed) {
-            const details = node('details', '', 'publication-error-details'); details.append(node('summary', this.words().errors), node('pre', message));
-            this.live.replaceChildren(node('span', this.words().failed), details);
+            const details = node('details', '', 'publication-error-details'); details.append(readerLabel(node('summary', this.words().errors), () => this.words().errors), node('pre', message));
+            this.live.replaceChildren(readerLabel(node('span', this.words().failed), () => this.words().failed), details);
         } else this.live.textContent = message;
         this.live.classList.toggle('is-error', failed);
     }
@@ -272,10 +273,10 @@ export class ReaderPublication {
     }
     private chooseProfile(record?: PublicationProfileRecord): void {
         ++this.viewRequest;
-        const w = this.words();
+        const w = copy[this.context().manuscriptLanguage || this.context().language];
         this.profile = record ? clone(record.profile) : this.inspection?.defaultProfile ? clone(this.inspection.defaultProfile) : {
             id: 'publication', workId: 'publication', title: '', version: '1.0', authors: [],
-            language: this.context().language, license: 'CC-BY-4.0', chapters: [],
+            language: this.context().manuscriptLanguage || this.context().language, license: 'CC-BY-4.0', chapters: [],
             cover: { showVersion: true }, frontMatter: [{ title: w.front, content: '', includeInToc: true }],
             backMatter: [{ title: w.back, content: '', includeInToc: true }], toc: { enabled: true, depth: 2, title: w.toc },
             continued: { enabled: true }, zenodo: { environment: 'sandbox' }
@@ -301,12 +302,12 @@ export class ReaderPublication {
         this.dirty = true; this.plan = undefined; this.uploadPlan = undefined; this.scopeConfirmed = false; this.publishConfirmed = false;
         this.content?.querySelector<HTMLButtonElement>('[data-build]')?.setAttribute('disabled', '');
     }
-    private input(parent: HTMLElement, label: string, value: string, update: (value: string) => void, multiline = false, hint = '', invalidate = true): HTMLInputElement | HTMLTextAreaElement {
+    private input(parent: HTMLElement, label: string, value: string, update: (value: string) => void, multiline = false, hint: string | (() => string) = '', invalidate = true): HTMLInputElement | HTMLTextAreaElement {
         const field = node('label', '', 'publication-field'), control = multiline ? node('textarea') : node('input');
         if (control instanceof HTMLInputElement) control.type = 'text';
         control.value = value; control.setAttribute('aria-label', label);
         control.addEventListener('input', () => { update(control.value); if (invalidate) this.changed(); });
-        field.append(node('span', label), control); if (hint) field.append(node('small', hint)); parent.append(field); return control;
+        field.append(node('span', label), control); if (hint) field.append(readerText(node('small'), typeof hint === 'function' ? hint : () => hint)); parent.append(field); return control;
     }
     private check(parent: HTMLElement, label: string, value: boolean, update: (value: boolean) => void): HTMLInputElement {
         const field = node('label', '', 'publication-check'), control = node('input'); control.type = 'checkbox'; control.checked = value;
@@ -315,18 +316,18 @@ export class ReaderPublication {
     private render(): void {
         if (!this.content) return;
         this.clearPreview(); const w = this.words();
-        this.dialog?.setAttribute('aria-label', w.title);
+        readerAttribute(this.dialog, 'aria-label', () => this.words().title);
         const header = this.dialog?.querySelector('.publication-header');
-        header?.replaceChildren(node('h1', w.title), icon(w.close, 'x', () => this.close()));
-        const content = this.content; content.replaceChildren(node('p', w.intro, 'publication-intro'));
-        const nav = node('nav', '', 'publication-steps'); nav.setAttribute('aria-label', w.title);
+        header?.replaceChildren(readerLabel(node('h1', w.title), () => this.words().title), readerLabel(icon(w.close, 'x', () => this.close()), () => this.words().close));
+        const content = this.content; content.replaceChildren(readerLabel(node('p', w.intro, 'publication-intro'), () => this.words().intro));
+        const nav = node('nav', '', 'publication-steps'); readerAttribute(nav, 'aria-label', () => this.words().title);
         w.steps.forEach((label, index) => {
-            const button = node('button', `${index + 1}  ${label}`); button.type = 'button';
+            const button = readerLabel(node('button', `${index + 1}  ${label}`), () => `${index + 1}  ${this.words().steps[index]}`); button.type = 'button';
             button.setAttribute('aria-current', this.step === index ? 'step' : 'false');
             button.addEventListener('click', () => { this.step = index; this.publishConfirmed = false; this.render(); }); nav.append(button);
         }); content.append(nav);
-        if (!this.inspection || !this.profile) { content.append(icon(w.retry, 'reload', () => void this.refresh())); return; }
-        const panel = node('section', '', 'publication-panel'); panel.append(node('h2', w.steps[this.step]));
+        if (!this.inspection || !this.profile) { content.append(readerLabel(icon(w.retry, 'reload', () => void this.refresh()), () => this.words().retry)); return; }
+        const panel = node('section', '', 'publication-panel'); panel.append(readerLabel(node('h2', w.steps[this.step]), () => this.words().steps[this.step]));
         if (this.step === 0) this.renderChapters(panel);
         else if (this.step === 1) this.renderDetails(panel);
         else if (this.step === 2) this.renderReview(panel);
@@ -339,8 +340,8 @@ export class ReaderPublication {
     }
     private renderChapters(parent: HTMLElement): void {
         const w = this.words(), profile = this.profile!, plans = node('div', '', 'publication-plan-row');
-        const label = node('label', w.plan, 'publication-field'), select = node('select'); select.setAttribute('aria-label', w.plan);
-        const empty = node('option', w.newPlan); empty.value = ''; select.append(empty);
+        const label = readerLabel(node('label', w.plan, 'publication-field'), () => this.words().plan), select = node('select'); readerAttribute(select, 'aria-label', () => this.words().plan);
+        const empty = readerLabel(node('option', w.newPlan), () => this.words().newPlan); empty.value = ''; select.append(empty);
         for (const record of this.inspection!.profiles) { const option = node('option', `${record.profile.id} · ${record.profile.title}`); option.value = record.profile.id; select.append(option); }
         select.value = this.revision === null ? '' : profile.id;
         select.addEventListener('change', () => {
@@ -349,14 +350,14 @@ export class ReaderPublication {
             if (this.revision !== null) void this.readStatus(generation).then(() => {
                 if (this.current(generation) && view === this.viewRequest) this.render();
             }).catch(error => { if (this.current(generation) && view === this.viewRequest) this.report(String(error), true); });
-        }); label.append(select); plans.append(label, icon(w.refresh, 'reload', () => void this.refresh())); parent.append(plans);
-        parent.append(node('p', w.selectHint, 'publication-hint'));
+        }); label.append(select); plans.append(label, readerLabel(icon(w.refresh, 'reload', () => void this.refresh()), () => this.words().refresh)); parent.append(plans);
+        parent.append(readerLabel(node('p', w.selectHint, 'publication-hint'), () => this.words().selectHint));
         const actions = node('div', '', 'publication-actions');
         const assigned = this.matterFiles(), available = this.inspection!.pages.filter(page => !assigned.has(page.path));
         const choose = (paths: string[]) => { profile.chapters = paths; this.changed(); this.render(); };
-        actions.append(icon(w.all, 'list-plus', () => choose(available.map(page => page.path))), icon(w.none, 'eraser', () => choose([])),
-            node('span', `${w.selectedCount}: ${profile.chapters.filter(file => !assigned.has(file)).length}`, 'publication-hint')); parent.append(actions);
-        if (!this.inspection!.pages.length) parent.append(node('p', w.empty));
+        actions.append(readerLabel(icon(w.all, 'list-plus', () => choose(available.map(page => page.path))), () => this.words().all), readerLabel(icon(w.none, 'eraser', () => choose([])), () => this.words().none),
+            readerLabel(node('span', `${w.selectedCount}: ${profile.chapters.filter(file => !assigned.has(file)).length}`, 'publication-hint'), () => `${this.words().selectedCount}: ${profile.chapters.filter(file => !assigned.has(file)).length}`)); parent.append(actions);
+        if (!this.inspection!.pages.length) parent.append(readerLabel(node('p', w.empty), () => this.words().empty));
         const groups = new Map<string, typeof this.inspection.pages>();
         for (const page of this.inspection!.pages) {
             const group = [page.bookTitle || page.book, page.volumeTitle || page.volume].filter(Boolean).join(' · ') || w.ungrouped;
@@ -365,17 +366,17 @@ export class ReaderPublication {
         for (const [title, pages] of groups) {
             const group = node('fieldset', '', 'publication-chapter-group'), legend = node('legend', title); group.append(legend);
             const selectable = pages.filter(page => !assigned.has(page.path));
-            const selected = new Set(profile.chapters), groupCheck = this.check(group, w.all + ' · ' + title, !!selectable.length && selectable.every(page => selected.has(page.path)), checked => {
+            const selected = new Set(profile.chapters), groupCheck = readerLabel(this.check(group, w.all + ' · ' + title, !!selectable.length && selectable.every(page => selected.has(page.path)), checked => {
                 selectable.forEach(page => checked ? selected.add(page.path) : selected.delete(page.path));
                 choose(available.filter(page => selected.has(page.path)).map(page => page.path));
-            }); groupCheck.disabled = !selectable.length; groupCheck.indeterminate = selectable.some(page => selected.has(page.path)) && !groupCheck.checked;
+            }), () => this.words().all + ' · ' + title); groupCheck.disabled = !selectable.length; groupCheck.indeterminate = selectable.some(page => selected.has(page.path)) && !groupCheck.checked;
             for (const page of pages) {
                 const row = node('div', '', 'publication-chapter');
                 const control = this.check(row, pageTitle(page), !assigned.has(page.path) && selected.has(page.path), checked => {
                     checked ? selected.add(page.path) : selected.delete(page.path);
                     choose(available.filter(item => selected.has(item.path)).map(item => item.path));
                 }); control.disabled = assigned.has(page.path);
-                row.append(node('small', page.path + (assigned.has(page.path) ? ` · ${w.usedAs} ${assigned.get(page.path)}` : ''))); group.append(row);
+                row.append(readerLabel(node('small', page.path + (assigned.has(page.path) ? ` · ${w.usedAs} ${assigned.get(page.path)}` : '')), () => page.path + (assigned.has(page.path) ? ` · ${this.words().usedAs} ${this.matterFiles().get(page.path)}` : ''))); group.append(row);
             } parent.append(group);
         }
         this.renderNext(parent);
@@ -390,14 +391,14 @@ export class ReaderPublication {
     }
     private manuscriptPicker(parent: HTMLElement, role: 'front-matter' | 'back-matter' | 'continued', current: string | undefined,
         update: (value: string | undefined) => void, identity: string): void {
-        const w = this.words(), field = node('label', w.matterFile, 'publication-field'), select = node('select');
-        const roleTitle = role === 'front-matter' ? w.front : role === 'back-matter' ? w.back : w.continued, number = /-(\d+)$/.exec(identity)?.[1];
-        select.setAttribute('aria-label', `${w.matterFile} · ${roleTitle}${number ? ` ${number}` : ''}`); select.dataset.publicationFile = identity;
-        const inline = node('option', w.inlineSource); inline.value = ''; select.append(inline);
+        const w = this.words(), field = readerLabel(node('label', w.matterFile, 'publication-field'), () => this.words().matterFile), select = node('select');
+        const roleTitle = () => role === 'front-matter' ? w.front : role === 'back-matter' ? w.back : w.continued, number = /-(\d+)$/.exec(identity)?.[1];
+        readerAttribute(select, 'aria-label', () => `${this.words().matterFile} · ${roleTitle()}${number ? ` ${number}` : ''}`); select.dataset.publicationFile = identity;
+        const inline = readerLabel(node('option', w.inlineSource), () => this.words().inlineSource); inline.value = ''; select.append(inline);
         const used = this.matterFiles(), pages = [...(this.inspection?.pages || [])].filter(page => page.path === current || !used.has(page.path));
         pages.sort((a, b) => Number(b.kind === role) - Number(a.kind === role));
         for (const page of pages) { const option = node('option', `${pageTitle(page)} · ${page.path}`); option.value = page.path; select.append(option); }
-        if (current && !pages.some(page => page.path === current)) { const option = node('option', `${current} · ${w.fileUnavailable}`); option.value = current; select.append(option); }
+        if (current && !pages.some(page => page.path === current)) { const option = readerLabel(node('option', `${current} · ${w.fileUnavailable}`), () => `${current} · ${this.words().fileUnavailable}`); option.value = current; select.append(option); }
         select.value = current || ''; select.addEventListener('change', () => {
             const restoreFocus = document.activeElement === select;
             update(select.value || undefined); this.changed(); this.render();
@@ -405,186 +406,186 @@ export class ReaderPublication {
                 this.content?.querySelector<HTMLSelectElement>(`[data-publication-file="${identity}"]`)?.focus();
             }
         });
-        field.append(select, node('small', w.filePriority)); parent.append(field);
+        field.append(select, readerLabel(node('small', w.filePriority), () => this.words().filePriority)); parent.append(field);
     }
     private renderDetails(parent: HTMLElement): void {
         const w = this.words(), p = this.profile!, grid = node('div', '', 'publication-fields');
-        this.input(grid, w.planName, p.id, value => {
+        readerLabel(this.input(grid, w.planName, p.id, value => {
             p.id = value; this.revision = null; this.status = undefined; this.build = undefined; this.manifest = undefined; ++this.viewRequest;
-        }, false, w.planHint);
-        this.input(grid, w.work, p.workId, value => { p.workId = value; }, false, w.workHint);
-        this.input(grid, w.titleField, p.title, value => { p.title = value; });
-        this.input(grid, w.subtitle, p.subtitle || '', value => { p.subtitle = value; });
-        this.input(grid, w.author, p.authors.map(author => author.name).join('\n'), value => {
+        }, false, () => this.words().planHint), () => this.words().planName);
+        readerLabel(this.input(grid, w.work, p.workId, value => { p.workId = value; }, false, () => this.words().workHint), () => this.words().work);
+        readerLabel(this.input(grid, w.titleField, p.title, value => { p.title = value; }), () => this.words().titleField);
+        readerLabel(this.input(grid, w.subtitle, p.subtitle || '', value => { p.subtitle = value; }), () => this.words().subtitle);
+        readerLabel(this.input(grid, w.author, p.authors.map(author => author.name).join('\n'), value => {
             const existing = new Map(p.authors.map(author => [author.name, author]));
             p.authors = value.split('\n').filter(name => name.trim()).map(name => existing.get(name.trim()) || { name: name.trim() });
-        }, true);
-        this.input(grid, w.version, p.version, value => { p.version = value; });
-        this.input(grid, w.edition, p.edition || '', value => { p.edition = value; });
-        this.input(grid, w.license, p.license || '', value => { p.license = value; });
-        this.input(grid, w.publicationDate, p.publicationDate || '', value => { p.publicationDate = value; });
-        const language = node('label', w.language, 'publication-field'), select = node('select'); select.setAttribute('aria-label', w.language);
-        for (const locale of ['zh', 'en'] as const) { const option = node('option', w[locale]); option.value = locale; select.append(option); }
-        select.value = (p.language || this.context().language).startsWith('zh') ? 'zh' : 'en';
+        }, true), () => this.words().author);
+        readerLabel(this.input(grid, w.version, p.version, value => { p.version = value; }), () => this.words().version);
+        readerLabel(this.input(grid, w.edition, p.edition || '', value => { p.edition = value; }), () => this.words().edition);
+        readerLabel(this.input(grid, w.license, p.license || '', value => { p.license = value; }), () => this.words().license);
+        readerLabel(this.input(grid, w.publicationDate, p.publicationDate || '', value => { p.publicationDate = value; }), () => this.words().publicationDate);
+        const language = readerLabel(node('label', w.language, 'publication-field'), () => this.words().language), select = node('select'); readerAttribute(select, 'aria-label', () => this.words().language);
+        for (const locale of ['zh', 'en'] as const) { const option = readerLabel(node('option', w[locale]), () => this.words()[locale]); option.value = locale; select.append(option); }
+        select.value = (p.language || this.context().manuscriptLanguage || this.context().language).startsWith('zh') ? 'zh' : 'en';
         select.addEventListener('change', () => { p.language = select.value; this.changed(); }); language.append(select); grid.append(language);
-        parent.append(grid); this.input(parent, w.description, p.description || '', value => { p.description = value; }, true);
-        const cover = this.section(parent, w.cover); cover.append(node('p', w.coverHint, 'publication-hint'));
-        this.input(cover, w.coverImage, p.cover?.image || '', value => { p.cover = { ...p.cover, image: value || undefined }; });
-        this.check(cover, w.coverVersion, p.cover?.showVersion !== false, value => { p.cover = { ...p.cover, showVersion: value }; this.changed(); });
+        parent.append(grid); readerLabel(this.input(parent, w.description, p.description || '', value => { p.description = value; }, true), () => this.words().description);
+        const cover = readerLabel(this.section(parent, w.cover), () => this.words().cover); cover.append(readerLabel(node('p', w.coverHint, 'publication-hint'), () => this.words().coverHint));
+        readerLabel(this.input(cover, w.coverImage, p.cover?.image || '', value => { p.cover = { ...p.cover, image: value || undefined }; }), () => this.words().coverImage);
+        readerLabel(this.check(cover, w.coverVersion, p.cover?.showVersion !== false, value => { p.cover = { ...p.cover, showVersion: value }; this.changed(); }), () => this.words().coverVersion);
         for (const [key, title] of [['frontMatter', w.front], ['backMatter', w.back]] as const) {
-            const section = this.section(parent, title);
+            const section = readerLabel(this.section(parent, title), () => this.words()[key === 'frontMatter' ? 'front' : 'back']);
             const role = key === 'frontMatter' ? 'front-matter' : 'back-matter';
             (p[key] || []).forEach((matter, index) => {
                 const entry = node('div', '', 'publication-matter');
                 this.manuscriptPicker(entry, role, matter.file, value => { matter.file = value; }, `${key}-${index + 1}`);
-                this.input(entry, w.matterTitle, matter.title || '', value => { matter.title = value || undefined; });
-                this.input(entry, w.matterText, matter.content || '', value => { matter.content = value || undefined; }, true);
-                this.check(entry, w.inToc, matter.includeInToc !== false, value => { matter.includeInToc = value; this.changed(); });
-                entry.append(icon(`${w.removeMatter} ${matter.title || title}`, 'trash', () => { p[key].splice(index, 1); this.changed(); this.render(); })); section.append(entry);
+                readerLabel(this.input(entry, w.matterTitle, matter.title || '', value => { matter.title = value || undefined; }), () => this.words().matterTitle);
+                readerLabel(this.input(entry, w.matterText, matter.content || '', value => { matter.content = value || undefined; }, true), () => this.words().matterText);
+                readerLabel(this.check(entry, w.inToc, matter.includeInToc !== false, value => { matter.includeInToc = value; this.changed(); }), () => this.words().inToc);
+                entry.append(readerLabel(icon(`${w.removeMatter} ${matter.title || title}`, 'trash', () => { p[key].splice(index, 1); this.changed(); this.render(); }), () => `${this.words().removeMatter} ${matter.title || this.words()[key === 'frontMatter' ? 'front' : 'back']}`)); section.append(entry);
             });
-            section.append(icon(`${w.addMatter} ${title}`, 'plus', () => {
+            section.append(readerLabel(icon(`${w.addMatter} ${title}`, 'plus', () => {
                 (p[key] ||= []).push({ includeInToc: true }); this.changed(); this.render();
-            }));
+            }), () => `${this.words().addMatter} ${this.words()[key === 'frontMatter' ? 'front' : 'back']}`));
         }
-        const toc = this.section(parent, w.toc);
-        this.check(toc, w.tocEnabled, p.toc?.enabled !== false, value => { p.toc = { ...p.toc, enabled: value }; this.changed(); });
-        this.input(toc, w.tocTitle, p.toc?.title || w.toc, value => { p.toc = { ...p.toc, title: value }; });
-        const depth = this.input(toc, w.tocDepth, String(p.toc?.depth || 2), value => { p.toc = { ...p.toc, depth: Number(value) }; });
+        const toc = readerLabel(this.section(parent, w.toc), () => this.words().toc);
+        readerLabel(this.check(toc, w.tocEnabled, p.toc?.enabled !== false, value => { p.toc = { ...p.toc, enabled: value }; this.changed(); }), () => this.words().tocEnabled);
+        readerLabel(this.input(toc, w.tocTitle, p.toc?.title || copy[this.context().manuscriptLanguage || this.context().language].toc, value => { p.toc = { ...p.toc, title: value }; }), () => this.words().tocTitle);
+        const depth = readerLabel(this.input(toc, w.tocDepth, String(p.toc?.depth || 2), value => { p.toc = { ...p.toc, depth: Number(value) }; }), () => this.words().tocDepth);
         if (depth instanceof HTMLInputElement) { depth.type = 'number'; depth.min = '1'; depth.max = '6'; }
-        const continued = this.section(parent, w.continued);
-        const continuedEnabled = this.check(continued, w.continuedEnabled, p.continued?.enabled ?? !!p.continued?.file, value => { p.continued = { ...p.continued, enabled: value }; this.changed(); this.render(); });
-        if (p.continued?.enabled === undefined) { continuedEnabled.indeterminate = !p.continued?.file; continued.append(node('p', w.continuedAuto, 'publication-hint')); }
+        const continued = readerLabel(this.section(parent, w.continued), () => this.words().continued);
+        const continuedEnabled = readerLabel(this.check(continued, w.continuedEnabled, p.continued?.enabled ?? !!p.continued?.file, value => { p.continued = { ...p.continued, enabled: value }; this.changed(); this.render(); }), () => this.words().continuedEnabled);
+        if (p.continued?.enabled === undefined) { continuedEnabled.indeterminate = !p.continued?.file; continued.append(readerLabel(node('p', w.continuedAuto, 'publication-hint'), () => this.words().continuedAuto)); }
         this.manuscriptPicker(continued, 'continued', p.continued?.file, value => { p.continued = { ...p.continued, file: value }; }, 'continued');
-        this.input(continued, w.continuedTitle, p.continued?.title || '', value => { p.continued = { ...p.continued, title: value || undefined }; });
-        this.input(continued, w.continuedText, p.continued?.text || '', value => { p.continued = { ...p.continued, text: value || undefined }; }, true);
-        const actions = node('div', '', 'publication-actions'); actions.append(icon(w.save, 'save', () => void this.save())); parent.append(actions); this.renderNext(parent);
+        readerLabel(this.input(continued, w.continuedTitle, p.continued?.title || '', value => { p.continued = { ...p.continued, title: value || undefined }; }), () => this.words().continuedTitle);
+        readerLabel(this.input(continued, w.continuedText, p.continued?.text || '', value => { p.continued = { ...p.continued, text: value || undefined }; }, true), () => this.words().continuedText);
+        const actions = node('div', '', 'publication-actions'); actions.append(readerLabel(icon(w.save, 'save', () => void this.save()), () => this.words().save)); parent.append(actions); this.renderNext(parent);
     }
     private section(parent: HTMLElement, title: string): HTMLElement {
         const section = node('section', '', 'publication-section'); section.append(node('h3', title)); parent.append(section); return section;
     }
     private checksum(parent: HTMLElement, value: string): void {
         const details = node('details', '', 'publication-checksum');
-        details.append(node('summary', `${this.words().exactPdf}: ${value.slice(0, 12)}…`), node('p', value)); parent.append(details);
+        details.append(readerLabel(node('summary', `${this.words().exactPdf}: ${value.slice(0, 12)}…`), () => `${this.words().exactPdf}: ${value.slice(0, 12)}…`), node('p', value)); parent.append(details);
     }
     private renderNext(parent: HTMLElement): void {
         if (this.step >= 3) return;
-        const next = icon(this.words().steps[this.step + 1], 'chevron-right', () => { ++this.step; this.render(); }, true);
+        const next = readerLabel(icon(this.words().steps[this.step + 1], 'chevron-right', () => { ++this.step; this.render(); }, true), () => this.words().steps[this.step + 1]);
         const footer = node('div', '', 'publication-actions publication-next'); footer.append(next); parent.append(footer);
     }
     private renderReview(parent: HTMLElement): void {
-        const w = this.words(); parent.append(node('p', w.reviewHint, 'publication-hint'));
-        const actions = node('div', '', 'publication-actions'); actions.append(icon(w.review, 'scan', () => void this.review(), true)); parent.append(actions);
-        const plan = this.plan; if (!plan) { parent.append(node('p', w.needReview, 'publication-hint')); return; }
+        const w = this.words(); parent.append(readerLabel(node('p', w.reviewHint, 'publication-hint'), () => this.words().reviewHint));
+        const actions = node('div', '', 'publication-actions'); actions.append(readerLabel(icon(w.review, 'scan', () => void this.review(), true), () => this.words().review)); parent.append(actions);
+        const plan = this.plan; if (!plan) { parent.append(readerLabel(node('p', w.needReview, 'publication-hint'), () => this.words().needReview)); return; }
         const summary = node('div', '', 'publication-review-grid');
-        for (const [title, pages] of [[w.selected, plan.selected], [w.omitted, plan.omitted]] as const) {
-            const section = this.section(summary, `${title} (${pages.length})`), list = node('ol');
+        for (const [key, pages] of [['selected', plan.selected], ['omitted', plan.omitted]] as const) {
+            const section = readerLabel(this.section(summary, `${w[key]} (${pages.length})`), () => `${this.words()[key]} (${pages.length})`), list = node('ol');
             pages.forEach(page => { const item = node('li', [page.bookTitle, page.volumeTitle, pageTitle(page)].filter(Boolean).join(' · ')); item.append(node('small', page.path)); list.append(item); }); section.append(list);
         } parent.append(summary);
-        const references = this.section(parent, `${w.external} (${plan.externalReferences.length})`);
-        references.append(node('p', plan.externalReferences.length ? w.externalHint : w.noExternal, 'publication-hint'));
+        const references = readerLabel(this.section(parent, `${w.external} (${plan.externalReferences.length})`), () => `${this.words().external} (${plan.externalReferences.length})`);
+        references.append(readerLabel(node('p', plan.externalReferences.length ? w.externalHint : w.noExternal, 'publication-hint'), () => plan.externalReferences.length ? this.words().externalHint : this.words().noExternal));
         if (plan.externalReferences.length) {
             const list = node('ul'); plan.externalReferences.forEach(reference => list.append(node('li', `${reference.source}:${reference.line} → ${reference.label || reference.target}`))); references.append(list);
         }
-        for (const [title, entries] of [[w.front, plan.frontMatter || plan.profile.frontMatter || []], [w.back, plan.backMatter || plan.profile.backMatter || []]] as const) {
+        for (const [key, entries] of [['front', plan.frontMatter || plan.profile.frontMatter || []], ['back', plan.backMatter || plan.profile.backMatter || []]] as const) {
             if (!entries.length) continue;
-            const section = this.section(parent, title);
+            const section = readerLabel(this.section(parent, w[key]), () => this.words()[key]);
             for (const entry of entries) {
                 const preview = node('div', '', 'publication-matter');
                 if (entry.title) preview.append(node('h4', entry.title));
-                preview.append(node('p', entry.file ? `${w.sourceFile}: ${entry.file} · ${w.manuscriptPreview}` : w.sourceInline, 'publication-hint'), node('div', manuscriptPreview(entry.content || ''), 'publication-prose')); section.append(preview);
+                preview.append(readerLabel(node('p', entry.file ? `${w.sourceFile}: ${entry.file} · ${w.manuscriptPreview}` : w.sourceInline, 'publication-hint'), () => entry.file ? `${this.words().sourceFile}: ${entry.file} · ${this.words().manuscriptPreview}` : this.words().sourceInline), node('div', manuscriptPreview(entry.content || ''), 'publication-prose')); section.append(preview);
             }
         }
         if (plan.continuedNotice.enabled) {
             const notice = this.section(parent, plan.continuedNotice.title);
-            if (plan.continuedNotice.file) notice.append(node('p', `${w.sourceFile}: ${plan.continuedNotice.file} · ${w.manuscriptPreview}`, 'publication-hint'));
+            if (plan.continuedNotice.file) notice.append(readerLabel(node('p', `${w.sourceFile}: ${plan.continuedNotice.file} · ${w.manuscriptPreview}`, 'publication-hint'), () => `${this.words().sourceFile}: ${plan.continuedNotice.file} · ${this.words().manuscriptPreview}`));
             notice.append(node('div', manuscriptPreview(plan.continuedNotice.text), 'publication-prose'));
         }
-        parent.append(node('p', `${w.reviewDoi}: ${plan.doi.versionDoi || w.noDoi}`));
+        parent.append(readerLabel(node('p', `${w.reviewDoi}: ${plan.doi.versionDoi || w.noDoi}`), () => `${this.words().reviewDoi}: ${plan.doi.versionDoi || this.words().noDoi}`));
         // This service warning is already expressed by the localized reference section above.
         const referenceWarning = `${plan.externalReferences.length} reference(s) point outside this edition; omitted pages are not added automatically.`;
         const warnings = plan.warnings.filter(warning => !plan.externalReferences.length || warning !== referenceWarning);
         if (warnings.length) { const list = node('ul', '', 'publication-warning'); warnings.forEach(warning => list.append(node('li', warning))); parent.append(list); }
         const toolsReady = plan.tools.pandoc.available && plan.tools.engine.available;
-        if (!toolsReady) parent.append(node('p', w.toolsMissing, 'publication-warning'));
-        const confirmation = this.check(parent, w.acknowledge, this.scopeConfirmed, value => { this.scopeConfirmed = value; build.disabled = !value || !toolsReady; });
+        if (!toolsReady) parent.append(readerLabel(node('p', w.toolsMissing, 'publication-warning'), () => this.words().toolsMissing));
+        const confirmation = readerLabel(this.check(parent, w.acknowledge, this.scopeConfirmed, value => { this.scopeConfirmed = value; build.disabled = !value || !toolsReady; }), () => this.words().acknowledge);
         confirmation.dataset.scopeConfirm = 'true';
-        const build = icon(w.build, 'publication', () => void this.createBuild(), true); build.dataset.build = 'true'; build.disabled = !this.scopeConfirmed || !toolsReady;
+        const build = readerLabel(icon(w.build, 'publication', () => void this.createBuild(), true), () => this.words().build); build.dataset.build = 'true'; build.disabled = !this.scopeConfirmed || !toolsReady;
         const footer = node('div', '', 'publication-actions'); footer.append(build); parent.append(footer);
     }
     private renderDelivery(parent: HTMLElement): void {
         const w = this.words(), build = this.build, frozenProfile = this.manifest?.plan.profile;
         if (build) {
             const edition = this.section(parent, `${frozenProfile?.title || this.profile!.title} · ${build.version}`);
-            edition.append(node('p', w.frozen, 'publication-hint'), node('p', `${w.builtAt}: ${new Date(build.createdAt).toLocaleString(this.context().language)}`));
+            edition.append(readerLabel(node('p', w.frozen, 'publication-hint'), () => this.words().frozen), readerLabel(node('p', `${w.builtAt}: ${new Date(build.createdAt).toLocaleString(this.context().language)}`), () => `${this.words().builtAt}: ${new Date(build.createdAt).toLocaleString(this.context().language)}`));
             if (this.manifest) {
-                const scope = node('details', '', 'publication-section'); scope.append(node('summary', `${w.selected} (${this.manifest.plan.selected.length})`));
+                const scope = node('details', '', 'publication-section'); scope.append(readerLabel(node('summary', `${w.selected} (${this.manifest.plan.selected.length})`), () => `${this.words().selected} (${this.manifest.plan.selected.length})`));
                 const list = node('ol'); this.manifest.plan.selected.forEach(page => list.append(node('li', [pageTitle(page), page.path].filter(Boolean).join(' · ')))); scope.append(list); edition.append(scope);
             }
             this.checksum(edition, build.pdfSha256);
             const actions = node('div', '', 'publication-actions');
-            actions.append(icon(w.preview, 'visible', () => void this.artifact('publication.pdf', true)), icon(w.download, 'download', () => void this.artifact('publication.pdf')),
-                icon(w.manifest, 'list-plus', () => void this.artifact('manifest.json')), icon(w.citation, 'copy-source', () => void this.artifact('citation.json'))); edition.append(actions);
-        } else parent.append(node('p', w.noBuild, 'publication-hint'));
-        const doi = this.section(parent, w.doi); doi.append(node('p', w.doiHint, 'publication-hint'));
-        const manual = node('details', '', 'publication-section'); manual.append(node('summary', w.manual));
+            actions.append(readerLabel(icon(w.preview, 'visible', () => void this.artifact('publication.pdf', true)), () => this.words().preview), readerLabel(icon(w.download, 'download', () => void this.artifact('publication.pdf')), () => this.words().download),
+                readerLabel(icon(w.manifest, 'list-plus', () => void this.artifact('manifest.json')), () => this.words().manifest), readerLabel(icon(w.citation, 'copy-source', () => void this.artifact('citation.json')), () => this.words().citation)); edition.append(actions);
+        } else parent.append(readerLabel(node('p', w.noBuild, 'publication-hint'), () => this.words().noBuild));
+        const doi = readerLabel(this.section(parent, w.doi), () => this.words().doi); doi.append(readerLabel(node('p', w.doiHint, 'publication-hint'), () => this.words().doiHint));
+        const manual = node('details', '', 'publication-section'); manual.append(readerLabel(node('summary', w.manual), () => this.words().manual));
         const p = this.profile!;
-        this.input(manual, w.versionDoi, p.doi?.versionDoi || '', value => { p.doi = { ...p.doi, versionDoi: value || undefined }; });
-        this.input(manual, w.conceptDoi, p.doi?.conceptDoi || '', value => { p.doi = { ...p.doi, conceptDoi: value || undefined }; });
-        this.input(manual, w.provenance, p.doi?.provenance || '', value => { p.doi = { ...p.doi, provenance: value || undefined }; });
-        manual.append(node('p', w.manualHint, 'publication-hint'), icon(w.save, 'save', () => void this.save())); doi.append(manual);
-        const zenodo = this.section(doi, w.zenodo), remote = this.status?.remote;
-        const environment = node('label', w.environment, 'publication-field'), select = node('select'); select.setAttribute('aria-label', w.environment);
-        for (const [value, title] of [['production', w.production], ['sandbox', w.sandbox]]) { const option = node('option', title); option.value = value; select.append(option); }
+        readerLabel(this.input(manual, w.versionDoi, p.doi?.versionDoi || '', value => { p.doi = { ...p.doi, versionDoi: value || undefined }; }), () => this.words().versionDoi);
+        readerLabel(this.input(manual, w.conceptDoi, p.doi?.conceptDoi || '', value => { p.doi = { ...p.doi, conceptDoi: value || undefined }; }), () => this.words().conceptDoi);
+        readerLabel(this.input(manual, w.provenance, p.doi?.provenance || '', value => { p.doi = { ...p.doi, provenance: value || undefined }; }), () => this.words().provenance);
+        manual.append(readerLabel(node('p', w.manualHint, 'publication-hint'), () => this.words().manualHint), readerLabel(icon(w.save, 'save', () => void this.save()), () => this.words().save)); doi.append(manual);
+        const zenodo = readerLabel(this.section(doi, w.zenodo), () => this.words().zenodo), remote = this.status?.remote;
+        const environment = readerLabel(node('label', w.environment, 'publication-field'), () => this.words().environment), select = node('select'); readerAttribute(select, 'aria-label', () => this.words().environment);
+        for (const [value, title] of [['production', w.production], ['sandbox', w.sandbox]]) { const option = readerLabel(node('option', title), () => this.words()[value as 'production' | 'sandbox']); option.value = value; select.append(option); }
         select.value = p.zenodo?.environment || 'sandbox'; select.disabled = !!remote;
         select.addEventListener('change', () => { p.zenodo = { ...p.zenodo, environment: select.value as 'production' | 'sandbox' }; this.changed(); }); environment.append(select); zenodo.append(environment);
         const credentialReady = this.status?.credential.configured || this.inspection?.credentialStatus.find(item => item.profileId === p.id)?.configured;
-        zenodo.append(node('p', credentialReady ? w.credentialReady : w.credentialMissing, 'publication-hint'));
-        zenodo.append(node('p', remote ? remote.status === 'published' ? w.published : remote.status === 'unknown' || remote.pending ? w.remoteUnknown : w.reserved : w.noRemote,
-            remote?.status === 'unknown' || remote?.pending ? 'publication-warning' : 'publication-hint'));
-        if (remote?.versionDoi) zenodo.append(node('p', `${w.versionDoi}: ${remote.versionDoi}`));
-        if (remote?.conceptDoi) zenodo.append(node('p', `${w.conceptDoi}: ${remote.conceptDoi}`));
-        if (remote?.recordId || remote?.draftId) zenodo.append(node('p', `${w.remoteRecord}: ${remote.recordId || remote.draftId}`));
-        if (remote?.history?.length) { const history = this.section(zenodo, w.oldEditions); remote.history.forEach(edition => history.append(node('p', `${edition.recordId} · ${edition.versionDoi || ''}`))); }
+        zenodo.append(readerLabel(node('p', credentialReady ? w.credentialReady : w.credentialMissing, 'publication-hint'), () => credentialReady ? this.words().credentialReady : this.words().credentialMissing));
+        zenodo.append(readerLabel(node('p', remote ? remote.status === 'published' ? w.published : remote.status === 'unknown' || remote.pending ? w.remoteUnknown : w.reserved : w.noRemote,
+            remote?.status === 'unknown' || remote?.pending ? 'publication-warning' : 'publication-hint'), () => remote ? remote.status === 'published' ? this.words().published : remote.status === 'unknown' || remote.pending ? this.words().remoteUnknown : this.words().reserved : this.words().noRemote));
+        if (remote?.versionDoi) zenodo.append(readerLabel(node('p', `${w.versionDoi}: ${remote.versionDoi}`), () => `${this.words().versionDoi}: ${remote.versionDoi}`));
+        if (remote?.conceptDoi) zenodo.append(readerLabel(node('p', `${w.conceptDoi}: ${remote.conceptDoi}`), () => `${this.words().conceptDoi}: ${remote.conceptDoi}`));
+        if (remote?.recordId || remote?.draftId) zenodo.append(readerLabel(node('p', `${w.remoteRecord}: ${remote.recordId || remote.draftId}`), () => `${this.words().remoteRecord}: ${remote.recordId || remote.draftId}`));
+        if (remote?.history?.length) { const history = readerLabel(this.section(zenodo, w.oldEditions), () => this.words().oldEditions); remote.history.forEach(edition => history.append(node('p', `${edition.recordId} · ${edition.versionDoi || ''}`))); }
         if (remote?.status === 'published') {
-            const confirm = this.check(zenodo, w.confirmNew, this.versionConfirmed, value => { this.versionConfirmed = value; next.disabled = !value || !credentialReady; });
+            const confirm = readerLabel(this.check(zenodo, w.confirmNew, this.versionConfirmed, value => { this.versionConfirmed = value; next.disabled = !value || !credentialReady; }), () => this.words().confirmNew);
             confirm.dataset.newVersionConfirm = 'true';
-            const next = icon(w.newVersion, 'plus', () => { if (this.versionConfirmed) void this.remoteAction('reserve-doi', { mode: 'new-version', expectedRecordId: remote.recordId, confirmedNewVersion: true }); });
+            const next = readerLabel(icon(w.newVersion, 'plus', () => { if (this.versionConfirmed) void this.remoteAction('reserve-doi', { mode: 'new-version', expectedRecordId: remote.recordId, confirmedNewVersion: true }); }), () => this.words().newVersion);
             next.disabled = !this.versionConfirmed || !credentialReady; zenodo.append(next);
         } else if (!remote || remote.status === 'draft' && !remote.pending) {
-            const reserve = icon(w.reserve, 'integration-managed', () => void this.remoteAction('reserve-doi', { mode: 'reuse-or-create' }));
+            const reserve = readerLabel(icon(w.reserve, 'integration-managed', () => void this.remoteAction('reserve-doi', { mode: 'reuse-or-create' })), () => this.words().reserve);
             reserve.disabled = !credentialReady; zenodo.append(reserve);
         }
-        const attach = node('details', '', 'publication-section'); attach.append(node('summary', w.attach));
-        const id = this.input(attach, w.remoteId, '', () => {}, false, '', false), typeLabel = node('label', w.remoteKind, 'publication-field'), kind = node('select');
-        kind.setAttribute('aria-label', w.remoteKind);
-        for (const [value, title] of [['draft', w.draftKind], ['record', w.recordKind]]) { const option = node('option', title); option.value = value; kind.append(option); }
+        const attach = node('details', '', 'publication-section'); attach.append(readerLabel(node('summary', w.attach), () => this.words().attach));
+        const id = readerLabel(this.input(attach, w.remoteId, '', () => {}, false, '', false), () => this.words().remoteId), typeLabel = readerLabel(node('label', w.remoteKind, 'publication-field'), () => this.words().remoteKind), kind = node('select');
+        readerAttribute(kind, 'aria-label', () => this.words().remoteKind);
+        for (const [value, title] of [['draft', w.draftKind], ['record', w.recordKind]]) { const option = readerLabel(node('option', title), () => value === 'draft' ? this.words().draftKind : this.words().recordKind); option.value = value; kind.append(option); }
         typeLabel.append(kind); attach.append(typeLabel);
-        const connect = icon(w.attach, 'integration-managed', () => void this.remoteAction('attach-zenodo', { id: id.value, kind: kind.value })); connect.disabled = !credentialReady; attach.append(connect); zenodo.append(attach);
+        const connect = readerLabel(icon(w.attach, 'integration-managed', () => void this.remoteAction('attach-zenodo', { id: id.value, kind: kind.value })), () => this.words().attach); connect.disabled = !credentialReady; attach.append(connect); zenodo.append(attach);
         if (remote?.status === 'draft' && !remote.pending && build) {
-            zenodo.append(node('p', w.uploadHint, 'publication-hint'));
-            const review = icon(w.reviewUpload, 'scan', () => void this.reviewUpload());
+            zenodo.append(readerLabel(node('p', w.uploadHint, 'publication-hint'), () => this.words().uploadHint));
+            const review = readerLabel(icon(w.reviewUpload, 'scan', () => void this.reviewUpload()), () => this.words().reviewUpload);
             review.disabled = !credentialReady || this.dirty || !this.manifest || this.manifest.plan.doi.versionDoi !== remote.versionDoi; zenodo.append(review);
             if (this.uploadPlan?.buildId === build.id && this.uploadPlan.remoteRevision === remote.revision) {
-                const changes = this.section(zenodo, w.reviewUpload), current = this.section(changes, w.remoteFiles);
+                const changes = readerLabel(this.section(zenodo, w.reviewUpload), () => this.words().reviewUpload), current = readerLabel(this.section(changes, w.remoteFiles), () => this.words().remoteFiles);
                 this.uploadPlan.files.forEach(file => current.append(node('p', `${file.name} · ${file.checksum}`, 'publication-checksum')));
-                for (const [title, files] of [[w.addFiles, this.uploadPlan.add], [w.replaceFiles, this.uploadPlan.replace], [w.removeFiles, this.uploadPlan.remove], [w.blockedFiles, this.uploadPlan.blocked]] as const) {
-                    const section = this.section(changes, title), list = node('ul'); files.forEach(file => list.append(node('li', file)));
-                    section.append(files.length ? list : node('p', w.filesUnchanged, 'publication-hint'));
+                for (const [key, files] of [['addFiles', this.uploadPlan.add], ['replaceFiles', this.uploadPlan.replace], ['removeFiles', this.uploadPlan.remove], ['blockedFiles', this.uploadPlan.blocked]] as const) {
+                    const section = readerLabel(this.section(changes, w[key]), () => this.words()[key]), list = node('ul'); files.forEach(file => list.append(node('li', file)));
+                    section.append(files.length ? list : readerLabel(node('p', w.filesUnchanged, 'publication-hint'), () => this.words().filesUnchanged));
                 }
-                if (this.uploadPlan.blocked.length) changes.append(node('p', w.blockedHint, 'publication-warning'));
-                const upload = icon(w.uploadFiles, 'save', () => void this.remoteAction('upload', { buildId: build.id, pdfSha256: build.pdfSha256, remoteRevision: remote.revision, uploadFingerprint: this.uploadPlan?.fingerprint }));
+                if (this.uploadPlan.blocked.length) changes.append(readerLabel(node('p', w.blockedHint, 'publication-warning'), () => this.words().blockedHint));
+                const upload = readerLabel(icon(w.uploadFiles, 'save', () => void this.remoteAction('upload', { buildId: build.id, pdfSha256: build.pdfSha256, remoteRevision: remote.revision, uploadFingerprint: this.uploadPlan?.fingerprint })), () => this.words().uploadFiles);
                 upload.disabled = !credentialReady || this.dirty || this.uploadPlan.blocked.length > 0; changes.append(upload);
             }
-            zenodo.append(node('p', w.needBuildReserved, 'publication-hint'));
+            zenodo.append(readerLabel(node('p', w.needBuildReserved, 'publication-hint'), () => this.words().needBuildReserved));
             if (remote.upload?.buildId === build.id && remote.upload.pdfSha256 === build.pdfSha256) {
-                const publish = this.section(zenodo, w.publish); publish.append(node('p', w.uploaded), node('p', w.publishWarning, 'publication-warning'),
+                const publish = readerLabel(this.section(zenodo, w.publish), () => this.words().publish); publish.append(readerLabel(node('p', w.uploaded), () => this.words().uploaded), readerLabel(node('p', w.publishWarning, 'publication-warning'), () => this.words().publishWarning),
                     node('p', `${frozenProfile?.title || this.profile!.title} · ${build.version}`),
-                    node('p', `${w.author}: ${frozenProfile?.authors.map(author => author.name).join(', ') || ''}`),
-                    node('p', `${w.license}: ${frozenProfile?.license || ''}`),
-                    node('p', frozenProfile?.description || ''), node('p', `${w.versionDoi}: ${remote.versionDoi || w.noDoi}`));
+                    readerLabel(node('p', `${w.author}: ${frozenProfile?.authors.map(author => author.name).join(', ') || ''}`), () => `${this.words().author}: ${frozenProfile?.authors.map(author => author.name).join(', ') || ''}`),
+                    readerLabel(node('p', `${w.license}: ${frozenProfile?.license || ''}`), () => `${this.words().license}: ${frozenProfile?.license || ''}`),
+                    node('p', frozenProfile?.description || ''), readerLabel(node('p', `${w.versionDoi}: ${remote.versionDoi || w.noDoi}`), () => `${this.words().versionDoi}: ${remote.versionDoi || this.words().noDoi}`));
                 this.checksum(publish, build.pdfSha256);
-                const confirm = this.check(publish, w.publishCheck, this.publishConfirmed, value => { this.publishConfirmed = value; action.disabled = !value || !credentialReady || !this.manifest; }); confirm.dataset.publishConfirm = 'true';
-                const action = icon(w.publish, 'publication', () => { if (this.publishConfirmed && this.manifest) void this.remoteAction('publish', { buildId: build.id, pdfSha256: build.pdfSha256, remoteRevision: remote.revision, recordId: remote.draftId || remote.recordId, confirmedPublication: true }); }, true);
+                const confirm = readerLabel(this.check(publish, w.publishCheck, this.publishConfirmed, value => { this.publishConfirmed = value; action.disabled = !value || !credentialReady || !this.manifest; }), () => this.words().publishCheck); confirm.dataset.publishConfirm = 'true';
+                const action = readerLabel(icon(w.publish, 'publication', () => { if (this.publishConfirmed && this.manifest) void this.remoteAction('publish', { buildId: build.id, pdfSha256: build.pdfSha256, remoteRevision: remote.revision, recordId: remote.draftId || remote.recordId, confirmedPublication: true }); }, true), () => this.words().publish);
                 action.disabled = !this.publishConfirmed || !credentialReady || !this.manifest; publish.append(action);
             }
         }
@@ -689,7 +690,7 @@ export class ReaderPublication {
         try {
             if (preview) {
                 this.clearPreview(); const panel = node('section', '', 'publication-preview'), header = node('div', '', 'publication-actions');
-                header.append(node('h3', this.words().previewTitle), icon(this.words().closePreview, 'x', () => this.clearPreview()));
+                header.append(readerLabel(node('h3', this.words().previewTitle), () => this.words().previewTitle), readerLabel(icon(this.words().closePreview, 'x', () => this.clearPreview()), () => this.words().closePreview));
                 panel.append(header); this.content!.append(panel); this.preview = panel;
                 const request = async (url: string, options: RequestInit = {}): Promise<Response> => {
                     if (!this.current(generation) || this.build?.id !== build.id || this.profile?.id !== profileId) throw new Error('Publication context changed.');

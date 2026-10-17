@@ -1,3 +1,4 @@
+import { readerLabel, readerText, readerWords } from './reader-ui-labels';
 export interface ReaderSymbolAuditBinding {
     filePath: string;
     startLine: number;
@@ -209,20 +210,24 @@ export class ReaderSymbolAudit {
         const container = this.container;
         const host = this.host;
         if (!container || !host) return;
-        const labels = host.labels();
+        const labels = readerWords(() => host.labels());
         container.replaceChildren();
         if (!this.status) {
-            container.append(text(error || labels.loading, 'reader-panel-summary'));
+            container.append(readerLabel(text(error || labels.loading, 'reader-panel-summary'), () => error || this.host!.labels().loading));
             host.changed();
             return;
         }
 
-        container.append(text(labels.intro, 'reader-symbol-audit-intro'));
-        container.append(text(labels.cache(
+        container.append(readerLabel(text(labels.intro, 'reader-symbol-audit-intro'), () => this.host!.labels().intro));
+        container.append(readerLabel(text(labels.cache(
             this.status.cache.reusableFiles,
             this.status.cache.totalFiles,
             this.status.cache.missingFiles
-        ), 'reader-symbol-audit-cache'));
+        ), 'reader-symbol-audit-cache'), () => this.host!.labels().cache(
+            this.status.cache.reusableFiles,
+            this.status.cache.totalFiles,
+            this.status.cache.missingFiles
+        )));
         const jobStatus = this.jobStatusView(labels);
         if (jobStatus) container.append(jobStatus);
 
@@ -231,21 +236,21 @@ export class ReaderSymbolAudit {
         const settingsHeader = document.createElement('div');
         settingsHeader.className = 'reader-symbol-audit-settings-header';
         settingsHeader.append(
-            text(labels.configuredModel + '：' + (this.status.settings.model || labels.codexDefault)),
-            text(labels.configuredEffort + '：' + (this.status.settings.effort || labels.codexDefault)),
-            text(labels.scopeSummary(this.status.scope.selectedFilePaths.length, this.status.scope.externalSpecialBindingCount))
+            readerLabel(text(labels.configuredModel + '：' + (this.status.settings.model || labels.codexDefault)), () => this.host!.labels().configuredModel + '：' + (this.status.settings.model || this.host!.labels().codexDefault)),
+            readerLabel(text(labels.configuredEffort + '：' + (this.status.settings.effort || labels.codexDefault)), () => this.host!.labels().configuredEffort + '：' + (this.status.settings.effort || this.host!.labels().codexDefault)),
+            readerLabel(text(labels.scopeSummary(this.status.scope.selectedFilePaths.length, this.status.scope.externalSpecialBindingCount)), () => this.host!.labels().scopeSummary(this.status.scope.selectedFilePaths.length, this.status.scope.externalSpecialBindingCount))
         );
         const configuredScope = this.status.settings.scope;
         const scopeRow = document.createElement('label');
         scopeRow.className = 'reader-symbol-audit-field';
-        scopeRow.append(document.createTextNode(labels.scope));
+        scopeRow.append(readerText(document.createElement('span'), () => this.host!.labels().scope));
         const scopeMode = document.createElement('select');
         scopeMode.className = 'reader-panel-search';
         const scopeKind = configuredScope?.kind || 'all';
         scopeMode.append(
-            option('all', labels.scopeAll, scopeKind === 'all'),
-            option('volume', labels.scopeVolume, scopeKind === 'volume'),
-            option('chapters', labels.scopeChapters, scopeKind === 'chapters')
+            readerLabel(option('all', labels.scopeAll, scopeKind === 'all'), () => this.host!.labels().scopeAll),
+            readerLabel(option('volume', labels.scopeVolume, scopeKind === 'volume'), () => this.host!.labels().scopeVolume),
+            readerLabel(option('chapters', labels.scopeChapters, scopeKind === 'chapters'), () => this.host!.labels().scopeChapters)
         );
         scopeRow.append(scopeMode);
         const currentGroupId = this.status.scope.pages.find(page => page.filePath === host.currentFilePath())?.groupId || this.status.scope.groups[0]?.id || '';
@@ -260,7 +265,7 @@ export class ReaderSymbolAudit {
         const chapterDetails = document.createElement('details');
         chapterDetails.className = 'reader-symbol-audit-scope-pages';
         const chapterSummary = document.createElement('summary');
-        chapterSummary.textContent = labels.scopePages;
+        readerText(chapterSummary, () => this.host!.labels().scopePages);
         chapterDetails.append(chapterSummary);
         const selectedChapterPaths = new Set(configuredScope?.kind === 'chapters' ? configuredScope.filePaths : []);
         const chapterCheckboxes: HTMLInputElement[] = [];
@@ -294,10 +299,10 @@ export class ReaderSymbolAudit {
         updateScopeVisibility();
         const modelRow = document.createElement('label');
         modelRow.className = 'reader-symbol-audit-field';
-        modelRow.append(document.createTextNode(labels.model));
+        modelRow.append(readerText(document.createElement('span'), () => this.host!.labels().model));
         const model = document.createElement('select');
         model.className = 'reader-panel-search';
-        model.append(option('', labels.codexDefault, !this.status.settings.model));
+        model.append(readerLabel(option('', labels.codexDefault, !this.status.settings.model), () => this.host!.labels().codexDefault));
         const allModels = this.models.length ? this.models : this.status.settings.model ? [{
             model: this.status.settings.model,
             displayName: this.status.settings.model,
@@ -306,17 +311,17 @@ export class ReaderSymbolAudit {
             defaultReasoningEffort: this.status.settings.effort || '',
             supportedReasoningEfforts: this.status.settings.effort ? [{ reasoningEffort: this.status.settings.effort, description: '' }] : []
         }] : [];
-        allModels.forEach(item => model.append(option(item.model, item.displayName + (item.isDefault ? ' · ' + labels.codexDefault : ''), item.model === this.status?.settings.model)));
+        allModels.forEach(item => model.append(readerLabel(option(item.model, item.displayName + (item.isDefault ? ' · ' + labels.codexDefault : ''), item.model === this.status?.settings.model), () => item.displayName + (item.isDefault ? ' · ' + this.host!.labels().codexDefault : ''))));
         modelRow.append(model);
         const effortRow = document.createElement('label');
         effortRow.className = 'reader-symbol-audit-field';
-        effortRow.append(document.createTextNode(labels.effort));
+        effortRow.append(readerText(document.createElement('span'), () => this.host!.labels().effort));
         const effort = document.createElement('select');
         effort.className = 'reader-panel-search';
         const populateEfforts = () => {
             const selectedModel = allModels.find(item => item.model === model.value);
             const current = effort.value || this.status?.settings.effort || '';
-            effort.replaceChildren(option('', labels.codexDefault, !current));
+            effort.replaceChildren(readerLabel(option('', labels.codexDefault, !current), () => this.host!.labels().codexDefault));
             (selectedModel?.supportedReasoningEfforts || []).forEach(item => effort.append(option(item.reasoningEffort, item.reasoningEffort, item.reasoningEffort === current)));
             if (current && !Array.from(effort.options).some(item => item.value === current)) effort.append(option(current, current, true));
             if (!effort.value && selectedModel?.defaultReasoningEffort) effort.value = selectedModel.defaultReasoningEffort;
@@ -341,7 +346,7 @@ export class ReaderSymbolAudit {
         const save = document.createElement('button');
         save.type = 'button';
         save.className = 'reader-symbol-audit-button is-secondary';
-        save.textContent = labels.saveSettings;
+        readerText(save, () => this.host!.labels().saveSettings);
         save.disabled = this.busy;
         save.addEventListener('click', () => void this.act(async () => {
             this.status = await host.saveSettings(selectedSettings());
@@ -358,7 +363,7 @@ export class ReaderSymbolAudit {
             const cancel = document.createElement('button');
             cancel.type = 'button';
             cancel.className = 'reader-symbol-audit-button is-secondary';
-            cancel.textContent = labels.cancel;
+            readerText(cancel, () => this.host!.labels().cancel);
             cancel.disabled = this.busy;
             cancel.addEventListener('click', () => void this.act(async () => { this.status = await host.cancel(); }, labels.cancellingJob));
             actions.append(cancel);
@@ -366,7 +371,7 @@ export class ReaderSymbolAudit {
             const start = document.createElement('button');
             start.type = 'button';
             start.className = 'reader-symbol-audit-button';
-            start.textContent = labels.start;
+            readerText(start, () => this.host!.labels().start);
             start.disabled = this.busy;
             start.addEventListener('click', () => {
                 try {
@@ -378,7 +383,7 @@ export class ReaderSymbolAudit {
             const force = document.createElement('button');
             force.type = 'button';
             force.className = 'reader-symbol-audit-button is-secondary';
-            force.textContent = labels.force;
+            readerText(force, () => this.host!.labels().force);
             force.disabled = this.busy;
             force.addEventListener('click', () => {
                 try {
@@ -390,26 +395,26 @@ export class ReaderSymbolAudit {
             actions.append(start, force);
             if (job?.status === 'complete') {
                 actions.append(
-                    text(labels.complete(job.scannedFiles, job.reusedFiles), 'reader-symbol-audit-progress'),
-                    text(labels.tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls), 'reader-symbol-audit-token-usage')
+                    readerLabel(text(labels.complete(job.scannedFiles, job.reusedFiles), 'reader-symbol-audit-progress'), () => this.host!.labels().complete(job.scannedFiles, job.reusedFiles)),
+                    readerLabel(text(labels.tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls), 'reader-symbol-audit-token-usage'), () => this.host!.labels().tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls))
                 );
             }
             if (job?.status === 'failed') {
                 actions.append(
-                    text(labels.failed + (job.error ? '：' + job.error : ''), 'reader-symbol-audit-error'),
-                    text(labels.tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls), 'reader-symbol-audit-token-usage')
+                    readerLabel(text(labels.failed + (job.error ? '：' + job.error : ''), 'reader-symbol-audit-error'), () => this.host!.labels().failed + (job.error ? '：' + job.error : '')),
+                    readerLabel(text(labels.tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls), 'reader-symbol-audit-token-usage'), () => this.host!.labels().tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls))
                 );
             }
             if (job?.status === 'cancelled') {
                 actions.append(
-                    text(labels.cancelled, 'reader-symbol-audit-progress'),
-                    text(labels.tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls), 'reader-symbol-audit-token-usage')
+                    readerLabel(text(labels.cancelled, 'reader-symbol-audit-progress'), () => this.host!.labels().cancelled),
+                    readerLabel(text(labels.tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls), 'reader-symbol-audit-token-usage'), () => this.host!.labels().tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls))
                 );
             }
         }
         container.append(actions);
         container.append(this.reportView(labels));
-        if (error) container.append(text(labels.actionFailed + '：' + error, 'reader-symbol-audit-error'));
+        if (error) container.append(readerLabel(text(labels.actionFailed + '：' + error, 'reader-symbol-audit-error'), () => this.host!.labels().actionFailed + '：' + error));
         host.changed();
     }
 
@@ -424,16 +429,16 @@ export class ReaderSymbolAudit {
         }
         if (!job) return section;
         const elapsed = Math.max(0, Math.floor((Date.now() - Date.parse(job.startedAt)) / 1000));
-        const title = text(
+        const title = readerLabel(text(
             `${labels.running(job.completedFiles, job.totalFiles, job.currentFilePath)} · ${labels.activity(job.activity)} · ${labels.elapsed(elapsed)}`,
             'reader-symbol-audit-job-title'
-        );
+        ), () => `${this.host!.labels().running(job.completedFiles, job.totalFiles, job.currentFilePath)} · ${this.host!.labels().activity(job.activity)} · ${this.host!.labels().elapsed(elapsed)}`);
         const progress = document.createElement('progress');
         progress.className = 'reader-symbol-audit-job-progress';
         progress.max = Math.max(1, job.totalFiles);
         progress.value = Math.min(job.completedFiles, job.totalFiles);
         progress.setAttribute('aria-label', title.textContent || '');
-        section.append(title, progress, text(labels.tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls), 'reader-symbol-audit-token-usage'));
+        section.append(title, progress, readerLabel(text(labels.tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls), 'reader-symbol-audit-token-usage'), () => this.host!.labels().tokenUsage(job.tokenUsage, job.tokenUsageReportedCalls, job.modelCalls)));
         return section;
     }
 
@@ -442,24 +447,24 @@ export class ReaderSymbolAudit {
         const section = document.createElement('section');
         section.className = 'reader-symbol-audit-report';
         if (!report) {
-            section.append(text(labels.noReport, 'reader-panel-summary'));
+            section.append(readerLabel(text(labels.noReport, 'reader-panel-summary'), () => this.host!.labels().noReport));
             return section;
         }
-        section.append(text(this.status?.reportState === 'current' ? labels.reportCurrent : labels.reportStale, 'reader-symbol-audit-report-state'));
+        section.append(readerLabel(text(this.status?.reportState === 'current' ? labels.reportCurrent : labels.reportStale, 'reader-symbol-audit-report-state'), () => this.status?.reportState === 'current' ? this.host!.labels().reportCurrent : this.host!.labels().reportStale));
         const summary = document.createElement('div');
         summary.className = 'reader-symbol-audit-report-summary-compact';
         const hard = document.createElement('span');
         const legacyReport = !Array.isArray(report.reconciliations);
         hard.className = legacyReport ? 'is-review' : report.hardConflicts.length ? 'is-hard' : 'is-ok';
-        hard.textContent = legacyReport ? labels.legacyCandidates(report.hardConflicts.length) : labels.hardConflicts(report.hardConflicts.length);
+        readerText(hard, () => legacyReport ? this.host!.labels().legacyCandidates(report.hardConflicts.length) : this.host!.labels().hardConflicts(report.hardConflicts.length));
         const review = document.createElement('span');
         review.className = report.advisories.length ? 'is-review' : 'is-ok';
-        review.textContent = labels.possibleConfusion(report.advisories.length);
+        readerText(review, () => this.host!.labels().possibleConfusion(report.advisories.length));
         summary.append(hard, review);
         const open = document.createElement('button');
         open.type = 'button';
         open.className = 'reader-symbol-audit-button';
-        open.textContent = labels.openReport;
+        readerText(open, () => this.host!.labels().openReport);
         open.addEventListener('click', () => this.host?.openReport());
         section.append(summary, open);
         return section;

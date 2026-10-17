@@ -1,3 +1,4 @@
+import { readerLabel, readerText, readerAttribute, readerWords } from './reader-ui-labels';
 import { readerIcon } from './reader-icons';
 import type { getDocument, OPS, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 
@@ -143,18 +144,18 @@ export class ReaderPublicationPdf {
             }); this.observer.observe(this.stage);
         }
     }
-    private words() { return copy[this.host.language()]; }
+    private words() { return readerWords(() => copy[this.host.language()]); }
     private current(generation: number): boolean { return this.active && !this.abort.signal.aborted && generation === this.renderGeneration; }
     private updateControls(): void {
         const w = this.words();
-        for (const [button, label] of [[this.previous, w.previous], [this.next, w.next]] as const) {
-            button.title = label; button.setAttribute('aria-label', label); button.dataset.tooltip = label;
+        for (const [button, key] of [[this.previous, 'previous'], [this.next, 'next']] as const) {
+            for (const attribute of ['title', 'aria-label', 'data-tooltip']) readerAttribute(button, attribute, () => this.words()[key]);
         }
         this.previous.disabled = !this.pdf || this.page <= 1; this.next.disabled = !this.pdf || this.page >= this.pdf.numPages;
-        this.count.textContent = this.pdf ? w.page(this.page, this.pdf.numPages) : '';
+        readerText(this.count, () => this.pdf ? this.words().page(this.page, this.pdf.numPages) : '');
     }
     async open(load: (signal: AbortSignal) => Promise<Blob>): Promise<void> {
-        this.status.textContent = this.words().loading; this.parent.setAttribute('aria-busy', 'true');
+        readerText(this.status, () => this.words().loading); this.parent.setAttribute('aria-busy', 'true');
         try {
             const [runtime, blob] = await Promise.all([this.runtime(this.host.request, this.abort.signal), load(this.abort.signal)]);
             if (!this.active) return;
@@ -182,7 +183,7 @@ export class ReaderPublicationPdf {
     }
     private async paint(target: number, generation: number): Promise<void> {
         if (!this.current(generation) || !this.pdf) return;
-        this.canvas.hidden = true; this.status.textContent = this.words().rendering; this.parent.setAttribute('aria-busy', 'true');
+        this.canvas.hidden = true; readerText(this.status, () => this.words().rendering); this.parent.setAttribute('aria-busy', 'true');
         let page: Awaited<ReturnType<PDFDocumentProxy['getPage']>>;
         try {
             page = await this.pdf.getPage(target); if (!this.current(generation)) return;
@@ -192,7 +193,7 @@ export class ReaderPublicationPdf {
             const pixels = Math.min(window.devicePixelRatio || 1, 2, MAX_CANVAS_DIMENSION / viewport.width,
                 MAX_CANVAS_DIMENSION / viewport.height, Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height)));
             this.canvas.width = Math.max(1, Math.floor(viewport.width * pixels)); this.canvas.height = Math.max(1, Math.floor(viewport.height * pixels));
-            this.canvas.setAttribute('aria-label', this.words().page(target, this.pdf.numPages));
+            readerAttribute(this.canvas, 'aria-label', () => this.words().page(target, this.pdf.numPages));
             this.task = page.render({ canvas: this.canvas, viewport, transform: [pixels, 0, 0, pixels, 0, 0], background: '#ffffff',
                 operationsFilter: (index, list) => {
                     // Preceding dependency operators have resolved these IDs; never filter valid content.
@@ -205,10 +206,10 @@ export class ReaderPublicationPdf {
     }
     private error(error: unknown): void {
         const w = this.words(), details = element('details'), download = element('button', '', 'publication-icon');
-        details.append(element('summary', w.details), element('pre', error instanceof Error ? error.message : String(error)));
-        download.type = 'button'; download.title = w.download; download.setAttribute('aria-label', w.download); download.dataset.tooltip = w.download;
+        details.append(readerLabel(element('summary', w.details), () => this.words().details), element('pre', error instanceof Error ? error.message : String(error)));
+        download.type = 'button'; download.title = w.download; readerAttribute(download, 'aria-label', () => this.words().download); download.dataset.tooltip = w.download;
         download.append(readerIcon('download')); download.addEventListener('click', () => this.host.download());
-        this.canvas.hidden = true; this.parent.removeAttribute('aria-busy'); this.status.replaceChildren(element('p', w.failed), details, download);
+        this.canvas.hidden = true; this.parent.removeAttribute('aria-busy'); this.status.replaceChildren(readerLabel(element('p', w.failed), () => this.words().failed), details, download);
     }
     destroy(): void {
         if (!this.active) return;

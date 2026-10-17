@@ -1,3 +1,4 @@
+import { readerUiLabels, installReaderTextNodes } from './reader-ui-harness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -90,6 +91,8 @@ class Element {
     getBoundingClientRect() { return { left: 10, top: 10, width: 200, height: 50, bottom: 60 }; }
 }
 
+installReaderTextNodes(Element);
+
 async function harness() {
     const document = { createElement(tag) { return new Element(tag, this); }, createElementNS(_namespace, tag) { return this.createElement(tag); } };
     document.body = new Element('body', document); document.activeElement = document.body;
@@ -104,7 +107,7 @@ async function harness() {
         addEventListener: windowEvents.addEventListener.bind(windowEvents), removeEventListener: windowEvents.removeEventListener.bind(windowEvents) },
         Element, Node: { ELEMENT_NODE: 1 }, AbortController, crypto: { randomUUID: () => 'test-' + (timerId++) },
         setTimeout: callback => { const id = ++timerId; timers.set(id, callback); return id; }, clearTimeout: id => timers.delete(id),
-        require: name => { if (name === './reader-clipboard') return { copyReaderText: async text => { copied.push(text); return true; } }; return modules[name]; } };
+        require: name => { if (name === './reader-ui-labels') return readerUiLabels; if (name === './reader-clipboard') return { copyReaderText: async text => { copied.push(text); return true; } }; return modules[name]; } };
     const assistanceInstances = [];
     modules['./reader-lean-assistance'] = { ReaderLeanAssistance: class {
         constructor(host) { this.host = host; this.root = document.createElement('section'); assistanceInstances.push(this); }
@@ -120,7 +123,7 @@ async function harness() {
     async function load(relative, name) {
         const text = await fs.readFile(path.join(repoRoot, relative), 'utf8'), exports = {};
         const compiled = ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-        vm.runInNewContext(compiled, { ...globals, exports }); modules[name] = exports; return exports;
+        vm.runInNewContext(compiled, { ...readerUiLabels,  ...globals, exports }); modules[name] = exports; return exports;
     }
     const lucide = {}; vm.runInNewContext('(function(exports) {\n' + await fs.readFile(require.resolve('lucide'), 'utf8') + '\n})(exports);', { exports: lucide, document }); modules.lucide = lucide;
     await load('src/reader/web/reader-icons.ts', './reader-icons');
@@ -474,7 +477,16 @@ async function testStableComparisonWorkbench() {
         assert.equal(h.find('[data-test-source-editor]'), editor); assert.match(h.region.textContent, /正在更新对照材料/);
         assert.equal(h.find('.reader-lean-review-prose-scroll'), prose);
         reload.resolve(response(payload())); await settle(); assert.equal(renders, 3);
-        h.context.language = 'en'; h.panel.contextChanged(); assert.equal(renders, 6); assert.equal(disposals, 3);
+        h.input('note', '中文草稿 remains exactly as entered');
+        const draftNote = h.find('[data-lean-focus="note"]'), requestsBeforeLanguage = h.requests.length;
+        draftNote.focus(); draftNote.setSelectionRange(1, 4);
+        h.context.language = 'en'; h.panel.contextChanged(); assert.equal(renders, 3); assert.equal(disposals, 0);
+        assert.equal(h.find('[data-lean-focus="note"]'), draftNote); assert.equal(draftNote.value, '中文草稿 remains exactly as entered');
+        assert.equal(draftNote.selectionStart, 1); assert.equal(draftNote.selectionEnd, 4); assert.equal(h.document.activeElement, draftNote);
+        assert.equal(h.requests.length, requestsBeforeLanguage, 'A language change makes no Lean/source/audit request.');
+        h.click('view-prose'); h.click('view-both');
+        assert.equal(renders, 3, 'A later view update cannot cause a delayed prose remount solely because the language changed.');
+        assert.equal(h.find('.reader-lean-review-prose-scroll'), prose, 'Locale changes retain the rendered manuscript and current prose selection.');
         assert.equal(h.find('[data-test-source-editor]'), editor, 'Locale changes retranslate prose controls without rebuilding Lean source.');
         const css = await fs.readFile(path.join(repoRoot, 'src/reader/web/styles.css'), 'utf8');
         assert.match(css, /reader-lean-review-prose-scroll[^}]*overflow: auto;[^}]*overscroll-behavior: contain;/);
@@ -570,12 +582,12 @@ async function testCandidateOnlyRealtimeRefresh() {
         const compiled = ts.transpileModule(`class RealtimeHarness { ${method.getText(parsed)} }\nexports.install = RealtimeHarness.prototype.installRealtimeUpdates;`,
             { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
         const handlers = new Map(), exports = {};
-        vm.runInNewContext(compiled, { exports, leanAssistanceUpdatePaths: h.leanAssistanceUpdatePaths,
+        vm.runInNewContext(compiled, { ...readerUiLabels,  exports, leanAssistanceUpdatePaths: h.leanAssistanceUpdatePaths,
             readerEvents: () => ({ addEventListener: (name, handler) => handlers.set(name, handler) }),
             window: { setTimeout() {} }, console });
         let fullRefreshes = 0, nextRevision = 1;
         const app = { state: { projectId: rootA, revision: 1, pages: [{ filePath: h.context.filePath }] },
-            leanReview: h.panel, pageRequestId: 1, currentPath: h.context.filePath, liveStatus: {}, dictionary: () => ({ live: 'Updated' }),
+            leanReview: h.panel, pageRequestId: 1, currentPath: h.context.filePath, liveStatus: h.document.createElement('p'), dictionary: () => ({ live: 'Updated' }),
             async refreshState() { fullRefreshes++; this.state = { ...this.state, revision: nextRevision }; h.panel.contextChanged(); } };
         h.host.context = () => ({ ...h.context, revision: app.state.revision });
         exports.install.call(app);

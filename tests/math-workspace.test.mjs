@@ -2,6 +2,10 @@ import { testReaderApps } from './reader-app.test.mjs';
 import { testReaderDefinitions } from './reader-definitions.test.mjs';
 import { testReaderIconClarity } from './reader-icon-clarity.test.mjs';
 import { testReaderToolbarMenu } from './reader-toolbar-menu.test.mjs';
+import { testReaderPreferences } from './reader-preferences.test.mjs';
+import { testReaderHostPreferences } from './reader-host-preferences.test.mjs';
+import { testReaderPreferenceDocs } from './reader-preference-docs.test.mjs';
+import { testReaderUiLanguage } from './reader-ui-language.test.mjs';
 import { testFormulaRuntime } from './formula-runtime.test.mjs';
 import { testReaderFormulaReflow } from './reader-formula-reflow.test.mjs';
 import { testReaderFormulaLayout } from './reader-formula-layout.test.mjs';
@@ -2855,6 +2859,10 @@ const tests = [
     ['Reader definition titles and navigation targets', testReaderDefinitions],
     ['Reader icon clarity and action tooltips', testReaderIconClarity],
     ['Reader category menus and keyboard navigation', testReaderToolbarMenu],
+    ['Reader automatic and manual UI preferences', testReaderPreferences],
+    ['Reader host language/theme context and local persistence', testReaderHostPreferences],
+    ['Reader preference documentation and bilingual README', testReaderPreferenceDocs],
+    ['Reader live interface language and retained manuscript drafts', testReaderUiLanguage],
     ['formula runtime packaging and bound transport', testFormulaRuntime],
     ['optional formula reflow and retained source', testReaderFormulaReflow],
     ['responsive formula layout and source actions', testReaderFormulaLayout],

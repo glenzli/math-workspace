@@ -8,6 +8,7 @@ import MarkdownIt from 'markdown-it';
 import { installInteractiveFigureRule } from './reader-figures';
 import { installFigureCaptionRule } from '../../figures/captions';
 import katex from 'katex';
+import { readerAttribute } from './reader-ui-labels';
 import type { ReaderDependencyMarker } from '../dependency-markers';
 
 export interface ReaderLabel {
@@ -188,12 +189,29 @@ function leanStatusText(status: ReaderDependencyMarker['leanStatus'], language: 
 }
 
 function renderLeanAnchorBadge(id: string, count: number, status: ReaderDependencyMarker['leanStatus'], language: 'zh' | 'en'): string {
-    const review = leanStatusText(status, language);
-    const label = language === 'en'
-        ? `Lean anchor: ${count} declaration${count === 1 ? '' : 's'}; ${review}; open alignment details`
-        : `Lean 锚点：${count} 个声明；${review}；点击查看对齐详情`;
+    const label = leanAnchorLabel(count, status, language);
     return '<button type="button" class="reader-lean-anchor" aria-label="' + escapeHtml(label)
         + '" title="' + escapeHtml(label) + '" data-reader-lean-anchor="' + escapeHtml(id) + '">Lean</button>';
+}
+
+function leanAnchorLabel(count: number, status: ReaderDependencyMarker['leanStatus'], language: 'zh' | 'en'): string {
+    const review = leanStatusText(status, language);
+    return language === 'en'
+        ? `Lean anchor: ${count} declaration${count === 1 ? '' : 's'}; ${review}; open alignment details`
+        : `Lean 锚点：${count} 个声明；${review}；点击查看对齐详情`;
+}
+
+/** These badge descriptions are Reader controls; formal prose and numbering keep their manuscript locale. */
+export function bindFormalInterfaceLabels(container: HTMLElement, markers: Record<string, ReaderDependencyMarker>, language: () => 'zh' | 'en'): void {
+    container.querySelectorAll<HTMLElement>('[data-reader-lean-anchor]').forEach(element => {
+        const marker = markers[element.dataset.readerLeanAnchor || '']; if (!marker) return;
+        const label = () => leanAnchorLabel(marker.leanDeclarationCount || 0, marker.leanStatus, language());
+        readerAttribute(element, 'aria-label', label); readerAttribute(element, 'title', label);
+    });
+    container.querySelectorAll<HTMLElement>('[data-reader-dependency]').forEach(element => {
+        const marker = markers[element.dataset.readerDependency || '']; if (!marker) return;
+        readerAttribute(element, 'aria-label', () => dependencyMarkerText(marker, language()));
+    });
 }
 
 function hasOddBackslashPrefix(value: string, index: number): boolean {

@@ -1,3 +1,4 @@
+import { readerLabel, readerText, readerAttribute } from './reader-ui-labels';
 import { closestReaderElement, positionReaderPopover } from './reader-popover';
 import { readerIconAction } from './reader-icons';
 
@@ -125,19 +126,19 @@ export class ReaderLeanPopover {
         const popover = this.createPopover(labels.title, labels.openReview, id, marker);
         const loading = document.createElement('p');
         loading.className = 'reader-lean-popover-status';
-        loading.textContent = labels.loading;
+        readerText(loading, () => this.host.labels().loading);
         popover.append(loading);
         this.popover = popover;
         positionReaderPopover(popover, marker.getBoundingClientRect(), { maxWidth: 460, gap: 7 });
         void this.host.fetchAnchor(id).then(payload => {
             if (requestId !== this.requestId || marker !== this.activeMarker || !this.popover) return;
-            this.renderPayload(payload, labels);
+            this.renderPayload(payload, this.host.labels());
             positionReaderPopover(this.popover, marker.getBoundingClientRect(), { maxWidth: 460, gap: 7 });
         }).catch(() => {
             if (requestId !== this.requestId || marker !== this.activeMarker || !this.popover) return;
             const failed = document.createElement('p');
             failed.className = 'reader-lean-popover-status is-error';
-            failed.textContent = labels.unavailable;
+            readerText(failed, () => this.host.labels().unavailable);
             this.popover.replaceChildren(this.popover.querySelector('header') as HTMLElement, failed);
             positionReaderPopover(this.popover, marker.getBoundingClientRect(), { maxWidth: 460, gap: 7 });
         });
@@ -147,11 +148,11 @@ export class ReaderLeanPopover {
         const popover = document.createElement('section');
         popover.className = 'reader-lean-popover';
         popover.setAttribute('role', 'dialog');
-        popover.setAttribute('aria-label', titleText);
+        readerAttribute(popover, 'aria-label', () => this.host.labels().title);
         const header = document.createElement('header');
         const title = document.createElement('h2');
-        title.textContent = titleText;
-        const review = readerIconAction('lean-compare', reviewText, 'local');
+        readerText(title, () => this.host.labels().title);
+        const review = readerLabel(readerIconAction('lean-compare', reviewText, 'local'), () => this.host.labels().openReview);
         review.classList.add('reader-lean-open-review');
         review.dataset.readerLeanReview = id;
         review.addEventListener('click', () => {
@@ -177,27 +178,27 @@ export class ReaderLeanPopover {
         }
         const status = document.createElement('dl');
         status.className = 'reader-lean-status-list';
-        this.appendStatus(status, labels.contract, labels.status('contract', payload.status?.contract));
-        this.appendStatus(status, labels.build, labels.status('build', payload.status?.build));
-        this.appendStatus(status, labels.dependencies, labels.status('dependencies', payload.status?.dependencies));
+        this.appendStatus(status, () => this.host.labels().contract, () => this.host.labels().status('contract', payload.status?.contract));
+        this.appendStatus(status, () => this.host.labels().build, () => this.host.labels().status('build', payload.status?.build));
+        this.appendStatus(status, () => this.host.labels().dependencies, () => this.host.labels().status('dependencies', payload.status?.dependencies));
         content.push(status);
         content.push(this.renderDeclarations(payload.declarations || [], labels));
         const comparison = payload.comparison;
         if (comparison?.markdownOnly?.length || comparison?.leanOnly?.length) {
             const comparisonSection = document.createElement('section');
             comparisonSection.className = 'reader-lean-comparison';
-            if (comparison.markdownOnly?.length) comparisonSection.append(this.renderReferenceList(labels.markdownOnly, comparison.markdownOnly));
-            if (comparison.leanOnly?.length) comparisonSection.append(this.renderReferenceList(labels.leanOnly, comparison.leanOnly));
+            if (comparison.markdownOnly?.length) comparisonSection.append(readerLabel(this.renderReferenceList(labels.markdownOnly, comparison.markdownOnly), () => this.host.labels().markdownOnly));
+            if (comparison.leanOnly?.length) comparisonSection.append(readerLabel(this.renderReferenceList(labels.leanOnly, comparison.leanOnly), () => this.host.labels().leanOnly));
             content.push(comparisonSection);
         }
         this.popover.replaceChildren(header, ...content);
     }
 
-    private appendStatus(list: HTMLDListElement, label: string, value: string): void {
+    private appendStatus(list: HTMLDListElement, label: () => string, value: () => string): void {
         const term = document.createElement('dt');
-        term.textContent = label;
+        readerText(term, label);
         const detail = document.createElement('dd');
-        detail.textContent = value;
+        readerText(detail, value);
         list.append(term, detail);
     }
 
@@ -205,14 +206,14 @@ export class ReaderLeanPopover {
         const section = document.createElement('section');
         section.className = 'reader-lean-declarations';
         const heading = document.createElement('h3');
-        heading.textContent = labels.declarations;
+        readerText(heading, () => this.host.labels().declarations);
         const count = document.createElement('span');
         count.textContent = String(declarations.length);
         heading.append(count);
         section.append(heading);
         if (declarations.length === 0) {
             const empty = document.createElement('p');
-            empty.textContent = labels.none;
+            readerText(empty, () => this.host.labels().none);
             section.append(empty);
             return section;
         }
