@@ -1,6 +1,6 @@
 # Math Workspace
 
-![Math Workspace Reader：数学正文、稳定引用与书卷导航](https://raw.githubusercontent.com/glenzli/math-workspace/main/media/readme/banner.jpg)
+![Math Workspace：数学写作、Lean 对照与人工审阅](https://raw.githubusercontent.com/glenzli/math-workspace/main/media/readme/banner.jpg)
 
 [中文](#zh-cn) | [English](#en)
 

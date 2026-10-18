@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const banner = '![Math Workspace Reader：数学正文、稳定引用与书卷导航](https://raw.githubusercontent.com/glenzli/math-workspace/main/media/readme/banner.jpg)';
+const banner = '![Math Workspace：数学写作、Lean 对照与人工审阅](https://raw.githubusercontent.com/glenzli/math-workspace/main/media/readme/banner.jpg)';
 const bannerPattern = /^!\[[^\]]*\]\((?:https:\/\/raw\.githubusercontent\.com\/glenzli\/math-workspace\/main\/)?media\/readme\/banner\.(?:png|jpe?g)\)$/;
 const languageAnchorPattern = /^<a (?:name|id)=(['"])(zh-cn|en)\1><\/a>$/;
 const languageNavigationPattern = /^\[[^\]]+\]\(#(?:zh-cn|en)\)\s*\|\s*\[[^\]]+\]\(#(?:zh-cn|en)\)$/;

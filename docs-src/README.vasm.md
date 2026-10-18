@@ -9,7 +9,7 @@ vasm:
 
 # Math Workspace
 
-![Math Workspace Reader：数学正文、稳定引用与书卷导航](https://raw.githubusercontent.com/glenzli/math-workspace/main/media/readme/banner.jpg)
+![Math Workspace：数学写作、Lean 对照与人工审阅](https://raw.githubusercontent.com/glenzli/math-workspace/main/media/readme/banner.jpg)
 
 Math Workspace 是面向长篇数学书稿的本地写作与审阅工作区。用 Markdown 维护原稿，在 Reader 中阅读、查定义与符号、核对 Lean，再把选定章节编成一版 PDF。
 
