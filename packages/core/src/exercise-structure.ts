@@ -1,5 +1,6 @@
 /** Source ranges and explicit exercise/solution relationships, independent of rendering. */
 import { FORMAL_ID_PATTERN } from './formal-kinds';
+import { MarkdownFence } from './markdown-fence';
 import type { FormalDefinition, FormalDocument, FormalIssue, FormalMarker, LabelData } from './formal-core';
 
 export interface ExerciseSupportRange {
@@ -23,19 +24,17 @@ export function solutionTarget(title: string): { id: string; title: string } | u
 export function collectExerciseContent(lines: string[], startLine: number, marker: FormalMarker,
     parseMarker: (line: string) => FormalMarker | undefined): { contentLines: string[]; endLine: number; support: ExerciseSupportRange[]; bodyEndLine: number } {
     let end = startLine;
-    let inFence = false;
+    const bodyFence = new MarkdownFence();
     for (let i = startLine + 1; i < lines.length; i++) {
-        if (/^\s*(```|~~~)/.test(lines[i])) { inFence = !inFence; end = i; continue; }
-        if (!inFence && (/^#{1,6}\s+/.test(lines[i]) || parseMarker(lines[i])
+        if (!bodyFence.consume(lines[i]) && (/^#{1,6}\s+/.test(lines[i]) || parseMarker(lines[i])
             || /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(lines[i]))) break;
         end = i;
     }
     while (end > startLine && !lines[end].trim()) end--;
     const support: ExerciseSupportRange[] = [];
-    inFence = false;
+    const supportFence = new MarkdownFence();
     if (marker.type === 'exercise') for (let i = startLine + 1; i <= end; i++) {
-        if (/^\s*(```|~~~)/.test(lines[i])) { inFence = !inFence; continue; }
-        const kind = !inFence && exerciseSupportKind(lines[i]);
+        const kind = !supportFence.consume(lines[i]) && exerciseSupportKind(lines[i]);
         if (!kind) continue;
         if (support.length) support[support.length - 1].endLine = i - 1;
         support.push({ kind, startLine: i, endLine: end });

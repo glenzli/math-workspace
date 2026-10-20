@@ -38,16 +38,29 @@ export async function testInteractiveFigures({ makeWorkspace, runCli, startReade
         'h-other': { type: 'prop', display: '命题 1.1', title: '参考', filePath: options.currentFilePath }
     } };
     const caption = '**图 #h-caption（观察 $x$）**：说明 $x$ 与 @h-other。';
+    const literalCaption = '````markdown\n```markdown\n' + figure + '\n\n' + caption + '\n```\n````';
+    const literalHtml = renderer.renderFormalMarkdown(markdown, literalCaption, captionOptions);
+    assert.match(literalHtml, /#h-caption/, 'A shorter nested fence must not expose a declaration to numbering.');
+    assert.doesNotMatch(literalHtml, /<figure class="reader-figure">|reader-interactive-figure/);
     for (const visual of [figure, '![图](figures/graph.svg)']) {
-        const rendered = renderer.renderFormalMarkdown(markdown, visual + '\n\n' + caption + '\n\n正文继续。', captionOptions);
-        assert.match(rendered, /<figure class="reader-figure">/);
-        assert.match(rendered, /<figcaption[^>]*id="formal-h-caption"[^>]*class="formal-anchor reader-figure-caption"/);
-        assert.match(rendered, /reader-figure-title/);
-        assert.match(rendered, /reader-figure-description/);
-        assert.match(rendered, /class="formal-reference"[^>]*data-formal-ref="h-other"/);
-        assert.match(rendered, /katex/);
-        assert.match(rendered, /<\/figcaption>\s*<\/figure>\s*<p[^>]*>正文继续。/);
+        for (const before of [false, true]) {
+            const source = (before ? [caption, visual] : [visual, caption]).join('\n\n');
+            const rendered = renderer.renderFormalMarkdown(markdown, source + '\n\n正文继续。', captionOptions);
+            assert.match(rendered, /<figure class="reader-figure">/);
+            assert.equal((rendered.match(/<figure class="reader-figure">/g) || []).length, 1);
+            assert.match(rendered, /<figcaption[^>]*id="formal-h-caption"[^>]*class="formal-anchor reader-figure-caption"/);
+            assert.match(rendered, /reader-figure-title/);
+            assert.match(rendered, /reader-figure-description/);
+            assert.match(rendered, /class="formal-reference"[^>]*data-formal-ref="h-other"/);
+            assert.match(rendered, /katex/);
+            assert.match(rendered, /<\/figure>\s*<p[^>]*>正文继续。/);
+            assert.equal(rendered.indexOf('<figcaption') < rendered.indexOf('<img'), before, 'Caption order follows authored source.');
+        }
     }
+    const repeated = caption + '\n\n![图](figures/graph.svg)\n\n图 5.2（第二幅）：说明。\n\n![图](figures/graph.svg)';
+    const paired = renderer.renderFormalMarkdown(markdown, repeated, captionOptions);
+    assert.equal((paired.match(/<figure class="reader-figure">/g) || []).length, 2, 'Each adjacent image is grouped once.');
+    assert.equal((paired.match(/<figcaption/g) || []).length, 2);
     const ordinary = renderer.renderFormalMarkdown(markdown, '![图](figures/graph.svg)\n\n**说明**：普通正文。', options);
     assert.match(ordinary, /<p[^>]*class="reader-static-figure"[^>]*><img/);
     assert.doesNotMatch(ordinary, /reader-figure-caption/);
@@ -57,23 +70,31 @@ export async function testInteractiveFigures({ makeWorkspace, runCli, startReade
     const { figureMarkdownForPdf, splitFigureCaption } = require(path.join(bundle, 'captions.cjs'));
     assert.deepEqual(splitFigureCaption('图 5.1（含 $a:b$）：说明 $x$。'), { title: '图 5.1（含 $a:b$）', description: '说明 $x$。' });
     const portable = '![图](figures/graph.svg)\n\n**Figure A.1 (Values $x$)**: Explanation $x$.\n\nFollowing text.';
-    const print = figureMarkdownForPdf(portable);
-    assert.match(print, /\\begin\{minipage\}\{\\linewidth\}/);
-    assert.match(print, /\\small\\color\[gray\]\{0.25\}\\centering/);
-    assert.match(print, /Explanation \$x\$\./);
-    assert.match(print, /\\end\{minipage\}[^]*Following text\.$/);
+    const captionFirst = '**Figure A.1 (Values $x$)**: Explanation $x$.\n\n![图](figures/graph.svg)\n\nFollowing text.';
+    for (const source of [portable, captionFirst]) {
+        const print = figureMarkdownForPdf(source);
+        assert.match(print, /\\begin\{minipage\}\{\\linewidth\}/);
+        assert.match(print, /\\small\\color\[gray\]\{0.25\}\\centering/);
+        assert.match(print, /Explanation \$x\$\./);
+        assert.match(print, /\\end\{minipage\}[^]*Following text\.$/);
+        assert.equal(print.indexOf('Figure A.1') < print.indexOf('![图]'), source.indexOf('Figure A.1') < source.indexOf('![图]'));
+        assert.equal((print.match(/\\begin\{minipage\}\{\\linewidth\}/g) || []).length, 1);
+    }
+    const multiplePrint = figureMarkdownForPdf(repeated.replace('#h-caption', '5.1'));
+    assert.equal((multiplePrint.match(/\\begin\{minipage\}\{\\linewidth\}/g) || []).length, 2);
     assert.equal(figureMarkdownForPdf('```md\n' + portable + '\n```'), '```md\n' + portable + '\n```');
     assert.equal(figureMarkdownForPdf('![图](figures/graph.svg)\n\nOrdinary paragraph.'), '![图](figures/graph.svg)\n\nOrdinary paragraph.');
 
     const root = await makeWorkspace('interactive-figures');
     await fs.mkdir(path.join(root, 'book1/figures'));
-    await fs.writeFile(path.join(root, 'book1/01-a.md'), '# Example\n\n' + figure + '\n\n```md\n' + figure + '\n```\n');
+    await fs.writeFile(path.join(root, 'book1/01-a.md'), '# Example\n\n图 #h-1111111111111111（图前标题）：说明。\n\n' + figure + '\n\n```md\n' + figure + '\n```\n');
     await fs.writeFile(path.join(root, 'book1/figures/graph.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><text x="5" y="25">x</text></svg>');
     const source = '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="figure">Figure</div><script>document.body.dataset.rendered="yes"</script></body></html>';
     await fs.writeFile(path.join(root, 'book1/figures/graph.html'), source);
     const exportResult = runCli(root, ['export-md', 'book1', '--out', 'compiled.md']);
     assert.equal(exportResult.status, 0, exportResult.stdout + exportResult.stderr);
     const output = await fs.readFile(path.join(root, 'compiled.md'), 'utf8');
+    assert.match(output, /图 1\.1/);
     assert.match(output, /!\[转移图\]\(<book1\/figures\/graph.svg>\)/);
     assert.equal(output.split('```')[0].includes('graph.html'), false);
     assert.match(output.split('```')[1], /graph.html/, 'Code examples must remain literal');

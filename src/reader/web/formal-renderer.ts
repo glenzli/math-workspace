@@ -2,6 +2,7 @@ import { readerRoute } from './reader-route';
 import { isReaderApp } from './reader-host';
 import { emptyReaderImage } from './reader-assets';
 import { FORMAL_TYPE_PATTERN, stripSolutionAssociation } from '../../../packages/core/src/formal-kinds';
+import { MarkdownFence } from '../../../packages/core/src/markdown-fence';
 import { isPageLabelType } from '../../../packages/core/src/page-structure';
 import { installExerciseRules } from './reader-exercises';
 import MarkdownIt from 'markdown-it';
@@ -381,14 +382,10 @@ function prepareFormalMarkdown(source: string, options: FormalRenderOptions): { 
     const markersByLine: Record<number, string> = {};
     const pagesByPath = new Map(options.pages.map(page => [page.filePath, page]));
     const markerTypeRe = new RegExp(`(${FORMAL_TYPE_PATTERN})\\s*$`, 'i');
-    let inFence = false;
+    const codeFence = new MarkdownFence();
 
     const lines = source.split(/\r?\n/).map((line, lineIndex) => {
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            return line;
-        }
-        if (inFence) return line;
+        if (codeFence.consume(line)) return line;
 
         const heading = line.match(/^(\s{0,3}#{1,6})\s+#([A-Za-z0-9_-]+)\s*(.*)$/);
         if (heading) {

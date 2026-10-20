@@ -1394,7 +1394,8 @@ a { color: inherit; }
 .reader-article .reader-figure > p { margin: 0; }
 .reader-article .reader-figure .reader-interactive-figure, .reader-article .reader-figure > .reader-static-figure { margin: 0 auto; }
 .reader-article .reader-figure-caption { margin: .7em auto 2.5em; width: 92%; font-size: .92em; line-height: 1.65; font-weight: 400; color: var(--reader-ink); }
-.reader-article .reader-figure > .reader-figure-caption { margin-bottom: 0; }
+.reader-article .reader-figure > .reader-figure-caption:last-child { margin-bottom: 0; }
+.reader-article .reader-figure > .reader-figure-caption:first-child { margin-top: 0; margin-bottom: .7em; }
 .reader-figure-title { display: block; text-align: center; font-weight: 600; }
 .reader-figure-description { display: block; margin-top: .35em; text-align: left; font-weight: 400; }
 @media print {

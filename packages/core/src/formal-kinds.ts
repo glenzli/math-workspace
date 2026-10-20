@@ -17,6 +17,7 @@ export const FORMAL_KIND_POLICIES: Record<string, FormalKindPolicy> = {
     def: { aliases: ['定义', 'Definition', 'Def', 'Def.'], zh: '定义', en: 'Definition' },
     remark: { aliases: ['注', 'Remark', 'Rem', 'Rem.'], zh: '注', en: 'Remark', recall: true, dependency: 'supplemental', lean: true },
     example: { aliases: ['例', 'Example', 'Ex', 'Ex.'], zh: '例', en: 'Example', counter: 'example', recall: true },
+    counterexample: { aliases: ['反例', 'Counterexample'], zh: '反例', en: 'Counterexample', counter: 'example', recall: true },
     exercise: { aliases: ['习题', '练习', 'Exercise'], zh: '习题', en: 'Exercise', counter: 'exercise', recall: true, dependency: 'pedagogical', lean: true },
     solution: { aliases: ['解答', '答案', 'Solution', 'Answer'], zh: '解答', en: 'Solution', recall: true, dependency: 'pedagogical' },
     section: { aliases: [], zh: '§', en: '§', counter: 'section' },

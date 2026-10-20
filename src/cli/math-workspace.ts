@@ -7,6 +7,7 @@ import { figureMarkdownForPdf } from '../figures/captions';
 
 import {
     DEFAULT_CONFIG,
+    MarkdownFence,
     FORMAL_KIND_POLICIES,
     FORMAL_TYPE_PATTERN,
     stripSolutionAssociation,
@@ -593,13 +594,9 @@ async function finalize(paths, commandName = 'finalize') {
     for (const filePath of targetFiles) {
         const content = await fs.readFile(filePath, 'utf8');
         const lines = content.split(/\r?\n/);
-        let inFence = false;
+        const codeFence = new MarkdownFence();
         for (const line of lines) {
-            if (/^\s*(```|~~~)/.test(line)) {
-                inFence = !inFence;
-                continue;
-            }
-            if (inFence) continue;
+            if (codeFence.consume(line)) continue;
             const marker = parseFormalMarkerLine(line);
             if (marker?.id && TMP_ID_RE.test(marker.id)) {
                 tmpDefs.push({ id: marker.id, file: relativePath(filePath) });
@@ -756,13 +753,9 @@ function rewriteMarkerId(line, mapping) {
 function rewriteFormalIds(content, mapping, { rewriteDefinitions }) {
     const lines = content.split(/\r?\n/);
     const eol = content.includes('\r\n') ? '\r\n' : '\n';
-    let inFence = false;
+    const codeFence = new MarkdownFence();
     const updated = lines.map(line => {
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            return line;
-        }
-        if (inFence) return line;
+        if (codeFence.consume(line)) return line;
 
         let next = rewriteDefinitions ? rewriteMarkerId(line, mapping) : line;
         next = rewriteInlineRefsOutsideCode(next, mapping);
@@ -775,15 +768,11 @@ function rewritePageReferences(content, file) {
     const lines = content.split(/\r?\n/);
     const eol = content.includes('\r\n') ? '\r\n' : '\n';
     const pageRefRe = /(^|[^A-Za-z0-9_])@(chapter|page):([^\s<>"'`，。；;！？]+?\.md)(?:\.(title|full))?(?=$|[\s,，。；;:：.!！?？)\]}])/g;
-    let inFence = false;
+    const codeFence = new MarkdownFence();
     let changed = false;
 
     const updated = lines.map(line => {
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            return line;
-        }
-        if (inFence) return line;
+        if (codeFence.consume(line)) return line;
 
         return splitProtectedInlineSegments(line).map(part => {
             if (part.kind !== 'text') return part.text;
@@ -929,15 +918,11 @@ function rewriteMarkdownLinkTargetsForExport(segment, sourceFilePath, mode: Expo
 
 function compileFormalMarkdownContent(content, sourceFilePath, state, options: { linkTargetMode?: ExportLinkTargetMode } = {}) {
     const lines = String(content || '').split(/\r?\n/);
-    let inFence = false;
+    const codeFence = new MarkdownFence();
     const linkTargetMode = options.linkTargetMode || 'root';
 
     return lines.map(line => {
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            return line;
-        }
-        if (inFence) return line;
+        if (codeFence.consume(line)) return line;
 
         const markerCompiled = compileFormalMarkerLine(staticFigureMarkdown(line), state);
         if (linkTargetMode !== 'preserve' && /^\s*\[[^\]]+\]:\s*/.test(markerCompiled)) {
@@ -1057,10 +1042,9 @@ function latexMetadataText(value) {
 
 function frontMatterMarkdownWithSafeHeadings(content, includeHeadingsInToc) {
     const classes = includeHeadingsInToc ? '{.unnumbered}' : '{.unnumbered .unlisted}';
-    let fence = false;
+    const codeFence = new MarkdownFence();
     return String(content || '').split(/\r?\n/).map(line => {
-        if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return line; }
-        if (fence) return line;
+        if (codeFence.consume(line)) return line;
         return line.replace(/^(#{1,6}\s+)(.+?)\s*$/, (_match, prefix, title) => {
         const attributes = /\s*\{([^}]*)\}\s*$/.exec(title);
         if (attributes) {
@@ -2072,15 +2056,11 @@ function rewriteTextReferenceLine(line, pattern, byAlias, file, lineNumber, repl
 function findAuditPageTitleHeadingLine(content) {
     const headings = [];
     const lines = String(content || '').split(/\r?\n/);
-    let inFence = false;
+    const codeFence = new MarkdownFence();
 
     for (let index = 0; index < lines.length; index++) {
         const line = lines[index];
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            continue;
-        }
-        if (inFence) continue;
+        if (codeFence.consume(line)) continue;
 
         const match = line.match(/^[ \t]{0,3}(#{1,6})[ \t]+(.+?)\s*$/);
         if (!match) continue;
@@ -2130,15 +2110,11 @@ function rewriteTextReferences(content, file, pattern, byAlias, options: any = {
     const linkedReferences = [];
     const sectionHeadings = [];
     const pageTitleHeadingLine = findAuditPageTitleHeadingLine(content);
-    let inFence = false;
+    const codeFence = new MarkdownFence();
     let changed = false;
 
     const updatedLines = lines.map((line, index) => {
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            return line;
-        }
-        if (inFence) return line;
+        if (codeFence.consume(line)) return line;
 
         if (options.auditStructure !== false) {
             collectSectionHeadingAudit(line, file, index + 1, sectionHeadings, pageTitleHeadingLine);
@@ -2275,14 +2251,10 @@ function collectBareNumberCandidates(content, file) {
     const candidates = [];
     const lines = content.split(/\r?\n/);
     const numberRe = /(^|[^@#A-Za-z0-9_])(\(?[A-Z]?(?:\d+|[A-Z])(?:[.．]\d+)+\)?)(?![A-Za-z0-9_-]|[.．]\d)/g;
-    let inFence = false;
+    const codeFence = new MarkdownFence();
 
     lines.forEach((line, index) => {
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            return;
-        }
-        if (inFence) return;
+        if (codeFence.consume(line)) return;
 
         for (const segment of splitAuditTextSegments(line)) {
             numberRe.lastIndex = 0;
@@ -2343,14 +2315,10 @@ function collectChapterReferenceCandidates(content, file, pages) {
     const candidates = [];
     const lines = content.split(/\r?\n/);
     const chapterRe = /(^|[^@#A-Za-z0-9_])((?:第\s*\d+\s*章)|(?:Chapter\s+\d+))(?![A-Za-z0-9_-])/gi;
-    let inFence = false;
+    const codeFence = new MarkdownFence();
 
     lines.forEach((line, index) => {
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            return;
-        }
-        if (inFence || /^#{1,6}\s+/.test(line)) return;
+        if (codeFence.consume(line) || /^#{1,6}\s+/.test(line)) return;
 
         for (const segment of splitAuditTextSegments(line)) {
             chapterRe.lastIndex = 0;
@@ -2395,15 +2363,11 @@ function collectMissingProofBoundaries(content, file) {
     const findings = [];
     const theoremTypes = new Set(['prop', 'lemma', 'theorem', 'cor']);
     const lines = content.split(/\r?\n/);
-    let inFence = false;
+    const codeFence = new MarkdownFence();
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            continue;
-        }
-        if (inFence) continue;
+        if (codeFence.consume(line)) continue;
 
         const marker = parseFormalMarkerLine(line);
         if (!marker || !theoremTypes.has(marker.type)) continue;
@@ -2431,22 +2395,6 @@ function collectMissingProofBoundaries(content, file) {
     return findings;
 }
 
-function collectUnusedOptionalBlocks(state, targetFileSet) {
-    const referencedIds = new Set(state.references.map(ref => ref.id));
-    return state.definitions
-        .filter(def => def.id && def.type === 'example')
-        .filter(def => targetFileSet.has(def.file))
-        .filter(def => !referencedIds.has(def.id))
-        .map(def => ({
-            code: 'unused-optional-block-hash',
-            file: def.file,
-            line: def.line,
-            id: def.id,
-            display: displayLabel(def, state.config),
-            title: def.title || ''
-        }));
-}
-
 function escapeAuditText(value) {
     return String(value).replace(/\|/g, '\\|').replace(/\n/g, ' ');
 }
@@ -2464,7 +2412,6 @@ function renderAuditReport(result) {
         `Chapter references needing page refs: ${result.chapterReferences.length}`,
         `Section headings needing numbered markers: ${result.sectionHeadings.length}`,
         `Bare number candidates: ${result.bareNumberCandidates.length}`,
-        `Unused optional example hashes: ${result.unusedOptionalBlocks.length}`,
         `Theorem-like blocks without proof boundary: ${result.missingProofBoundaries.length}`,
         ''
     ];
@@ -2535,15 +2482,6 @@ function renderAuditReport(result) {
         lines.push('');
     }
 
-    if (result.unusedOptionalBlocks.length > 0) {
-        lines.push('## Unused Optional Example Hashes', '');
-        lines.push('Examples usually stay plain unless later text cites them. Anchored fact remarks may be intentionally unnumbered and are not reported here.', '');
-        result.unusedOptionalBlocks.forEach(item => {
-            lines.push(`- ${item.file}:${item.line}: ${item.display} \`${item.id}\`${item.title ? ` (${escapeAuditText(item.title)})` : ''}`);
-        });
-        lines.push('');
-    }
-
     if (result.missingProofBoundaries.length > 0) {
         lines.push('## Theorem-Like Blocks Without Proof Boundary', '');
         lines.push('This is advisory. Add `证明` / `Proof` when the block has a proof and recall should stop before it.', '');
@@ -2562,7 +2500,6 @@ function renderAuditReport(result) {
         result.chapterReferences,
         result.sectionHeadings,
         result.bareNumberCandidates,
-        result.unusedOptionalBlocks,
         result.missingProofBoundaries
     ].every(items => items.length === 0)) {
         lines.push('No audit findings.', '');
@@ -2577,7 +2514,6 @@ async function audit(args) {
 
     const allFiles = await collectMarkdownFiles(state.config);
     const targetFiles = args.length > 0 ? await resolveInputMarkdownFiles(args, state.config) : allFiles;
-    const targetFileSet = new Set(targetFiles.map(relativePath));
     const byAlias = buildTextReferenceIndex(state.definitions, state.config);
     const pattern = makeTextReferencePattern(state.config);
     const result = {
@@ -2590,7 +2526,6 @@ async function audit(args) {
         chapterReferences: [],
         sectionHeadings: [],
         bareNumberCandidates: [],
-        unusedOptionalBlocks: collectUnusedOptionalBlocks(state, targetFileSet),
         missingProofBoundaries: []
     };
 
@@ -2618,7 +2553,6 @@ async function audit(args) {
         + result.chapterReferences.length
         + result.sectionHeadings.length
         + result.bareNumberCandidates.length
-        + result.unusedOptionalBlocks.length
         + result.missingProofBoundaries.length;
     const status = findingCount > 0 ? 'WARN' : 'OK';
     console.log(`${status} audit: ${findingCount} findings across ${targetFiles.length} files`);

@@ -63,6 +63,24 @@ Declaration syntax and reference syntax are intentionally different:
 
 Do not use declaration syntax in prose. For example, write `by @h-...`, not `by Theorem #h-...`.
 
+### Examples and Counterexamples
+
+Complete, independent examples, worked calculations, and counterexamples may be numbered before any later text cites them. Incidental in-text examples stay ordinary prose. Each numbered object has its own stable ID:
+
+```markdown
+Example #tmp-example (Finite sum): Start with a concrete case.
+
+First calculation step.
+
+Second explanation paragraph.
+
+Counterexample #tmp-counterexample (Missing boundedness): Choose the following objects.
+```
+
+Chinese declarations are `例 #tmp-example（标题）：...` and `反例 #tmp-counterexample（标题）：...`. Examples and counterexamples share a separate chapter counter, such as “Example 3.1, Counterexample 3.2, Example 3.3”. They never consume the sequence shared by propositions, lemmas, theorems, and corollaries. Figures, tables, equations, and exercises retain their own chapter counters; appendices use A.1, A.2, and so on.
+
+Example recall includes all paragraphs, formulas, lists, fenced code, and worked arguments or proofs until the next formal object, Markdown heading, or thematic break. Headings and declarations inside fenced code remain literal. Use a Markdown thematic break such as `---` to separate following ordinary prose from the example. Source references still use `@tmp-*` / `@h-...`, rather than handwritten display numbers. A numbered example without incoming references is not an audit finding.
+
 ### Exercises and Solutions
 
 Exercises have their own chapter counter. Each question and each solution has a separate stable ID; an explicit target connects a solution to its question:
@@ -92,6 +110,26 @@ A prompt continues until the next formal object or Markdown heading and includes
 The dependency graph retains exercise and solution references with `layer: pedagogical`. Its separate `pedagogicalLinks` records solution ownership without adding proof cycles. `graph impact` follows references and question/answer associations; Reader mainline importance and `graph bridges` exclude pedagogical references. A mainline result that references an exercise or solution produces a review notice: keep required claims and proofs in the main text so the solution appendix does not supply a missing argument.
 
 When turning a formalized result into an exercise, retain its hash and Lean declarations. Exercises belong to the default `coverageTypes`. Anchored exercises remain in the denominator even if a custom type list omits exercises; solutions do not duplicate the default coverage count. Lean contracts separately fingerprint the statement, associated hints/proofs/linked solutions, and declaration signatures. An answer edit requires review of its question; a question edit also requires review of anchored solutions. Lean dependency comparison attributes explicit strict references in a linked solution to its exercise and records the answer as provenance; ownership itself is not a premise. In `lean-index.json`, `status.markdownChanges` distinguishes `statement` and `proof` changes. Legacy contracts without proof fingerprints are `untracked`; review the source and declarations before running `lean capture` to establish the new baseline.
+
+### Interactive and Static Figures
+
+An image link in its own paragraph declares an interactive figure when its link title is `Interactive figure` or `交互图`. Use project-relative paths for both the image and HTML:
+
+```markdown
+[![Operator network evaluation](figures/network.svg)](figures/network.html "Interactive figure")
+
+Figure #tmp-network (Operator network evaluation): Write the caption in Markdown.
+```
+
+Ordinary Markdown readers show the image. Math Workspace shows the interactive version in the same place, with a static-image switch and an image fallback if loading fails. Markdown and PDF exports use the saved static image; fenced code examples stay literal. Carry the referenced assets with the published project.
+
+Figure HTML must be self-contained, with inline styles, scripts, and required fonts or images. It runs in an isolated frame without access to the Reader DOM, workspace APIs, or external networks. The project owns the content and layout; Math Workspace handles references, isolated display, size synchronization, and static export.
+
+Before scripts run, the Reader sets `window.mathWorkspaceFigure.mode` to `interactive` or `static`. Use the same drawing function for both modes, with controls and event handlers only in interactive mode. Generate and save the static preview from that same function; the exporter reads the preview without running project scripts. Standalone HTML may default to interactive mode.
+
+Keep a formal caption adjacent to a standalone image paragraph, separated by a blank line. A caption normally follows its image, but may precede it. Reader and PDF preserve that order and group the two together: the figure number and title are centered, and explanatory text appears on a separate, smaller, inset line. PDF keeps the image and caption on one page, so the pair must fit on a page. Portable Markdown retains its ordinary text form. Static and interactive versions of the same figure share one number and caption style.
+
+The Reader synchronizes figure height automatically. Wide mathematical diagrams may retain their layout and implement scaling or horizontal scrolling internally. Check symbol sizes, lines, and captions in the printed version.
 
 ### Numbered Objects
 
@@ -994,6 +1032,24 @@ local engine is installed.
 
 不要在正文里写声明语法。应写 `由 @h-... 可得`，不要写 `由定理 #h-... 可得`。
 
+## 例与反例
+
+完整、独立的例子、算例和反例可以主动编号，不要求已经被后文引用。随文的一句“例如……”仍写普通正文。声明使用独立稳定 ID：
+
+```markdown
+例 #tmp-example（有限求和）：先考察一个具体情形。
+
+第一步计算。
+
+第二步说明计算结果。
+
+反例 #tmp-counterexample（缺少有界性）：取如下对象。
+```
+
+英文写作 `Example #tmp-example (Title): ...` 和 `Counterexample #tmp-counterexample (Title): ...`。例与反例共用独立的章内连续序列，例如“例 3.1、反例 3.2、例 3.3”；不占用命题、引理、定理、推论共享的编号。图、表、公式和习题仍各自独立按章编号；附录对应使用 A.1、A.2。
+
+例与反例的引用预览保留多段文字、公式、列表、代码块及其中的推导或证明，到下一个正式对象、Markdown 标题或分隔线结束。代码块中的标题和声明只是示例，不结束当前例子。需要在例后接普通正文时，用 `---` 等 Markdown 分隔线明确结束例子。源码引用仍使用 `@tmp-*` / `@h-...`，不手写显示编号。未被引用的编号例子不构成审计问题。
+
 ## 习题与解答
 
 习题按章独立编号，不占用定理编号。题目和解答分别持有稳定 ID，解答用显式目标关联题目：
@@ -1040,7 +1096,7 @@ $$
 
 阅读器在图脚本运行前设置 `window.mathWorkspaceFigure.mode`，取值为 `interactive` 或 `static`。图组件应让两种模式调用相同的绘图函数，只在交互模式下创建控件和事件处理。静态预览也应由同一绘图函数生成并随源文件保存；导出器读取该预览，不在本机执行项目脚本。独立打开 HTML 时可自行以 `interactive` 为默认模式。
 
-紧接独立图片段落的正式图注，在 Reader 中与图片组成一个整体：图号和图题居中，说明另起一行、略小并缩进，与后续正文留出较大的间距。PDF 采用相同的图注层次，并将图与图注保持在同一页；单幅图及图注应能容纳于一页。普通 Markdown 导出保留原有文字形式。静态图片与交互图使用同一套图注样式。
+正式图注与独立图片段落相邻，推荐放在图后，也支持放在图前；两者之间用空行分段。Reader 与 PDF 都保持原稿的前后顺序，并将图与图注组成一个整体：图号和图题居中，说明另起一行、略小并缩进。PDF 将图与图注保持在同一页；单幅图及图注应能容纳于一页。普通 Markdown 导出保留原有文字形式。静态图片与交互图使用同一套图注样式，同一幅图的静态预览和交互版本共用一个图号。
 
 图的页面高度由阅读器自动同步。横向数学图可保留其布局；图内部负责缩放或横向浏览，不必为了窄屏改变节点关系。纸面版应验证符号字号、线条和图注是否清晰。
 

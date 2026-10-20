@@ -811,6 +811,121 @@ async function testStrongMarkerWithSoftbreak() {
     assert.equal(marker?.markerText, '命题 #h-2ebc63596b817afd');
 }
 
+async function testIndependentExamplesAndCounterexamples() {
+    const root = await makeWorkspace('independent-examples');
+    const chapter = [
+        '# Chapter 3',
+        '',
+        '命题 #h-1111111111111111（First result）：Statement.',
+        '',
+        '证明：This proof must stay outside theorem recall.',
+        '',
+        '例 #h-2222222222222222（Long calculation）：First paragraph.',
+        '',
+        'Second paragraph with a calculation:',
+        '',
+        '$$',
+        '1+2=3',
+        '$$',
+        '',
+        '- First case.',
+        '- Second case.',
+        '',
+        '````markdown',
+        '```markdown',
+        '# A literal heading',
+        '反例 #tmp-literal（Literal declaration）：Not an object.',
+        'Counterexample 3.4 and @tmp-english must stay literal.',
+        '```',
+        '````',
+        '',
+        'Proof. The worked argument belongs to this example.',
+        '',
+        'Final paragraph of the example.',
+        '',
+        '反例 #h-3333333333333333（Missing hypothesis）：A counterexample.',
+        '',
+        'The hypothesis holds but the conclusion fails.',
+        '',
+        '---',
+        '',
+        'Following ordinary prose must stay outside recall.',
+        '',
+        '引理 #h-4444444444444444（Second result）：Statement.',
+        '',
+        'Proof. The theorem sequence continues independently.',
+        '',
+        'Example #h-5555555555555555 (Another example): An independent example.',
+        '',
+        '## Next section',
+        '',
+        '例（Incidental）：This stays unnumbered.',
+        '',
+        'Counterexample #tmp-english (English counterexample): A separate stable object.',
+        '',
+        '~~~~markdown',
+        '```markdown',
+        '例 #tmp-tilde-literal（Another literal）：Not an object.',
+        '```',
+        '~~~~',
+        '',
+        'Its final paragraph.'
+    ].join('\n');
+    const withReference = chapter + '\n\n---\n\nSee @h-1111111111111111.';
+    const scanned = formalCore().scanFormalDocuments([{ filePath: 'book1/03-calculation.md', content: withReference }], { language: 'zh' });
+    assert.equal(scanned.references.length, 1, 'References inside nested fences must remain literal.');
+    assert.equal(scanned.references[0].line, withReference.split('\n').length, 'Source locations survive skipped code blocks.');
+    await fs.writeFile(path.join(root, 'book1/03-calculation.md'), chapter);
+    await fs.writeFile(path.join(root, 'book1/04-reset.md'), [
+        '# Chapter 4', '',
+        '例 #h-6666666666666666（New chapter）：No incoming citation is required.', '',
+        'See @tmp-english.', ''
+    ].join('\n'));
+    await fs.writeFile(path.join(root, 'book1/appendix-a-examples.md'), [
+        '# Appendix A', '',
+        '反例 #h-7777777777777777（Appendix）：The example counter resets.', ''
+    ].join('\n'));
+
+    const finish = runCli(root, ['finish', 'book1', '--all']);
+    assert.equal(finish.status, 0, combinedOutput(finish));
+    const entries = JSON.parse(await read(root, '.math-workspace/workspace-index.json')).entries;
+    const long = entries['h-2222222222222222'];
+    assert.match(long.content, /First paragraph\.[\s\S]*Second paragraph[\s\S]*1\+2=3/);
+    assert.match(long.content, /- First case\.[\s\S]*# A literal heading[\s\S]*#tmp-literal/);
+    assert.match(long.content, /Proof\. The worked argument[\s\S]*Final paragraph of the example\.$/);
+    assert.doesNotMatch(long.content, /Missing hypothesis/);
+    assert.equal(chapter.split('\n')[long.endLine], 'Final paragraph of the example.');
+    assert.doesNotMatch(entries['h-1111111111111111'].content, /This proof must stay outside/);
+    assert.equal(entries['h-3333333333333333'].type, 'counterexample');
+    assert.match(entries['h-3333333333333333'].content, /hypothesis holds but the conclusion fails/);
+    assert.doesNotMatch(entries['h-3333333333333333'].content, /Following ordinary prose/);
+    assert.doesNotMatch(entries['h-5555555555555555'].content, /Next section|Incidental/);
+    const english = Object.values(entries).find(entry => entry.title === 'English counterexample');
+    assert.equal(english.type, 'counterexample');
+    assert.match(english.content, /Its final paragraph\.$/);
+    assert.deepEqual(['h-1111111111111111', 'h-2222222222222222', 'h-3333333333333333',
+        'h-4444444444444444', 'h-5555555555555555'].map(id => entries[id].number), [1, 1, 2, 2, 3]);
+    assert.equal(english.number, 4);
+    assert.equal(entries['h-6666666666666666'].number, 1);
+    assert.equal(entries['h-7777777777777777'].number, 1);
+    assert.equal(entries['h-7777777777777777'].appendix, 'A');
+    assert.equal(Object.values(entries).filter(entry => entry.type === 'example' || entry.type === 'counterexample').length, 6);
+    assert.doesNotMatch(await read(root, 'book1/04-reset.md'), /@tmp-english/);
+    assert.match(await read(root, 'book1/03-calculation.md'), /Counterexample 3\.4 and @tmp-english must stay literal\./);
+
+    const exported = runCli(root, ['export-md', 'book1', '--out', 'compiled.md']);
+    assert.equal(exported.status, 0, combinedOutput(exported));
+    const compiled = await read(root, 'compiled.md');
+    assert.match(compiled, /反例 3\.2[\s\S]*反例 3\.4[\s\S]*反例 A\.1/);
+    assert.match(compiled, /反例 #tmp-literal/, 'Fenced declarations stay literal during export.');
+    assert.match(compiled, /Counterexample 3\.4 and @tmp-english must stay literal\./);
+    assert.match(compiled, /例 #tmp-tilde-literal/);
+    const audit = runCli(root, ['audit', 'book1/04-reset.md', 'book1/appendix-a-examples.md']);
+    assert.equal(audit.status, 0, combinedOutput(audit));
+    assert.match(combinedOutput(audit), /OK audit: 0 findings/);
+    assert.match(await read(root, '.math-workspace/audit.md'), /No audit findings/);
+}
+
 async function testDependencyGraph() {
     const root = await makeWorkspace('dependency-graph');
     await fs.writeFile(path.join(root, 'book1', '01-a.md'), [
@@ -2837,11 +2952,11 @@ async function testAuditReport() {
     assert.match(report, /Chapter references needing page refs: 1/);
     assert.match(report, /Section headings needing numbered markers: 1/);
     assert.match(report, /Bare number candidates: 1/);
-    assert.match(report, /Unused optional example hashes: 1/);
+    assert.doesNotMatch(report, /Unused [Oo]ptional [Ee]xample|unused-optional-block-hash/);
     assert.match(report, /Theorem-like blocks without proof boundary: 1/);
     assert.match(report, /定理 1\.1 -> @h-1111111111111111/);
     assert.match(report, /bare-number-candidate|Bare Number Candidates/);
-    assert.match(report, /例 1\.1 `h-2222222222222222`/);
+    assert.doesNotMatch(report, /h-2222222222222222/);
     assert.match(report, /第 2 章; suggested @chapter:book1\/02-b\.md/);
 }
 
@@ -2888,6 +3003,7 @@ const tests = [
     ['local Reader symbol audit', testReaderSymbolAudit],
     ['warns unbalanced symbol pattern', testWarnsUnbalancedSymbolPattern],
     ['recall boundaries and optional blocks', testRecallBoundariesAndOptionalBlocks],
+    ['independent examples, counterexamples and complete recall', testIndependentExamplesAndCounterexamples],
     ['strong marker with softbreak', testStrongMarkerWithSoftbreak],
     ['dependency graph', testDependencyGraph],
     ['proof terminators exclude explanatory references', testProofTerminatorsExcludeFollowingExplanatoryReferences],

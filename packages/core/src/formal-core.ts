@@ -1,4 +1,6 @@
 import * as path from 'node:path';
+import { MarkdownFence, maskFencedMarkdown } from './markdown-fence';
+export { MarkdownFence } from './markdown-fence';
 import { FORMAL_KIND_POLICIES, DEFAULT_LEAN_COVERAGE_TYPES, FORMAL_TYPES, THEOREM_COUNTER_TYPES, DEPENDENCY_NODE_TYPES, RECALL_TYPES, SECTION_TYPES, HASH_ID_RE, TMP_ID_RE, FORMAL_TYPE_PATTERN, normalizeFormalKind, formalDictionary, isPedagogicalKind, isMainlineKind } from './formal-kinds';
 import { collectExerciseContent, connectExerciseSolutions, solutionTarget, type ExerciseSupportRange } from './exercise-structure';
 export * from './formal-kinds';
@@ -762,9 +764,8 @@ export function formatPageHeading(page: PageData, config: any): string {
 }
 
 export function getContentPreview(content: string, maxLength = 240): string {
-    const text = content
+    const text = maskFencedMarkdown(content)
         .replace(/<!--[\s\S]*?-->/g, ' ')
-        .replace(/```[\s\S]*?```/g, ' ')
         .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
         .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
         .replace(/`([^`]*)`/g, '$1')
@@ -848,16 +849,12 @@ function collectInlineLatex(value: string, formulas: LatexFormula[]): void {
 /** Extract only author-written LaTeX from Markdown; code fences are deliberately ignored. */
 export function extractLatexFormulas(content: string): LatexFormula[] {
     const formulas: LatexFormula[] = [];
-    let inFence = false;
+    const codeFence = new MarkdownFence();
     let blockDelimiter = '';
     let blockBuffer: string[] = [];
 
     for (const line of String(content || '').split(/\r?\n/)) {
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            continue;
-        }
-        if (inFence) continue;
+        if (codeFence.consume(line)) continue;
 
         if (blockDelimiter) {
             const close = line.indexOf(blockDelimiter);
@@ -1299,11 +1296,10 @@ export function parseFormalDefinitions(input: unknown, documents: Array<FormalDo
 }
 
 export function stripIgnoredMarkdown(content: string): string {
-    return content
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(/```[\s\S]*?```/g, '')
-        .replace(/~~~[\s\S]*?~~~/g, '')
-        .replace(/`[^`\n]*`/g, '');
+    const blank = (text: string) => text.replace(/[^\r\n]/g, ' ');
+    return maskFencedMarkdown(content)
+        .replace(/<!--[\s\S]*?-->/g, blank)
+        .replace(/`[^`\n]*`/g, blank);
 }
 
 function cleanMarkerTitle(title: string): string {
@@ -1508,16 +1504,12 @@ function parseMarkdownHeadingLine(line: string): { level: number; id?: string; t
 
 function getPageTitleHeading(content: string, fallback: string): PageTitleHeading {
     const headings: PageTitleHeading[] = [];
-    let inFence = false;
+    const codeFence = new MarkdownFence();
     let lineNumber = 0;
 
     for (const line of String(content || '').split(/\r?\n/)) {
         lineNumber++;
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            continue;
-        }
-        if (inFence) continue;
+        if (codeFence.consume(line)) continue;
 
         const heading = parseMarkdownHeadingLine(line);
         if (!heading) continue;
@@ -1632,6 +1624,17 @@ function trimTrailingBlankLines(lines: string[]): string[] {
 function collectRecallMarkerContent(lines: string[], startLine: number, marker: FormalMarker): { contentLines: string[]; endLine: number } {
     const contentLines = [markerLineContent(lines[startLine], marker)];
     let endLine = startLine;
+    if (FORMAL_KIND_POLICIES[marker.type]?.counter === 'example') {
+        const codeFence = new MarkdownFence();
+        for (let i = startLine + 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (!codeFence.consume(line) && (isMarkerBoundaryLine(line)
+                || /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(line))) break;
+            contentLines.push(line);
+        }
+        const trimmed = trimTrailingBlankLines(contentLines);
+        return { contentLines: trimmed, endLine: startLine + trimmed.length - 1 };
+    }
     let proofLine = -1;
 
     for (let i = startLine + 1; i < lines.length; i++) {
@@ -1993,14 +1996,10 @@ export function scanFormalDocuments(documents: FormalDocument[], configInput: an
         }
 
         const lines = content.split(/\r?\n/);
-        let inFence = false;
+        const codeFence = new MarkdownFence();
         for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
             const line = lines[lineIndex];
-            if (/^\s*(```|~~~)/.test(line)) {
-                inFence = !inFence;
-                continue;
-            }
-            if (inFence) continue;
+            if (codeFence.consume(line)) continue;
             const marker = parseFormalMarkerLine(line);
             if (!marker || marker.type !== 'def') continue;
 
@@ -2028,15 +2027,11 @@ export function scanFormalDocuments(documents: FormalDocument[], configInput: an
 
         for (const unitFile of groupFiles) {
             const lines = unitFile.content.split(/\r?\n/);
-            let inFence = false;
+            const codeFence = new MarkdownFence();
 
             for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
                 const line = lines[lineIndex];
-                if (/^\s*(```|~~~)/.test(line)) {
-                    inFence = !inFence;
-                    continue;
-                }
-                if (inFence) continue;
+                if (codeFence.consume(line)) continue;
                 const marker = parseFormalMarkerLine(line);
                 if (!marker) continue;
                 if (isPageAnchorMarker({ ...marker, line: lineIndex + 1 }, unitFile.pageAnchor)) continue;
@@ -2171,14 +2166,10 @@ export function scanFormalDocuments(documents: FormalDocument[], configInput: an
 function collectMarkerStarts(content: string, filePath: string): any[] {
     const starts = [];
     const lines = content.split(/\r?\n/);
-    let inFence = false;
+    const codeFence = new MarkdownFence();
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        if (/^\s*(```|~~~)/.test(line)) {
-            inFence = !inFence;
-            continue;
-        }
-        if (inFence) continue;
+        if (codeFence.consume(line)) continue;
         const marker = parseFormalMarkerLine(line);
         if (marker) starts.push({ ...marker, file: filePath, line: i + 1 });
     }
@@ -3463,14 +3454,15 @@ export function renderAgentGuide(state: any): string {
         '',
         '- Sections: `## #h-... Title` renders as the current section number plus title, and links jump to the section without hover recall.',
         '- Numbered objects: `命题 #h-...（Title）：...`, `引理 #h-...`, `定理 #h-...`, `推论 #h-...` share the theorem counter per chapter or appendix.',
-        '- Equations, figures, and tables: `公式 #h-...：` binds the next display formula as a numbered equation, `图 #h-...（Title）：...` captions a nearby image, and `表 #h-...（Title）：` captions the following table. They have separate counters per chapter or appendix; equations render as `(1.1)`, appendices as `(A.1)`.',
+        '- Equations, figures, and tables: `公式 #h-...：` binds the next display formula as a numbered equation, `图 #h-...（Title）：...` captions an adjacent standalone image paragraph before or after it, and `表 #h-...（Title）：` captions the following table. Keep a blank line between image and caption; Reader/PDF group them in source order. Static and interactive versions of one figure share its number. They have separate counters per chapter or appendix; equations render as `(1.1)`, appendices as `(A.1)`.',
         '- Chapter/page anchors: put `#h-...` / `#tmp-*` on the file\'s unique highest-level heading when the page needs stable refs. The hash is hidden in preview and does not create a section number. Use `@h-...`, `@h-....title`, or `@h-....full` from `reference-map.md` to reference the page.',
         '- Compatibility chapter/page refs: `@chapter:book1/02-main.md`, `@chapter:book1/02-main.md.title`, or `@chapter:book1/02-main.md.full` still work; paths are relative to the formal root that owns `.math-workspace/`. `@page:path.md` is for unnumbered pages (including front matter, back matter, continued, intro, and summary) and appendix pages. Prefer page hashes when available. `finish` normalizes `./` and `../` input sugar to root-relative paths.',
         '- Theorem-like recall captures the statement before `证明` / `Proof`; keep proofs after an explicit proof marker.',
         '- Dependency graph: `.math-workspace/dependency-graph.json` is the canonical explicit reference graph. It uses only `@h-...` references between mainline claims, proof-backed hash remarks, exercises and solutions; pedagogical references carry `layer: pedagogical`, while `pedagogicalLinks` keeps solution ownership separate from proof cycles, and marks edges as `statement`, `proof`, or `body`. Edges introduced as explanatory navigation (`见 @h-...`, `参见 @h-...`, or `see @h-...`) are preserved with relation `explanatory`; the Reader relation map excludes them, body references, and self-references from its strict dependency view. `.math-workspace/dependency-report.md` separates mainline theorem-like and supplemental remark statistics. Use `npm run workspace -- graph summary`, `graph impact <h-id>`, `graph upstream <h-id>`, `graph focus <h-id> --depth 2`, `graph bridges`, `graph isolated`, `graph cycles`, or `graph matrix chapter|volume|book` for Markdown analysis. Add `--where statement|proof|body` to filter edge placement. These are structural graph tools, not domain interpretation.',
         '- Definitions and project knowledge: lookup is a tool-first, AI-exception workflow. The tool scans standard `定义（Term）：...` / `Definition (Term): ...` definitions and dedicated concept/glossary pages named by filename or main title; `.math-workspace/project-analysis.md` records detected concept, notation, and summary roles, including combined pages. Prefer the book’s final appendix for concept and notation summaries; reuse existing dedicated pages and follow the book’s appendix order without reserving fixed letters. This placement guidance does not change lookup priority. Do not refresh `.math-workspace/definitions.json` after ordinary edits. Use it only for nonstandard phrases, aliases/bilingual lookup, stable multi-paragraph previews, or a boundary the deterministic extractor cannot represent; include Markdown `content` for those entries. Codex MCP queries return narrow source locators and previews, including all detected roles for a source. Full rendered lookup previews are only guaranteed for definitions in the currently previewed file; cross-file search is primarily for locating and jumping.',
         '- Exercises use `习题 #tmp-e（Title）：...` / `Exercise #tmp-e (Title): ...`, with an independent chapter counter. Solutions use a separate ID and `解答 #tmp-s（对应 @tmp-e）：...` / `Solution #tmp-s (for @tmp-e): ...`; they may live in an appendix near the end of the same book and retain the original exercise number. Order solutions and concept/notation summaries according to the book’s structure. Separate hint/answer paragraphs from the prompt with a blank line. Prompt recall excludes hints and answers; exports include them. Keep stable IDs and Lean declarations when converting existing results; required mainline claims and proofs stay in the main text.',
-        '- Explanatory remarks stay plain: `注（Title）：...` / `Remark (Title): ...`, without hash. Non-mainline fact remarks that need a proof or later citation use `注 #tmp-*（Title）：...`; `> 注 #tmp-*（Title）：...` is also recognized inside standard blockquotes. A hash remark is an unnumbered supplemental dependency node and supports recall; a plain remark never enters the dependency graph or Reader dependency markers. Examples stay plain by default; only explicitly cited examples use `例 #tmp-*` / `Example #tmp-*` and remain numbered.',
+        '- Explanatory remarks stay plain: `注（Title）：...` / `Remark (Title): ...`, without hash. Non-mainline fact remarks that need a proof or later citation use `注 #tmp-*（Title）：...`; `> 注 #tmp-*（Title）：...` is also recognized inside standard blockquotes. A hash remark is an unnumbered supplemental dependency node and supports recall; a plain remark never enters the dependency graph or Reader dependency markers.',
+        '- Independent examples and counterexamples may use `例 #tmp-*` / `Example #tmp-*` and `反例 #tmp-*` / `Counterexample #tmp-*` even without later citations. They share a separate chapter/appendix example counter and never consume theorem numbers. Incidental in-text examples stay plain. Their recall includes all paragraphs, calculations and proof text up to the next formal object, Markdown heading or thematic break; fenced code stays literal. Separate following ordinary prose with a thematic break when needed.',
         '- Symbols: maintain only project-specific `source`, `pattern`, and `meaning` entries in `.math-workspace/symbols.json` when explicit notation semantics change; patterns describe the notation itself with balanced delimiters, not whole equations or open-ended formula fragments. Dedicated notation pages are recognized by filename or main title and supply context only; they do not infer symbol meanings. The navigation symbol table lists symbols matched in the current preview file. Symbols are not inline formula refs and are not searched through the definition search box.',
         '- Appendices use the appendix file prefix, so markers in `appendix-a-*.md` render as `A.1`, `A.2`, etc. `00-introduction.md`, `intro.md`, and `introduction.md` are intro pages, not chapter 0.',
         '- Export: do not compile formal source Markdown directly. Use `npm run workspace -- export-md <file-or-dir> --out dist/book.md` to produce one portable Markdown file, `npm run workspace -- export-md-split <file-or-dir> --out dist/public` to produce compiled Markdown files while preserving the source tree, `npm run workspace -- export-pdf <file-or-dir> --out dist/book.pdf` to call local pandoc after Markdown export, or `npm run workspace -- render-pdf dist/book.md --out dist/book.pdf` when a project release flow has already postprocessed the compiled Markdown. PDF rendering reads `.math-workspace/config.json` `pdf` defaults when present: A4, 2.5cm margins, TOC depth 2, language-aware TOC title, separate TOC page, optional title page metadata, optional publication metadata page, and optional front matter pages. `author` is the cover/PDF metadata author; fuller identity fields are `authorNative`, `authorAliases`, `orcid`, `repository`, `license`, `licenseUrl`, `preferredCitation`, `releaseTag`, `releaseCommit`, and `doi`. When `metadataPage` is true, the generated metadata page is unnumbered, unlisted, and placed after the title page but before the table of contents. Longer AI, license, citation, or provenance statements belong in `frontMatter`, placed after metadata and before the TOC; front matter entries use `source` or `content`, default to `toc: false`, and default to page breaks. Override with `--title`, `--subtitle`, `--author`, `--author-native`, `--author-alias`, `--orcid`, `--repository`, `--license`, `--license-url`, `--preferred-citation`, `--date`, `--release-version`, `--release-tag`, `--release-commit`, `--doi`, `--metadata-page`, `--front-matter`, `--front-matter-title`, `--front-matter-toc`, `--documentclass`, `--title-page`, `--margin`, `--no-toc`, `--toc-depth`, `--paper`, or Pandoc `-V key:value`. No PDF engine is bundled.',
