@@ -5,7 +5,7 @@ exports:
     version: 0.1.0
     format: executable
     file: math-workspace-editor.zh-CN.md
-    hash: sha256:c27086998e40d8a91c4f233831094f851f4837117f99df76a194a50fcdf5cb37
+    hash: sha256:c869f4834843478f2242ace8fd8e4be693ab15b7400ecdb2e6df06cb5ce0a768
   math-writing:
     name: math-workspace-math-writing-skill
     version: 0.1.0
@@ -17,13 +17,13 @@ exports:
     version: 0.1.0
     format: integrative
     file: math-workspace-integrator.md
-    hash: sha256:f357f1a9de4ab628a4d53dc22f2819d5fdeeda4a1855f569045c1190c2d6aa73
+    hash: sha256:73c599adcaa9e458ad64fefba0c167bb7cd1bd671a1b19e68ea65d9f5f03f6df
     appliesTo:
-      - sha256:c27086998e40d8a91c4f233831094f851f4837117f99df76a194a50fcdf5cb37
+      - sha256:c869f4834843478f2242ace8fd8e4be693ab15b7400ecdb2e6df06cb5ce0a768
       - sha256:c48952ee9c951629d62c76fc26a72b8bf587e7a35b5de0508ff2c4b753113642
   lean-formalization:
     name: math-workspace-lean-formalization-skill
     version: 0.1.0
     format: executable
     file: math-workspace-lean-formalization.zh-CN.md
-    hash: sha256:1c147871a9fd7d752612b5dc0784198f6d6fb1e2e91c172cd6074bbed334526a
+    hash: sha256:c461aa15fcc02db38633aa1a39d8dba8a029ad72f11dc638e43d2efa355de3a3

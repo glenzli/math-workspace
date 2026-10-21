@@ -13,7 +13,7 @@ vasm:
 
 Math Workspace 是面向长篇数学书稿的本地写作与审阅工作区。用 Markdown 维护原稿，在 Reader 中阅读、查定义与符号，按需核对 Lean，再把选定章节编成一版 PDF。
 
-它既可作为 Codex 插件使用，也提供独立 CLI。正文、前言、后记和未完待续声明都保留在书稿中，日常阅读与出版引用同一份内容。
+通过 Codex 安装时，使用插件自带的 CLI、Reader 和通用 skills；脱离 Codex 时，使用独立 CLI/npm。项目保留正文、配置和审阅记录，明确使用同一个工具来源。正文、前言、后记和未完待续声明都保留在书稿中，日常阅读与出版引用同一份内容。
 
 Lean 为可选功能；日常数学写作、阅读和稳定引用无需配置 Lean 工程。
 
@@ -21,7 +21,7 @@ Lean 为可选功能；日常数学写作、阅读和稳定引用无需配置 Le
 
 ## 开始使用
 
-### Codex 插件
+### 通过 Codex 插件使用
 
 从公开 marketplace 安装：
 
@@ -30,11 +30,11 @@ codex plugin marketplace add glenzli/marketplace --ref main
 codex plugin add math-workspace@glenzli-marketplace
 ```
 
-插件自带 CLI 和 Reader 运行时，不要求另外全局安装 `math-workspace`。安装或更新后新建 Codex 任务，请它为你的写作项目打开 Math Workspace。尚未配置的项目先完成初始化；已有写作规则按需融合。完整步骤见[安装与项目适配指南](docs/install.md)。
+插件自带 CLI、Reader 和通用 skills，无需在写作项目中再安装 npm 包、复制 `tools/math-workspace/` 或保存通用规则副本。安装或更新后新建 Codex 任务，请它初始化并打开你的写作项目；需要 CLI 时复用当前插件的实际入口。项目只维护自己的配置、源稿、审阅记录和特化规则。完整步骤见[安装与项目适配指南](docs/install.md)。
 
-### 独立 CLI 与项目依赖
+### 独立使用（不经 Codex）
 
-需要脱离 Codex 使用 Reader，或在项目、CI 中锁定工具版本时，可以使用 npm 包：
+不使用 Codex，或明确需要独立的终端、自动化与 CI 环境时，可以使用 Math Workspace 自己的 npm/CLI，不依赖 Codex：
 
 ```bash
 npm install -D math-workspace
@@ -42,7 +42,7 @@ npx math-workspace init
 npx math-workspace open
 ```
 
-npm 安装的是 registry 已发布版本，更新进度可能与 marketplace 不同；本页介绍当前仓库能力。
+npm 安装的是 registry 已发布版本，更新进度可能与 marketplace 不同；本页介绍当前仓库能力。同一流程应明确使用插件或独立安装中的一份，避免脚本与界面调用不同版本。
 
 `init` 创建或补全 `.math-workspace/config.json` 并生成初始索引。`open` 从当前目录向上发现项目根，再启动只监听 `127.0.0.1` 的本地 Reader。编辑后运行：
 

@@ -4,7 +4,7 @@
 
 - Preserve source-first behavior: skeletons and skills orient agents, but source and tests decide facts.
 - Protect stable-ID, reference, numbering, preview, migration, graph, and export invariants.
-- Keep target-project AI material clear enough to merge into existing project instructions; executable and integrative AI artifacts belong in `skills/`, while VASMC consumers should prefer catalog exports.
+- Keep project-specific AI rules separate from generic rules: projects using the Codex plugin reuse its installed skills and runtime; independent artifact/VASMC users can explicitly select reviewed exports. Do not introduce a second tool bundle as a default Codex integration step.
 - Keep release artifacts narrow: runtime files, a self-contained Codex plugin, public docs, generated AI artifacts, and VASMC catalog exports. Keep the npm package to CLI/Reader runtime, docs, AI artifacts, and catalog exports; publish the plugin as a copied marketplace snapshot.
 - Prefer small deterministic checks over persistent implementation summaries.
 - Challenge dependency additions unless they clearly reduce maintenance risk and are pinned and verified.

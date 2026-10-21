@@ -23,12 +23,12 @@ vasm:
 
 ## 日常闭环
 
-下列命令以项目已有的 `workspace` script 为例。Reader 交接提供确切的 Node、CLI 路径与工作目录时，复用该入口；否则使用项目已验证的 CLI，必要时以 `paths` / `help-ai` 定位随包规则。不要为套用示例静默修改项目脚本、替换原生 AI 规则或安装全局命令。
+在 Codex 插件任务中使用当前启用插件自带的 CLI、Reader 和通用 skills，不向目标项目复制运行时或通用规则，也不另建工具包同步流程；独立使用时使用明确安装的 Math Workspace CLI/npm。下文 `math-workspace` 代表所选实际入口。复用 Reader 提供的 Node/CLI 与工作目录，或已核对来源的项目 wrapper；不要为套用示例另装一份工具、改写项目脚本或替换原生规则。项目配置、Lean 契约、构建证据与人工审阅记录保留。
 
 首次进入任务或索引可能过期时：
 
 ```bash
-npm run workspace -- prepare
+math-workspace prepare
 ```
 
 先读取目标正文。需要引用当前上下文外的既有对象、章节或页面时，再从 `.math-workspace/reference-map.md` 读取对应行；不要为一次局部编辑加载整张表。只有本次涉及术语、概念附录或符号约定时，再读取 `.math-workspace/project-analysis.md`。
@@ -36,7 +36,7 @@ npm run workspace -- prepare
 编辑后：
 
 ```bash
-npm run workspace -- finish path/to/chapter-or-dir
+math-workspace finish path/to/chapter-or-dir
 ```
 
 `finish` 固化目标范围内的 `tmp-*`，并已执行校验。只有本次确实新增跨文件 `@tmp-*` 引用时才加 `--all`。仅在直接运行 `finalize`、执行迁移，或作为独立 release 门禁时，再单独运行 `verify`。
@@ -93,7 +93,7 @@ $$
 
 - 从拥有 `.math-workspace/config.json` 的 formal root 运行命令。构建、草稿、上下文和外部工程目录写入 `scan.exclude`。
 - 定义查询和符号表默认限制在当前 book；跨 book 引用或查询必须先配置 `lookup.bookDependencies`。
-- 改动已有命题类对象或带 hash 补充注释前，按需要运行 `npm run workspace -- graph impact <h-id>` 或 `graph focus <h-id> --depth 2`；显式依赖只来自 `@h-...`，报告会将主线对象与补充注释分开统计，AI 推测边不能写进权威依赖图。
+- 改动已有命题类对象或带 hash 补充注释前，按需要运行 `math-workspace graph impact <h-id>` 或 `graph focus <h-id> --depth 2`；显式依赖只来自 `@h-...`，报告会将主线对象与补充注释分开统计，AI 推测边不能写进权威依赖图。
 - 旧编号迁移使用 `migrate-text-refs` / `migrate-ids` 的 dry-run 后再 `--apply`。工具不会自动改裸数字或手写章引用；结合上下文改为页面 `@h-...` 或临时 `@chapter:path.md`。
 
 ## PDF 发布
@@ -103,4 +103,4 @@ $$
 - 查看、规划和本地构建不隐式调用发布服务。外部预留、上传及发布分别遵守用户授权；令牌仅放在服务进程环境中，不写入方案、正文或浏览器。
 - 发布清单绑定源输入和产物摘要，不证明数学正确性，也不替代原稿签名、验签或 Lean 证据。正文变化后重新规划、构建和审阅，不沿用过期成品的批准。
 
-完整命令、PDF 发布和配置字段见项目的 `docs/usage.md`；不要把这些说明复制进写作提示词。
+完整参数查看所选 CLI 的 `--help`；PDF 发布和配置字段见 [Math Workspace 使用指南](https://github.com/glenzli/math-workspace/blob/main/docs/usage.md)，不要求目标项目复制公开文档或把它们内嵌到写作规则。

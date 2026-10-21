@@ -1,7 +1,7 @@
 ---
 vasm:
   alias: math-workspace-release
-  intent: "Document math-workspace release artifacts, installation, vendoring, skill distribution, checks, and dependency policy."
+  intent: "Document math-workspace release artifacts, installation choices, skill distribution, checks, and dependency policy."
   compile:
     format: informational
     targetLangs: ["en", "zh-CN"]
@@ -11,9 +11,9 @@ vasm:
 
 `math-workspace` 的 release 包含四类主产物：
 
-- 可 vendoring 的 CLI、本地 Math Workspace 运行时与自包含 Codex plugin；
+- 自包含 Codex plugin，以及供非 Codex 环境独立使用的 CLI/Reader；
 - 面向人的公开文档；
-- 需要融合到目标项目的 AI 工作流 artifact；
+- 供按所选入口引用或审阅的 AI 工作流 artifact；
 - 可由 VASMC 锁定消费的 catalog exports。
 
 ## 构建
@@ -63,7 +63,7 @@ dist/
 
 各产物职责：
 
-- `cli/`：目标项目使用的无运行时依赖 CLI 与内置 Math Workspace 静态资源。
+- `cli/`：供独立使用的无运行时依赖 CLI 与 Reader 静态资源；Codex 项目使用插件内的同套运行时。
 - `.agents/plugins/` 与 `plugins/`：Codex marketplace 与 `math-workspace` MCP plugin；plugin 内含相对路径启动器、CLI 和 Reader 运行时。
 - `skills/`：AI 规则与组合指导 artifact，包含 `skills/editor.md`、`skills/math-writing.md`、`skills/integrator.md` 和 `skills/lean-formalization.md`。
 - `vasm-catalog/`：面向 VASMC consumer 的 catalog，包含 `vasmc-catalog.yaml`、`editor`、`math-writing`、`integrator` 和 `lean-formalization` exports。
@@ -74,9 +74,9 @@ dist/
 `docs-src/`、`skills-src/`、`.vasmc/`、`vasmc-build-state.yaml` 等仓库内部
 内容源和构建状态不是 release 产物。对外 VASMC 复用必须通过 `vasm-catalog/` 中的 artifact 和 hash，而不是直接扫描这些 source 目录。
 
-## npm 包
+## 独立 npm 包（按需）
 
-npm 包用于安装 CLI、本地 Math Workspace、AI artifacts 和 VASMC catalog。Codex plugin 由 marketplace 单独分发。npm 版本发布后安装：
+不通过 Codex 使用时，可以选择 npm 包安装 CLI、Reader、AI artifacts 和 VASMC catalog。通过 Codex 安装的项目直接复用插件，不需要再添加这份依赖。独立 npm 版本发布后安装：
 
 ```bash
 npm install -D math-workspace
@@ -87,7 +87,7 @@ npm install -D math-workspace
 ```json
 {
   "scripts": {
-    'workspace': "math-workspace"
+    "workspace": "math-workspace"
   }
 }
 ```
@@ -110,28 +110,22 @@ vasmc add --catalog node_modules/math-workspace/vasm-catalog/vasmc-catalog.yaml 
 vasmc add --catalog node_modules/math-workspace/vasm-catalog/vasmc-catalog.yaml --export integrator --alias math-workspace-integrator
 ```
 
-## 使用 Math Workspace
+## 使用所选入口
 
-首次接入项目时运行：
+通过 Codex 安装时，复用当前插件提供的实际 Node/CLI、启动器和工作目录；初始化及文件写入使用其 CLI，读取与只读校验优先使用 MCP。独立环境使用自己安装的 CLI/npm，首次接入运行：
 
 ```bash
 math-workspace init
 math-workspace open
 ```
 
-或使用 release vendored CLI：
+这里的 `math-workspace` 代表所选实际入口；npm 项目依赖使用 `npx math-workspace`。也可以从项目之外管理 release CLI：
 
 ```bash
-node tools/math-workspace/out/cli/math-workspace.js open
+node /absolute/path/to/math-workspace-release/cli/out/cli/math-workspace.js open /path/to/project
 ```
 
-省略项目目录可打开本机启动台，并从系统目录选择器或最近项目中选择目标：
-
-```bash
-math-workspace open
-```
-
-命令只监听 `127.0.0.1`，只读扫描项目，并在源文件变化后刷新页面。最近项目记录保存在用户本机状态目录，不写入项目。
+Reader 只监听 `127.0.0.1`。最近项目记录保存在用户本机状态目录；项目配置、原稿、审阅与证据记录仍在项目中。
 
 ## 使用 Codex MCP plugin
 
@@ -144,54 +138,25 @@ codex plugin add math-workspace@personal
 
 plugin 通过自身的相对路径启动器运行 bundle 内的 `math-workspace mcp`，不依赖全局命令。它可返回在 Codex 内置浏览器直接访问的 localhost URL，也可将 Reader 选取作为源码附件加入当前会话输入框，并查询命题、严格依赖、Lean 对齐与只读校验。
 
-## Vendoring CLI
+## 项目接入边界
 
-把 CLI 复制到目标项目：
-
-```bash
-mkdir -p path/to/project/tools/math-workspace
-cp -R dist/cli/* path/to/project/tools/math-workspace/
-```
-
-目标项目添加脚本：
-
-```json
-{
-  "scripts": {
-    'workspace': "node tools/math-workspace/out/cli/math-workspace.js"
-  }
-}
-```
-
-初始化：
-
-```bash
-npm run workspace -- init
-```
-
-校验：
-
-```bash
-npm run workspace -- verify
-```
+- Codex 插件任务使用已安装插件的 CLI、Reader 和通用 skills。不要为接入再复制 `cli/` 到 `tools/math-workspace/`、添加第二份 npm 依赖或维护旧包同步脚本。
+- 独立终端、CI 或其他宿主使用自己选定的 CLI/npm。需要可复现环境时明确锁定其版本并管理更新，不要求安装 Codex。
+- 项目只维护自己的配置、源稿、Lean、审阅记录和特化规则。已有脚本可作为经核对来源的薄入口；同一流程不要混用不同版本的脚本和 Reader。
 
 ## AI Skill 分发
 
-`skills/` 是可审阅的 AI artifact，不是远程安装器。通过 VASMC 使用时，优先使用 release catalog。
+`skills/` 是可审阅的 AI artifact，不是远程安装器。
 
-目标项目应该：
+- Codex 项目读取已安装插件的通用 skills，项目特化 skill 只保存本项目约束并引用当前规则。工作区编辑细则由同一插件生成的 `agent-guide.md` 提供。
+- 独立 CLI/其他 AI 宿主按需审阅 `editor.md`、`math-writing.md`、`integrator.md` 和 `lean-formalization.md`。明确采用 VASMC catalog 时再锁定所需 exports；这不是 Codex 插件项目的默认依赖。
+- 两条路径都保留项目自己的公理、术语、文风和发布规则，不以工具更新覆盖配置或人工审阅记录。
 
-1. 审阅 `skills/editor.md`；
-2. 审阅与具体项目无关的 `skills/math-writing.md`；
-3. 审阅 `skills/integrator.md`；
-4. 使用 Lean 时审阅 `skills/lean-formalization.md`；
-5. 把规则融合进项目原生 AI 指令；
-6. 保留目标项目自己的公理、术语、文风和 release 规则。
 源与生成层保持分离：
 
 - `skills-src/*.vasm.md` 是通用 skill 的唯一内容源。
 - `skills/*.md` 与 `vasm-catalog/*` 是面向 consumer 的生成 artifact。
-- `plugins/math-workspace/skills/*/SKILL.md` 由同一 VASM 产物确定性生成；`agents/openai.yaml` 保存对应界面元数据。
+- 插件的 `math-writing` 与 `lean-formalization` `SKILL.md` 由同一 VASM 产物生成；`open-math-workspace/SKILL.md` 是插件入口规则的维护源，`agents/openai.yaml` 保存对应界面元数据。
 - 修改源后运行 `npm run content:build`，审阅 `.vasmc/build-report.yaml` 和生成 diff，再运行 `npm run release:local`。不要直接修补生成的 `SKILL.md`。
 
 

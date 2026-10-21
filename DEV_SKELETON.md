@@ -4,7 +4,7 @@
 
 - Support long-form mathematical and technical Markdown writing with stable source IDs, generated reader-facing numbering, reference checks, a local enhanced Reader, and publication exports.
 - Make AI-assisted editing safer by letting agents draft with temporary markers while deterministic tooling finalizes IDs and verifies generated state.
-- Keep the Reader and CLI usable as local, reviewable tooling that can be vendored into writing projects.
+- Provide the CLI, Reader and generic skills through the installed Codex plugin for Codex installations; retain a standalone CLI/npm path for independent environments. Project configuration, source and review records stay in the writing project.
 
 ## Non-Goals
 

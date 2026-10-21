@@ -69,7 +69,7 @@ async function copyDir(src: string, dest: string): Promise<void> {
 }
 
 async function copyPublicDocs(destDocs: string): Promise<void> {
-    const publicDocs = ['usage.md', 'release.md'];
+    const publicDocs = ['install.md', 'usage.md', 'release.md'];
     for (const fileName of publicDocs) {
         await copyFile(path.join(ROOT, 'docs', fileName), path.join(destDocs, fileName));
     }
@@ -155,117 +155,75 @@ Language: [English](#english) | [中文](#中文)
 
 ## English
 
-This release bundle contains Math Workspace, the CLI runtime, a self-contained Codex MCP plugin, documentation, AI workflow artifacts, and a VASMC catalog for lockable reuse.
+Choose the tool provider to match the installation. Codex users use the plugin's bundled CLI, Reader and generic skills. Independent users use Math Workspace's own CLI/npm; Codex is not required.
 
-### Artifacts
+### Codex plugin
 
-- \`cli/\`: dependency-free CLI runtime and bundled Math Workspace for target projects.
-- \`.agents/plugins/\` and \`plugins/\`: Codex marketplace and the Math Workspace MCP plugin.
-- \`skills/\`: reviewed AI workflow artifacts.
-- \`vasm-catalog/\`: VASMC catalog exports for lockable reuse.
-- \`docs/\`: usage and release documentation.
-- \`manifest.json\`: machine-readable artifact map.
-- \`checksums.txt\`: SHA-256 checksums.
-
-### Run Math Workspace
-
-\`\`\`bash
-node cli/out/cli/math-workspace.js serve /path/to/project
-\`\`\`
-
-Open the printed localhost URL in your preferred browser or local side panel. Math Workspace is read-only and binds only to \`127.0.0.1\`.
-
-### Use the Codex MCP Plugin
-
-Add the release bundle as a marketplace, then install the plugin:
+Register this release as a marketplace and install the self-contained plugin:
 
 \`\`\`bash
 codex plugin marketplace add /path/to/math-workspace-release
 codex plugin add math-workspace@personal
 \`\`\`
 
-The plugin carries its own CLI and Reader runtime. It returns a local URL for browser-based Math Workspace and does not require a global \`math-workspace\` command.
+Start a new Codex task after installation or updates. Reuse the installed plugin's actual launcher or Node/CLI entry for initialization and file operations. Keep project configuration, source, review records and project-specific rules in the project. Do not copy a second runtime into \`tools/math-workspace\`, add a second npm dependency, or embed generic skill copies just to use the Codex plugin.
 
-### Vendor CLI
+### Independent CLI
+
+For terminal, CI or other-host use, manage the release CLI outside the writing project or explicitly select the standalone npm package. For example:
 
 \`\`\`bash
-mkdir -p tools/math-workspace
-cp -R cli/* tools/math-workspace/
+node /absolute/path/to/math-workspace-release/cli/out/cli/math-workspace.js open /path/to/project
 \`\`\`
 
-Then add a project script:
+The Reader binds only to \`127.0.0.1\`. The standalone CLI uses the same project file formats and does not require Codex. Keep one selected runtime version per workflow.
 
-\`\`\`json
-{
-  "scripts": {
-    'workspace': "node tools/math-workspace/out/cli/math-workspace.js"
-  }
-}
-\`\`\`
+### Artifacts and rules
 
-Run \`npm run workspace -- prepare\` from the project root that owns \`.math-workspace/config.json\`.
+- \`.agents/plugins/\` and \`plugins/\`: the Codex marketplace and self-contained plugin.
+- \`cli/\`: the standalone CLI and Reader runtime.
+- \`skills/\`: reviewed generic rules for explicit standalone integration; Codex projects read the installed plugin skills.
+- \`vasm-catalog/\`: optional hash-lockable exports for explicit artifact/VASMC consumers.
+- \`docs/\`, \`manifest.json\`, \`checksums.txt\`: public documentation, artifact map and SHA-256 checksums.
 
-### AI Artifacts
-
-Review \`skills/editor.md\`, \`skills/math-writing.md\`, and \`skills/integrator.md\`; when the project uses Lean, also review \`skills/lean-formalization.md\`. Merge the rules into the target project's native AI instructions. If the target project uses VASMC, consume the matching catalog exports so the consumer lockfile fixes artifact hashes. Do not auto-install or auto-update skills from an untrusted remote source.
+Keep project-specific axioms, terminology and stricter requirements in native project instructions. Preserve configuration, review decisions and evidence records when updating tools. See \`docs/install.md\` for complete setup choices.
 
 <a id="中文"></a>
 
 ## 中文
 
-这个 release 包包含本地 Math Workspace、CLI 运行时、自包含的 Codex MCP plugin、文档、面向 AI 的工作流 artifact，以及可锁定复用的 VASMC catalog。
+按安装方式选择工具来源：通过 Codex 使用时，复用插件自带的 CLI、Reader 和通用 skills；独立使用时，走 Math Workspace 自己的 CLI/npm，无需安装 Codex。
 
-### 产物
+### Codex 插件
 
-- \`cli/\`：目标项目使用的无运行时依赖 CLI 与内置 Math Workspace。
-- \`.agents/plugins/\` 与 \`plugins/\`：Codex marketplace 和 Math Workspace MCP plugin。
-- \`skills/\`：需要审阅和融合的 AI 工作流 artifact。
-- \`vasm-catalog/\`：供 VASMC consumer 锁定复用的 catalog exports。
-- \`docs/\`：使用和 release 文档。
-- \`manifest.json\`：机器可读产物表。
-- \`checksums.txt\`：SHA-256 校验和。
-
-### 启动 Math Workspace
-
-\`\`\`bash
-node cli/out/cli/math-workspace.js serve /path/to/project
-\`\`\`
-
-在浏览器或本地侧栏中打开命令输出的 localhost URL。Math Workspace 只读，并且只绑定 \`127.0.0.1\`。
-
-### 使用 Codex MCP Plugin
-
-将 release 根目录作为 marketplace 添加，然后安装 plugin：
+把本 release 注册为 marketplace，再安装自包含插件：
 
 \`\`\`bash
 codex plugin marketplace add /path/to/math-workspace-release
 codex plugin add math-workspace@personal
 \`\`\`
 
-plugin 自带 CLI 和 Reader 运行时，不依赖全局 \`math-workspace\` 命令；它会返回浏览器 Math Workspace 的本地 URL。
+安装或更新后新建 Codex 任务。初始化和文件操作复用已安装插件的实际启动器或 Node/CLI 入口。项目保留配置、源稿、审阅记录和特化规则；不要仅为使用 Codex 插件再内置 \`tools/math-workspace\`、添加第二份 npm 依赖或复制通用 skills。
 
-### Vendoring CLI
+### 独立 CLI
+
+终端、CI 或其他宿主可在写作项目之外管理 release CLI，或明确选择独立 npm 包。例如：
 
 \`\`\`bash
-mkdir -p tools/math-workspace
-cp -R cli/* tools/math-workspace/
+node /absolute/path/to/math-workspace-release/cli/out/cli/math-workspace.js open /path/to/project
 \`\`\`
 
-然后添加项目脚本：
+Reader 只绑定 \`127.0.0.1\`。独立 CLI 使用同一项目文件格式，不依赖 Codex；同一流程明确使用一份已选运行时。
 
-\`\`\`json
-{
-  "scripts": {
-    'workspace': "node tools/math-workspace/out/cli/math-workspace.js"
-  }
-}
-\`\`\`
+### 产物与规则
 
-在拥有 \`.math-workspace/config.json\` 的项目根目录运行 \`npm run workspace -- prepare\`。
+- \`.agents/plugins/\` 与 \`plugins/\`：Codex marketplace 和自包含插件。
+- \`cli/\`：独立 CLI 与 Reader 运行时。
+- \`skills/\`：供独立接入时审阅的通用规则；Codex 项目读取已安装插件的 skills。
+- \`vasm-catalog/\`：供明确采用 artifact/VASMC 分发的消费者锁定所需 exports。
+- \`docs/\`、\`manifest.json\`、\`checksums.txt\`：公开文档、产物表与 SHA-256 校验和。
 
-### AI Artifacts
-
-审阅 \`skills/editor.md\`、\`skills/math-writing.md\` 和 \`skills/integrator.md\`；项目使用 Lean 时再审阅 \`skills/lean-formalization.md\`。把规则融合到目标项目原生 AI 指令中；若目标项目使用 VASMC，则消费相应 catalog export，让 consumer lockfile 固定 artifact hash。不要从不可信远端自动安装或自动更新 skill。
+项目自己的公理、术语和更严格约束留在原生规则中；工具更新保留配置、人工审阅与证据记录。完整接入选择见 \`docs/install.md\`。
 `;
 }
 
@@ -339,7 +297,7 @@ async function main(): Promise<void> {
                 bin: 'math-workspace',
                 skillsPath: 'cli/skills',
                 vasmCatalogPath: 'cli/vasm-catalog/vasmc-catalog.yaml',
-                install: 'Copy this directory into tools/math-workspace and run node tools/math-workspace/out/cli/math-workspace.js.'
+                install: 'Codex installations use the plugin runtime; independent users run this CLI from their selected standalone installation.'
             },
             codexMcpPlugin: {
                 marketplace: '.agents/plugins/marketplace.json',
@@ -350,7 +308,7 @@ async function main(): Promise<void> {
             skills: {
                 path: 'skills',
                 cliPath: 'cli/skills',
-                mode: 'Reviewed AI workflow artifacts; merge into the target project instructions instead of auto-installing from remote sources'
+                mode: 'Codex projects reference installed plugin skills; explicit standalone consumers review these artifacts and preserve project-specific rules'
             },
             vasmCatalog: {
                 path: 'vasm-catalog',

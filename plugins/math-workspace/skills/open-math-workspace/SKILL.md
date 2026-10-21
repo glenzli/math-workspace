@@ -5,6 +5,8 @@ description: Open the local Math Workspace for a prepared formal Markdown projec
 
 # Open Math Workspace
 
+Use this installed Codex plugin as the runtime and generic-skill provider for Codex projects. Reuse its CLI/launcher for initialization, preparation, finalization, export, and Lean commands. Keep project configuration, manuscripts, review records, and project-specific rules in the project; do not copy the runtime into `tools/math-workspace`, add a second npm installation, or embed generic skill copies merely to use this plugin. Independent non-Codex users can use the standalone CLI/npm path described in the installation guide.
+
 Use `open_reader` to read, inspect, or navigate a prepared Math Workspace project beside the current conversation. Use `open_workspace` for the standalone project entry. When discussing a quoted selection, read the inline Markdown attachment and its source location; use the original file when more context is needed.
 - Pass the current project root when it contains `.math-workspace/config.json`.
 - Pass a project-relative `pagePath` when the user identified a chapter to open.

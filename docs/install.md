@@ -8,39 +8,55 @@
 
 ## 🌍 English
 
-Math Workspace can be adopted in layers. The CLI and Reader form the base; the Codex plugin, project-specific skills, symbol audit, and Lean alignment can be added when a real need appears. Do not copy every workflow merely to make the installation look complete.
+Choose the tool provider to match the installation: Codex installations reuse the plugin’s CLI, Reader, and generic skills; independent environments use Math Workspace’s own CLI/npm. Configuration, manuscripts, review records, and project-specific rules remain in the writing project.
 
-### 1. Prerequisites and scope
+### 1. Prerequisites and choice
 
-- Basic use requires Node.js, npm, and a local project whose primary manuscript source is Markdown.
-- Install the Codex plugin only when native Codex tasks need to query marks, propositions, project knowledge, dependencies, Lean evidence, or cached audits.
-- Configure Lean only when the project already has a working Lean 4/Lake project.
+| Environment | Tool provider | Project integration |
+| --- | --- | --- |
+| Codex plugin task | Installed and enabled Math Workspace plugin, including CLI, Reader, and generic skills | Keep configuration and project-specific rules; do not copy another runtime or generic rules. |
+| Independent terminal, automation, CI, or another host | Math Workspace standalone CLI/npm or an independently managed release CLI | Use one explicitly selected CLI; Codex is not required. |
+
+- The standalone CLI needs Node.js; npm installation also needs npm. The Codex plugin launcher uses an available Node runtime supplied by its host environment.
+- Configure Lean only when the project already has a buildable Lean 4/Lake project.
 - Pandoc and LaTeX are needed only for PDF export, not for the Reader.
 
-### 2. Install the CLI and prepare the project
+### 2. Install and prepare through the selected provider
 
-After an npm version has been published, install Math Workspace in the target project and keep a stable script:
+#### Codex plugin path
+
+Install from the public marketplace:
+
+```bash
+codex plugin marketplace add glenzli/marketplace --ref main
+codex plugin add math-workspace@glenzli-marketplace
+```
+
+Start a new Codex task after installation or updates, then ask it to initialize and open the writing project. The project does not need another npm dependency, a copied `tools/math-workspace/`, a bundle-sync script, or generic skill copies.
+
+Use the current plugin’s actual entry for initialization and other CLI operations, for example:
+
+```bash
+/absolute/path/to/installed-plugin/scripts/launch_math_workspace_mcp init /path/to/project
+```
+
+Resolve that path from the actual installation; do not hardcode a machine path or cache version into the project. Reuse exact Node/CLI paths and working directories supplied by the Reader. If a project needs a script, keep only a thin entry that locates the current enabled plugin. If the plugin is missing, disabled, or ambiguous, identify the intended provider rather than falling back to an old project bundle.
+
+#### Standalone CLI path
+
+Without Codex, explicitly install and pin the npm package in the project:
 
 ```bash
 npm install -D math-workspace
+npx math-workspace init
+npx math-workspace open
 ```
 
-```json
-{
-  "scripts": {
-    "workspace": "math-workspace"
-  }
-}
-```
+A release CLI can also be managed outside the project and called from the project root. Codex is not required. npm and marketplace releases may differ, so verify the version used by the workflow.
 
-Then run:
+In this guide, `math-workspace` is shorthand for the selected actual CLI: use the plugin entry in Codex, `npx math-workspace` for an npm project dependency, or an existing project `workspace` script whose provider has been verified.
 
-```bash
-npm run workspace -- init
-npm run workspace -- open
-```
-
-`init` creates or completes `.math-workspace/config.json` and generates inspectable indexes. `open` finds the project root from the current directory and starts the local Reader on `127.0.0.1` only. `verify` remains the project-wide gate for structure, references, and migration residue. Project source remains the source of truth.
+`init` creates or completes `.math-workspace/config.json` and generates indexes. `open` finds the project root upward from the working directory and serves the Reader only on `127.0.0.1`. CLI `prepare`, `finish`, and `verify` update derived artifacts; use the plugin’s MCP `verify` for read-only validation. Project source and human records remain authoritative.
 
 ### 3. Define the scan boundary
 
@@ -81,58 +97,29 @@ Draft collections are collapsible and do not produce formal hashes, dependency n
 
 After saving the configuration, run `prepare` and `verify` again. The Reader navigation and adoption status should match the intended scan scope before stable anchors are migrated. See [usage.md](usage.md#configuration) for the complete configuration reference.
 
-### 4. Let AI adapt the project instead of replacing it
+### 4. Adapt the project with AI
 
-The release and npm package include four reviewable artifacts:
+Read the target repository’s existing `AGENTS.md`, project skills, mathematical axioms, and release rules first, and identify the selected tool provider.
 
-- `skills/math-writing.md`: project-neutral mathematical writing, redesign, and audit rules.
-- `skills/editor.md`: workspace rules for stable anchors, references, definitions, and symbols.
-- `skills/lean-formalization.md`: manuscript–Lean alignment rules.
-- `skills/integrator.md`: guidance for composing generic rules with an existing project skill.
+- Codex plugin users read the installed plugin’s `math-writing`, `lean-formalization`, and `open-math-workspace` skills. The same plugin generates workspace editing rules in `.math-workspace/agent-guide.md`. Project skills route to those current rules and retain only project-specific axioms, terminology, style, paths, and stricter requirements.
+- Standalone CLI or other-host users may review `skills/editor.md`, `skills/math-writing.md`, `skills/lean-formalization.md`, and `skills/integrator.md` from the release. Lock catalog artifacts only when explicitly choosing VASMC distribution; this is not a default dependency for Codex plugin projects.
+- Keep configuration, definition and symbol source tables, document state, Lean contracts, build evidence, and human review records in the project. Tool updates do not delete records or recapture unreviewed objects as reviewed.
 
-An adaptation task for Codex or another AI should require it to:
-
-1. Read the target repository's `AGENTS.md`, project skills, mathematical axioms, and release rules first.
-2. Import only the generic artifacts needed for the current task rather than copying the whole package.
-3. Preserve project terminology, directory conventions, wrappers, and stricter checks without silently weakening mathematical rigor.
-4. Surface genuine conflicts for user judgment instead of allowing a merge script to choose automatically.
-5. Treat dependency graphs and Lean as evidence during conceptual rewrites, not as a mandate to propagate obsolete structure or synchronize unstable prose.
-
-Prefer one project-specific skill, such as `co-edit`, that routes to generic rules over several copied prompts that drift independently. VASMC projects can lock artifact hashes from `vasm-catalog/vasmc-catalog.yaml`; other projects can review and incorporate the files manually.
-
-The following task can be given directly to an AI. It describes adaptation constraints but does not replace the target repository's own rules:
+An adaptation request can say:
 
 ```text
-Adapt Math Workspace to the current mathematical repository. Read and obey the existing AGENTS.md, skills, build workflow, and mathematical conventions before making changes.
-1. Distinguish formal manuscript files from drafts, private material, and generated directories, then propose the smallest scan boundary. Do not rewrite the manuscript in bulk or invent permanent hashes without confirmation.
-2. Install or update Math Workspace, run prepare and verify, and explain every remaining error or warning.
-3. Select only the math-writing, editor, and lean-formalization rules needed by this project. Use integrator to produce a project-specific skill, preserving project terminology and stricter constraints while reporting conflicts explicitly.
-4. If Lean already exists, confirm that it builds independently before configuring alignment. Never describe the presence of an anchor as complete formalization.
-5. Report changed files, validation results, semantic questions that still need user judgment, and the normal daily commands.
+Adapt Math Workspace to this mathematical repository. Read its existing AGENTS.md, skills, build workflow, and mathematical conventions, then identify the tool provider:
+1. In a Codex plugin task, reuse the installed and enabled plugin’s CLI/Reader/generic skills. Do not copy runtime or generic rules, or add an old-bundle sync workflow. Independent environments use their explicitly installed Math Workspace CLI/npm.
+2. Identify formal manuscripts, drafts, private material, and generated directories. Set the smallest scan boundary without bulk rewriting prose or inventing hashes for onboarding.
+3. Initialize configuration, run required prepare/verify checks, and explain issues. Prefer MCP verify for read-only checks.
+4. Preserve project axioms, terminology, stricter requirements, configuration, and review records. Reference current generic rules and report real conflicts.
+5. If Lean is present, check the project and this task’s alignment goal. Report anchors, build results, and human review separately.
+6. Report the actual provider/version, changed scope, validation evidence, and daily entry.
 ```
 
-### 5. Install the Codex plugin
+### 5. Codex queries and project operations
 
-Install the public plugin from the marketplace:
-
-```bash
-codex plugin marketplace add glenzli/marketplace --ref main
-codex plugin add math-workspace@glenzli-marketplace
-```
-
-The plugin carries the built CLI and Reader, so it does not depend on a global `math-workspace` command. Start a new Codex task after installation or update.
-
-For development from the current checkout, build first and then install the repository as a local marketplace:
-
-```bash
-cd /absolute/path/to/math-workspace
-npm install
-npm run build
-codex plugin marketplace add /absolute/path/to/math-workspace
-codex plugin add math-workspace@personal
-```
-
-Its query interfaces are read-only:
+The plugin’s query interfaces are read-only:
 
 - `open`, `open_reader`, `open_workspace`
 - `lookup_formal_object`, `lookup_knowledge`
@@ -140,16 +127,16 @@ Its query interfaces are read-only:
 - `read_lean_review_context`
 - `read_symbol_audit`, `verify`
 
-The interfaces live in the `math-workspace` MCP namespace, so the tool names do not repeat the brand prefix. `read_symbol_audit` reads only a cached report that the user has already run; it never calls a model silently.
+Use narrow MCP tools for queries and the same plugin’s actual CLI for page creation, ID finalization, export, and builds. Independent users call the equivalent commands through their selected CLI. Both paths use the same project files and configuration format.
 
-`submit_lean_review_candidates` saves only AI candidates from an explicitly requested Lean comparison, for individual review in the Reader. Candidates must match the object, source evidence and review revisions used to prepare them. The tool cannot modify prose, Lean source or human verdicts. Adding a candidate to a Reader draft still requires human checking and an explicit save.
+`submit_lean_review_candidates` saves only explicitly requested AI candidate metadata; it cannot change prose, Lean source, or human decisions. Reader “Add to draft” still requires human review and an explicit save. Symbol-audit queries read existing user-started cache results and never silently start a model.
 
 ### 6. Optional Codex file navigation
 
 To route `Markdown file:line` links from Codex replies directly to the Reader, explicitly install the Desktop file handler:
 
 ```bash
-npm run workspace -- codex-handler install
+math-workspace codex-handler install
 ```
 
 Restart Codex Desktop, then choose Math Workspace from a file link's Open in menu. Saving it as the preferred handler for a project also routes ordinary clicks through this integration. An open Reader navigates in place; otherwise the handler starts or opens the local service. The command manages only its own marked block in `~/.codex/config.toml`. Use `codex-handler status` to inspect it and `codex-handler remove` to remove it.
@@ -159,10 +146,10 @@ Restart Codex Desktop, then choose Math Workspace from a file link's Open in men
 Configure `lean.projects` in `.math-workspace/config.json` only after manuscript objects are reasonably stable and the Lean project builds independently. The minimal sequence is:
 
 ```bash
-npm run workspace -- lean scan
-npm run workspace -- lean verify
-npm run workspace -- lean coverage
-npm run workspace -- lean build
+math-workspace lean scan
+math-workspace lean verify
+math-workspace lean coverage
+math-workspace lean build
 ```
 
 An anchor records the presence of a corresponding declaration. Coverage, contract review, build evidence, and dependency comparison remain separate signals and do not jointly prove complete formalization. During conceptual rewrites, an older Lean implementation can remain as historical evidence without immediately capturing a new baseline.
@@ -171,13 +158,13 @@ An anchor records the presence of a corresponding declaration. Coverage, contrac
 
 ```bash
 # Finalize temporary anchors in one chapter and validate it
-npm run workspace -- finish path/to/chapter.md
+math-workspace finish path/to/chapter.md
 
-# Inspect the whole project without writing source
-npm run workspace -- verify
+# Validate the whole project and refresh derived artifacts
+math-workspace verify
 
 # Start the local Reader
-npm run workspace -- open
+math-workspace open
 ```
 
 A useful adaptation should satisfy at least these conditions:
@@ -188,28 +175,36 @@ A useful adaptation should satisfy at least these conditions:
 - The project-specific skill preserves project semantics instead of turning generic rules into performative process.
 - A new Codex task can see the Math Workspace plugin, discuss quoted Reader selections, or run a narrow query.
 
-### 9. Update
+### 9. Update the selected provider
 
-Update the project dependency normally, then rebuild indexes and run read-only validation:
+Codex plugin users refresh their marketplace and reinstall the plugin:
+
+```bash
+codex plugin marketplace upgrade glenzli-marketplace
+codex plugin add math-workspace@glenzli-marketplace
+```
+
+Start a new task to load the current plugin, skills, and MCP definitions; existing tasks do not hot-reload them. Continue using the plugin CLI without updating a project-owned tool bundle. Preserve configuration and review records and inspect project-specific rules as needed.
+
+Independent npm users update their dependency and validate through the same CLI:
 
 ```bash
 npm update math-workspace
-npm run workspace -- init
-npm run workspace -- verify
+npx math-workspace verify
 ```
 
-For a plugin used from source, pull the new version, build it, update the cachebuster, and reinstall the plugin. Existing Codex tasks do not hot-load a new manifest, skill, or MCP definition, so verify it in a new task. After generic skills change, review the composition again instead of overwriting the project-specific skill.
+For source-based plugin development, build first and update the corresponding installation. Run `init` only when configuration needs completion. Do not use configuration completion or recapture to suppress review drift.
 
 ### 10. Troubleshooting
 
-- Reader enhancements are missing: confirm that `.math-workspace/config.json` exists at the project root, run `init` again, or use `doctor` to inspect project discovery.
-- Codex cannot find the MCP server: confirm that the installed plugin contains `out/cli` and `out/reader`, then start a new task after installing or updating it.
-- The plugin icon, skills, or tools did not refresh: update the plugin cachebuster and run `codex plugin add math-workspace@personal` again.
-- Indexes disagree with source: run `prepare` or `verify`; never edit generated `workspace-index.json` manually.
-- Symbol audit has no result: it never runs in the background; explicitly choose a scope, model, and effort in the Reader and start it.
-- Lean status is stale: after manuscript or Lean source changes, rerun the relevant `lean verify`, `lean build`, or dependency comparison instead of inferring current state from old evidence.
+- No enhanced Reader: check `.math-workspace/config.json` and use the actual CLI’s `doctor` to inspect project discovery. Run `init` if the project is unconfigured.
+- Codex cannot find MCP: verify that the installed release plugin contains `out/cli` and `out/reader`, then start a new task.
+- Stale plugin icon, skills, or tools: check the enabled plugin, marketplace, and version; update that installation and start a new task. Do not switch to an old project bundle.
+- Index/source mismatch: run `prepare` or `verify`; do not hand-edit `workspace-index.json`.
+- No symbol audit result: start the desired scope, model, and effort explicitly in the Reader; audits do not run in the background.
+- Stale Lean state: rerun relevant Lean verification, builds, or dependency checks after input changes. Old build evidence does not prove the current state.
 
-See [usage.md](usage.md) for commands and configuration, and [release.md](release.md) for packaging and local plugin development.
+See [usage.md](usage.md) for commands and configuration, and [release.md](release.md) for packaging and plugin development.
 
 ---
 
@@ -217,39 +212,55 @@ See [usage.md](usage.md) for commands and configuration, and [release.md](releas
 
 ## 🇨🇳 中文
 
-Math Workspace 可以分层接入。CLI 与 Reader 是基础；Codex plugin、项目特化 skill、符号审计和 Lean 对齐都可以在真实需要出现后再启用。不要为了“完整”一次性复制所有流程。
+按实际安装方式选择工具来源：通过 Codex 安装时，复用插件自带的 CLI、Reader 和通用 skills；不使用 Codex 时，走 Math Workspace 的独立 CLI/npm。项目配置、原稿、审阅记录和项目特化规则始终留在写作项目中。
 
 ## 1. 前置条件与选择
 
-- 基础使用需要 Node.js、npm 和一个以 Markdown 为主要正文源的本地项目。
-- Codex plugin 只在需要从原生 Codex 任务查询标记、命题、项目知识、依赖、Lean 或缓存审计时安装。
+| 使用环境 | 工具来源 | 项目侧接入 |
+| --- | --- | --- |
+| Codex 插件任务 | 已安装并启用的 Math Workspace 插件，包含 CLI、Reader 和通用 skills | 保留项目配置与特化规则，不再复制工具包或通用规则。 |
+| 独立终端、自动化、CI 或其他宿主 | Math Workspace 独立 CLI/npm 或独立管理的 release CLI | 使用明确安装并管理的同一个 CLI，不依赖 Codex。 |
+
+- 独立 CLI 需要 Node.js；npm 安装还需要 npm。Codex 插件的启动器会使用宿主已有的可用 Node 运行时。
 - Lean 只在项目已经有可构建的 Lean 4/Lake 工程时配置。
 - Pandoc 与 LaTeX 只在需要 PDF 导出时安装，不是 Reader 的依赖。
 
-## 2. 安装 CLI 并准备项目
+## 2. 按来源安装并准备项目
 
-npm 版本发布后，在目标项目中安装并保留稳定脚本：
+### Codex 插件路径
+
+从公开 marketplace 安装：
+
+```bash
+codex plugin marketplace add glenzli/marketplace --ref main
+codex plugin add math-workspace@glenzli-marketplace
+```
+
+安装或更新后新建 Codex 任务，让它初始化并打开当前写作项目。项目不需要再安装 `math-workspace` npm 依赖、内置 `tools/math-workspace/`、维护工具包同步脚本或复制插件通用 skills。
+
+初始化及其他 CLI 操作使用当前插件的实际入口，例如：
+
+```bash
+/absolute/path/to/installed-plugin/scripts/launch_math_workspace_mcp init /path/to/project
+```
+
+这里的路径必须来自实际安装，不把机器路径或带版本号的缓存路径硬编码进项目。Reader 提供确切的 Node、CLI 路径和工作目录时直接复用；项目确需保留脚本时，只保留定位当前启用插件的薄入口。插件缺失、禁用或有多个候选时明确核对来源，不自动回退到仓库旧包。
+
+### 独立 CLI 路径
+
+不通过 Codex 使用时，可以在项目中明确安装并锁定 npm 包：
 
 ```bash
 npm install -D math-workspace
+npx math-workspace init
+npx math-workspace open
 ```
 
-```json
-{
-  "scripts": {
-    "workspace": "math-workspace"
-  }
-}
-```
+独立 release CLI 也可以放在项目之外统一管理，从项目根调用其实际入口。无需安装 Codex；npm 与 marketplace 可能提供不同发布版本，应核对本流程实际使用的版本。
 
-然后执行：
+下文的 `math-workspace` 是已选 CLI 的简写：Codex 中使用插件实际入口；npm 项目依赖使用 `npx math-workspace`；已有且已核对来源的 `workspace` 脚本也可以继续使用。
 
-```bash
-npm run workspace -- init
-npm run workspace -- open
-```
-
-`init` 创建或补全 `.math-workspace/config.json` 并生成可审阅索引；`open` 从当前目录向上查找项目根，再只在 `127.0.0.1` 启动本地 Reader。`verify` 保留为结构、引用和迁移遗留的整项目门禁。项目源码仍是事实来源。
+`init` 创建或补全 `.math-workspace/config.json` 并生成索引；`open` 从当前目录向上查找项目根，只在 `127.0.0.1` 启动本地 Reader。CLI 的 `prepare`、`finish`、`verify` 会更新派生产物；需要只读检查时，使用插件的 MCP `verify`。项目源码与人工记录仍是事实来源。
 
 ## 3. 明确扫描边界
 
@@ -290,56 +301,27 @@ npm run workspace -- open
 
 保存配置后重新运行 `prepare` 和 `verify`。Reader 左侧目录与接管状态应和预期扫描范围一致，然后再迁移稳定锚点。完整配置见 [usage.md](usage.md#配置)。
 
-## 4. 让 AI 适配项目，而不是覆盖项目
+## 4. 让 AI 适配项目
 
-release 和 npm 包中包含四份可审阅 artifact：
+先读取目标仓库已有的 `AGENTS.md`、项目 skill、数学公理和发布规则，并确认所选工具来源。
 
-- `skills/math-writing.md`：通用数学写作、重构和审计底线。
-- `skills/editor.md`：稳定锚点、引用、定义和符号等工作区规则。
-- `skills/lean-formalization.md`：正文—Lean 对齐规则。
-- `skills/integrator.md`：把通用规则组合进已有项目 skill 的指南。
+- Codex 插件用户读取当前插件的 `math-writing`、`lean-formalization` 和 `open-math-workspace` skills；工作区编辑细则由同一插件生成的 `.math-workspace/agent-guide.md` 提供。项目特化 skill 路由到这些当前规则，只保存自己的公理、术语、文风、路径和更严格约束。
+- 独立 CLI/其他 AI 宿主可以审阅发行物中的 `skills/editor.md`、`skills/math-writing.md`、`skills/lean-formalization.md` 和 `skills/integrator.md`。明确采用 VASMC catalog 时再锁定相应 artifact；这不是 Codex 插件项目的默认依赖。
+- 配置、定义和符号源表、文档状态、Lean 契约、构建证据与人工审阅记录留在项目中。工具升级不删除记录，也不把未审阅对象重新 capture 为已审阅。
 
-给 Codex 或其他 AI 的适配任务应明确要求：
-
-1. 先读取目标仓库现有的 `AGENTS.md`、项目 skill、数学公理和发布规则。
-2. 只引入当前任务真正需要的通用 artifact，不整包复制。
-3. 项目规则可以增加术语、目录、wrapper 和更严格的验证，但不能静默削弱数学严谨性底线。
-4. 遇到真实冲突时保留冲突并交给用户判断，不由融合脚本自动择一。
-5. 概念性重写时，依赖图和 Lean 只作为证据；不要默认传播旧结构或强制同步尚未稳定的正文。
-
-建议让 AI 产出一个项目特化 skill（例如 `co-edit`），在正文中链接或路由到通用规则，而不是复制多个互相漂移的长提示。使用 VASMC 的项目可以从 `vasm-catalog/vasmc-catalog.yaml` 固定 artifact hash；不用 VASMC 的项目也可以人工审阅后纳入自己的 skill。
-
-可以把下面这段直接交给 AI；它描述的是接入约束，不替代目标仓库自己的规则：
+可以把下面的适配任务交给 AI：
 
 ```text
-请把 Math Workspace 适配到当前数学仓库。先读取并遵守仓库已有的 AGENTS.md、skills、构建方式和数学约定，再完成以下工作：
-1. 识别正式正文、草稿、私人材料和生成目录，提出最小扫描边界；未经确认不要批量改写正文或补造正式 hash。
-2. 安装或更新 Math Workspace，运行 prepare 与 verify，并解释每项遗留错误或警告。
-3. 只选取本项目需要的 math-writing、editor、lean-formalization 规则，用 integrator 生成项目特化 skill；保留项目术语和更严格约束，显式报告冲突。
-4. 若项目已有 Lean，先确认工程可独立构建，再配置对齐；不要把存在锚点表述为完整形式化。
-5. 最后报告改动文件、验证结果、仍需用户判断的语义问题，以及日常使用命令。
+请把 Math Workspace 适配到当前数学仓库。先读取仓库已有的 AGENTS.md、skills、构建方式和数学约定，再确认本项目的工具来源：
+1. 在 Codex 插件任务中复用已安装并启用的插件及其 CLI/Reader/通用 skills，不复制运行时或通用规则，不另建旧包同步流程；独立使用时沿用明确安装的 Math Workspace CLI/npm。
+2. 识别正式正文、草稿、私人材料和生成目录，设置最小扫描边界；不要为接入批量改写正文或补造正式 hash。
+3. 初始化配置，运行必要的 prepare 与 verify，解释错误和警告；只读检查优先用插件 MCP verify。
+4. 项目特化规则保留公理、术语和更严格约束，引用当前通用规则并报告真实冲突；保留现有项目配置和审阅记录。
+5. 有 Lean 时先核对工程与本轮对齐目标；锚点、成功构建和人工审阅分别报告。
+6. 最后报告实际工具来源和版本、修改范围、校验结果与日常入口。
 ```
 
-## 5. 安装 Codex plugin
-
-公开版本从 marketplace 安装：
-
-```bash
-codex plugin marketplace add glenzli/marketplace --ref main
-codex plugin add math-workspace@glenzli-marketplace
-```
-
-plugin 自带构建后的 CLI 与 Reader，不依赖全局 `math-workspace` 命令。安装或更新后新建 Codex 任务以加载 plugin、skills 和 MCP。
-
-开发当前仓库时，先构建，再把仓库根目录作为本地 marketplace 安装：
-
-```bash
-cd /absolute/path/to/math-workspace
-npm install
-npm run build
-codex plugin marketplace add /absolute/path/to/math-workspace
-codex plugin add math-workspace@personal
-```
+## 5. Codex 查询与项目操作
 
 插件的查询接口保持只读：
 
@@ -349,16 +331,16 @@ codex plugin add math-workspace@personal
 - `read_lean_review_context`
 - `read_symbol_audit`、`verify`
 
-接口位于 `math-workspace` MCP 命名空间内，因此工具名不再重复品牌前缀。`read_symbol_audit` 只读取用户已经运行的缓存报告，不会静默调用模型。
+需要查询时使用窄范围 MCP 工具。需要建稿、固化标识、导出或构建时，调用同一插件的实际 CLI。独立 CLI 用户直接使用所选 CLI 的对应命令；两条路径使用同一套文件与配置格式。
 
-`submit_lean_review_candidates` 只把明确发起的 Lean 辅助审核结果保存为项目内的 AI 候选，供 Reader 逐条核对。候选必须匹配读取时的对象、源码证据与审阅版本；接口不能修改正文、Lean 源码或人工结论。Reader 中的“加入草稿”仍须人工核对并主动保存。
+`submit_lean_review_candidates` 只保存明确发起的 AI 候选元数据，不能修改正文、Lean 源码或人工结论。Reader 中的“加入草稿”仍须人工核对并主动保存。符号审计查询只读取用户已经运行的缓存，不会静默启动模型。
 
 ## 6. 可选 Codex 文件定位
 
 若希望 Codex 回复中的 `Markdown 文件:行号` 链接直接交给 Reader，可以显式安装 Desktop 文件处理器：
 
 ```bash
-npm run workspace -- codex-handler install
+math-workspace codex-handler install
 ```
 
 重启 Codex Desktop 后，从文件链接的“Open in / 打开方式”菜单选择 Math Workspace；按项目保存为首选处理器后，普通点击也会走这条链路。已打开的 Reader 会直接跳转，未启动时则启动本地服务。该命令只维护用户 `~/.codex/config.toml` 中自己的注释块；用 `codex-handler status` 检查，用 `codex-handler remove` 移除。
@@ -368,10 +350,10 @@ npm run workspace -- codex-handler install
 只有在正文对象已相对稳定并且 Lean 工程可以独立构建时，才配置 `.math-workspace/config.json` 的 `lean.projects`。最小顺序是：
 
 ```bash
-npm run workspace -- lean scan
-npm run workspace -- lean verify
-npm run workspace -- lean coverage
-npm run workspace -- lean build
+math-workspace lean scan
+math-workspace lean verify
+math-workspace lean coverage
+math-workspace lean build
 ```
 
 锚点只表示存在对应声明；覆盖、contract、构建和依赖比较分别提供不同证据，不共同推出“完整形式化”。概念性重写期间可以保留旧 Lean 作为历史实现，而不立即 capture 新基线。
@@ -380,13 +362,13 @@ npm run workspace -- lean build
 
 ```bash
 # 完成一章的临时锚点并校验
-npm run workspace -- finish path/to/chapter.md
+math-workspace finish path/to/chapter.md
 
-# 只读检查整个项目
-npm run workspace -- verify
+# 校验整个项目并刷新派生产物
+math-workspace verify
 
 # 启动本地 Reader
-npm run workspace -- open
+math-workspace open
 ```
 
 一次有效接入至少满足：
@@ -397,23 +379,31 @@ npm run workspace -- open
 - 项目特化 skill 保留项目语义，没有把通用规则当作强制流程表演。
 - Codex 能在新任务中看到 Math Workspace plugin，并能读取标记或执行窄范围查询。
 
-## 9. 更新
+## 9. 按所选来源更新
 
-项目内安装可以按包管理器正常更新，然后重跑只读验证：
+Codex 插件用户更新 marketplace 并重新安装插件：
+
+```bash
+codex plugin marketplace upgrade glenzli-marketplace
+codex plugin add math-workspace@glenzli-marketplace
+```
+
+之后新建任务以加载当前 plugin、skills 和 MCP；已打开任务不会热加载新定义。继续使用插件提供的实际 CLI，不用更新项目内的工具包。项目配置与审阅记录保留，项目特化规则按需核对。
+
+独立 npm 用户按包管理器更新自己的依赖，再用同一 CLI 校验：
 
 ```bash
 npm update math-workspace
-npm run workspace -- init
-npm run workspace -- verify
+npx math-workspace verify
 ```
 
-从源码使用 plugin 时，拉取新版本后先构建并更新 cachebuster，再重新安装 plugin；已经打开的 Codex 任务不会热加载新 manifest、skill 或 MCP 定义，需要新建任务验证。更新通用 skill 后，项目特化 skill 应重新做一次融合审阅，不应被整份覆盖。
+从源码开发插件时先构建，再更新对应安装。仅在确需补全配置时运行 `init`；不要把配置补全或重新 capture 当作消除审阅漂移的方法。
 
 ## 10. 故障排查
 
-- Reader 没有增强功能：确认项目根存在 `.math-workspace/config.json`，重新运行 `init`，或运行 `doctor` 查看项目发现结果。
+- Reader 没有增强功能：确认项目根存在 `.math-workspace/config.json`，先用实际工具入口的 `doctor` 检查项目发现；尚未初始化时再运行 `init`。
 - Codex 找不到 MCP：确认安装的是包含 `out/cli` 与 `out/reader` 的发布 plugin，并在安装或更新后新建任务。
-- plugin 图标、skill 或工具没有刷新：更新 plugin cachebuster 后重新执行 `codex plugin add math-workspace@personal`。
+- plugin 图标、skill 或工具没有刷新：核对实际启用的插件、marketplace 和版本，更新对应安装并新建任务；不要改用项目里遗留的工具包。
 - 索引与源码不一致：运行 `prepare` 或 `verify`；不要手工编辑生成的 `workspace-index.json`。
 - 符号审计没有结果：它不会后台运行，需在 Reader 中显式选择范围、模型和强度后启动。
 - Lean 状态过期：正文或 Lean 源码变化后重新运行相应的 `lean verify`、`lean build` 或依赖检查，不要用旧构建记录推断当前状态。

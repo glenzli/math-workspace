@@ -324,12 +324,12 @@ async function lint() {
 
 function printLeanUsage(): void {
     console.log(`Usage:
-  npm run workspace -- lean scan
-  npm run workspace -- lean coverage
-  npm run workspace -- lean verify
-  npm run workspace -- lean capture
-  npm run workspace -- lean build [--project <key>]
-  npm run workspace -- lean dependencies
+  math-workspace lean scan
+  math-workspace lean coverage
+  math-workspace lean verify
+  math-workspace lean capture
+  math-workspace lean build [--project <key>]
+  math-workspace lean dependencies
 
 The Lean index records stable docstring anchors. ` + '`capture`' + ` records the reviewed Markdown/declaration contract; ` + '`build`' + ` records the configured Lake build result. Neither result by itself claims complete formalization or proof coverage.`);
 }
@@ -439,15 +439,15 @@ function parseGraphArgs(args) {
 
 function printGraphUsage() {
     console.log(`Usage:
-  npm run workspace -- graph
-  npm run workspace -- graph summary [--where all|statement|proof|body]
-  npm run workspace -- graph focus <h-id> [--depth N] [--where all|statement|proof|body]
-  npm run workspace -- graph impact <h-id> [--where all|statement|proof|body]
-  npm run workspace -- graph upstream <h-id> [--where all|statement|proof|body]
-  npm run workspace -- graph bridges [--where all|statement|proof|body]
-  npm run workspace -- graph isolated [--where all|statement|proof|body]
-  npm run workspace -- graph cycles [--where all|statement|proof|body]
-  npm run workspace -- graph matrix chapter|volume|book [--where all|statement|proof|body]`);
+  math-workspace graph
+  math-workspace graph summary [--where all|statement|proof|body]
+  math-workspace graph focus <h-id> [--depth N] [--where all|statement|proof|body]
+  math-workspace graph impact <h-id> [--where all|statement|proof|body]
+  math-workspace graph upstream <h-id> [--where all|statement|proof|body]
+  math-workspace graph bridges [--where all|statement|proof|body]
+  math-workspace graph isolated [--where all|statement|proof|body]
+  math-workspace graph cycles [--where all|statement|proof|body]
+  math-workspace graph matrix chapter|volume|book [--where all|statement|proof|body]`);
 }
 
 async function graph(args = []) {
@@ -467,7 +467,7 @@ async function graph(args = []) {
         console.log(`OK graph: ${dependencyGraph.summary.theoremLikeNodes} theorem-like nodes, ${supplementalRemarks} ${remarkLabel}, ${dependencyGraph.summary.edges} explicit edges, ${dependencyGraph.summary.proofEdges} proof edges, ${dependencyGraph.summary.cycles} cycles`);
         console.log('Graph: .math-workspace/dependency-graph.json');
         console.log('Report: .math-workspace/dependency-report.md');
-        console.log('Run `npm run workspace -- graph summary` for a Markdown summary.');
+        console.log('Run `math-workspace graph summary` for a Markdown summary.');
         return;
     }
 
@@ -581,7 +581,7 @@ async function verify(args) {
 async function finalize(paths, commandName = 'finalize') {
     const options = parseMigrationArgs(paths);
     if (options.paths.length === 0) {
-        console.error(`Usage: npm run workspace -- ${commandName} <file-or-dir> [...] [--all]`);
+        console.error(`Usage: math-workspace ${commandName} <file-or-dir> [...] [--all]`);
         process.exitCode = 1;
         return;
     }
@@ -1490,7 +1490,7 @@ function parseExportArgs(args, defaultOutput, configInput = DEFAULT_CONFIG) {
 async function exportMarkdown(args = []) {
     const options = parseExportArgs(args, '.math-workspace/export.md');
     if (options.paths.length === 0) {
-        console.error('Usage: npm run workspace -- export-md <file-or-dir> [...] --out <compiled.md>');
+        console.error('Usage: math-workspace export-md <file-or-dir> [...] --out <compiled.md>');
         process.exitCode = 1;
         return '';
     }
@@ -1532,7 +1532,7 @@ async function compilePublicationFragment(args: string[]): Promise<void> {
 async function exportMarkdownSplit(args = []) {
     const options = parseExportArgs(args, '.math-workspace/export-md-split');
     if (options.paths.length === 0) {
-        console.error('Usage: npm run workspace -- export-md-split <file-or-dir> [...] --out <dir>');
+        console.error('Usage: math-workspace export-md-split <file-or-dir> [...] --out <dir>');
         process.exitCode = 1;
         return '';
     }
@@ -1675,7 +1675,7 @@ async function exportPdf(args = []) {
     const config = await readConfigIfExists();
     const options = parseExportArgs(args, '.math-workspace/export.pdf', config);
     if (options.paths.length === 0) {
-        console.error('Usage: npm run workspace -- export-pdf <file-or-dir> [...] --out <book.pdf> [--md-out compiled.md] [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title-page] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title Title] [--front-matter-toc] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--show-version-on-cover] [--cover-style simple] [--title-size 32pt] [-V key:value] [--variable key:value] [--keep-md]');
+        console.error('Usage: math-workspace export-pdf <file-or-dir> [...] --out <book.pdf> [--md-out compiled.md] [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title-page] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title Title] [--front-matter-toc] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--show-version-on-cover] [--cover-style simple] [--title-size 32pt] [-V key:value] [--variable key:value] [--keep-md]');
         process.exitCode = 1;
         return;
     }
@@ -1699,7 +1699,7 @@ async function renderPdf(args = []) {
     const config = await readConfigIfExists();
     const options = parseExportArgs(args, '.math-workspace/render.pdf', config);
     if (options.paths.length !== 1) {
-        console.error('Usage: npm run workspace -- render-pdf <compiled.md> --out <book.pdf> [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title-page] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title Title] [--front-matter-toc] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--show-version-on-cover] [--cover-style simple] [--title-size 32pt] [-V key:value] [--variable key:value]');
+        console.error('Usage: math-workspace render-pdf <compiled.md> --out <book.pdf> [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title-page] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title Title] [--front-matter-toc] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--show-version-on-cover] [--cover-style simple] [--title-size 32pt] [-V key:value] [--variable key:value]');
         process.exitCode = 1;
         return;
     }
@@ -1733,8 +1733,8 @@ async function migrateIds(args) {
     const apply = options.apply;
     const dryRun = options.dryRun;
     if (!options.all && options.paths.length === 0) {
-        console.error('Usage: npm run workspace -- migrate-ids <file-or-dir> [...] [--apply] [--target-only]');
-        console.error('       npm run workspace -- migrate-ids --all [--apply]');
+        console.error('Usage: math-workspace migrate-ids <file-or-dir> [...] [--apply] [--target-only]');
+        console.error('       math-workspace migrate-ids --all [--apply]');
         process.exitCode = 1;
         return;
     }
@@ -2403,7 +2403,7 @@ function renderAuditReport(result) {
     const lines = [
         '# math-workspace Audit',
         '',
-        'Generated by `npm run workspace -- audit`. This report is advisory and does not affect `verify`.',
+        'Generated by `math-workspace audit`. This report is advisory and does not affect `verify`.',
         '',
         `Scope: ${result.scope}`,
         `Files scanned: ${result.files}`,
@@ -2562,8 +2562,8 @@ async function audit(args) {
 async function migrateTextRefs(args) {
     const options = parseMigrationArgs(args);
     if (!options.all && options.paths.length === 0) {
-        console.error('Usage: npm run workspace -- migrate-text-refs <file-or-dir> [...] [--apply] [--target-only]');
-        console.error('       npm run workspace -- migrate-text-refs --all [--apply]');
+        console.error('Usage: math-workspace migrate-text-refs <file-or-dir> [...] [--apply] [--target-only]');
+        console.error('       math-workspace migrate-text-refs --all [--apply]');
         process.exitCode = 1;
         return;
     }
@@ -2643,7 +2643,7 @@ async function printReport() {
     try {
         process.stdout.write(await fs.readFile(path.join(CACHE_DIR, 'report.md'), 'utf8'));
     } catch (_err) {
-        console.log('No report found. Run: npm run workspace -- prepare');
+        console.log('No report found. Run: math-workspace prepare');
     }
 }
 
@@ -2728,25 +2728,25 @@ function printHelp({ all = false } = {}) {
   math-workspace doctor [project-dir]
 
 Advanced commands:
-  npm run workspace -- prepare
-  npm run workspace -- migrate-text-refs <file-or-dir> [...] [--apply] [--target-only] [--all]
-  npm run workspace -- migrate-ids <file-or-dir> [...] [--apply] [--target-only] [--all]
-  npm run workspace -- audit [file-or-dir] [...]
-  npm run workspace -- graph
-  npm run workspace -- graph impact <h-id>
-  npm run workspace -- graph focus <h-id> [--depth N]
-  npm run workspace -- graph matrix chapter|volume|book
-  npm run workspace -- lean scan|coverage|verify|capture|dependencies
-  npm run workspace -- lean build [--project <key>]
-  npm run workspace -- serve [project-dir] [--port 0]  # no project-dir opens the local launcher
-  npm run workspace -- mcp [--root project-dir] [--port 0]
+  math-workspace prepare
+  math-workspace migrate-text-refs <file-or-dir> [...] [--apply] [--target-only] [--all]
+  math-workspace migrate-ids <file-or-dir> [...] [--apply] [--target-only] [--all]
+  math-workspace audit [file-or-dir] [...]
+  math-workspace graph
+  math-workspace graph impact <h-id>
+  math-workspace graph focus <h-id> [--depth N]
+  math-workspace graph matrix chapter|volume|book
+  math-workspace lean scan|coverage|verify|capture|dependencies
+  math-workspace lean build [--project <key>]
+  math-workspace serve [project-dir] [--port 0]  # no project-dir opens the local launcher
+  math-workspace mcp [--root project-dir] [--port 0]
   math-workspace archive help
   math-workspace codex-handler install|remove|status
-  npm run workspace -- export-md <file-or-dir> [...] --out <compiled.md>
-  npm run workspace -- export-md-split <file-or-dir> [...] --out <dir>
-  npm run workspace -- export-pdf <file-or-dir> [...] --out <book.pdf> [--no-toc] [--toc-depth N] [--margin 2.5cm]
-  npm run workspace -- render-pdf <compiled.md> --out <book.pdf> [--title "Title"] [--toc-title 目录]
-  npm run workspace -- paths
+  math-workspace export-md <file-or-dir> [...] --out <compiled.md>
+  math-workspace export-md-split <file-or-dir> [...] --out <dir>
+  math-workspace export-pdf <file-or-dir> [...] --out <book.pdf> [--no-toc] [--toc-depth N] [--margin 2.5cm]
+  math-workspace render-pdf <compiled.md> --out <book.pdf> [--title "Title"] [--toc-title 目录]
+  math-workspace paths
 
 Migrations are dry-run by default. Pass --apply to edit files.
 
@@ -2758,7 +2758,7 @@ Agent workflow:
   5. If you use finalize directly, run verify before treating generated or migrated content as complete.
 
 Advanced commands:
-  npm run workspace -- help --all`);
+  math-workspace help --all`);
         return;
     }
 
@@ -2767,38 +2767,38 @@ Advanced commands:
   math-workspace open [project-dir] [--port 0]
   math-workspace doctor [project-dir]
   math-workspace create-page --kind chapter|front-matter|back-matter|continued --container <dir|.> --title "Title" [--slug stem] [--dry-run] [--json] [--expect-state token]
-  npm run workspace -- prepare
-  npm run workspace -- finish <file-or-dir> [...] [--all]
-  npm run workspace -- migrate-text-refs <file-or-dir> [...] [--apply] [--target-only] [--all]
-  npm run workspace -- migrate-ids <file-or-dir> [...] [--apply] [--target-only] [--all]
-  npm run workspace -- audit [file-or-dir] [...]
-  npm run workspace -- graph
-  npm run workspace -- graph summary [--where all|statement|proof|body]
-  npm run workspace -- graph focus <h-id> [--depth N] [--where all|statement|proof|body]
-  npm run workspace -- graph impact <h-id> [--where all|statement|proof|body]
-  npm run workspace -- graph upstream <h-id> [--where all|statement|proof|body]
-  npm run workspace -- graph bridges|isolated|cycles [--where all|statement|proof|body]
-  npm run workspace -- graph matrix chapter|volume|book [--where all|statement|proof|body]
-  npm run workspace -- lean scan|coverage|verify|capture|dependencies
-  npm run workspace -- lean build [--project <key>]
-  npm run workspace -- serve [project-dir] [--port 0]  # no project-dir opens the local launcher
-  npm run workspace -- mcp [--root project-dir] [--port 0]
+  math-workspace prepare
+  math-workspace finish <file-or-dir> [...] [--all]
+  math-workspace migrate-text-refs <file-or-dir> [...] [--apply] [--target-only] [--all]
+  math-workspace migrate-ids <file-or-dir> [...] [--apply] [--target-only] [--all]
+  math-workspace audit [file-or-dir] [...]
+  math-workspace graph
+  math-workspace graph summary [--where all|statement|proof|body]
+  math-workspace graph focus <h-id> [--depth N] [--where all|statement|proof|body]
+  math-workspace graph impact <h-id> [--where all|statement|proof|body]
+  math-workspace graph upstream <h-id> [--where all|statement|proof|body]
+  math-workspace graph bridges|isolated|cycles [--where all|statement|proof|body]
+  math-workspace graph matrix chapter|volume|book [--where all|statement|proof|body]
+  math-workspace lean scan|coverage|verify|capture|dependencies
+  math-workspace lean build [--project <key>]
+  math-workspace serve [project-dir] [--port 0]  # no project-dir opens the local launcher
+  math-workspace mcp [--root project-dir] [--port 0]
   math-workspace archive help
   math-workspace codex-handler install|remove|status
-  npm run workspace -- export-md <file-or-dir> [...] --out <compiled.md>
-  npm run workspace -- export-md-split <file-or-dir> [...] --out <dir>
-  npm run workspace -- export-pdf <file-or-dir> [...] --out <book.pdf> [--md-out compiled.md] [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title "Title"] [--subtitle "Subtitle"] [--author Name] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--date "Revised 2026-06-26"] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title "AI Statement"] [--front-matter-toc] [--show-version-on-cover] [--documentclass ctexbook] [--title-page] [--no-title-page] [--cover-style simple] [--title-size 32pt] [--subtitle-size 18pt] [--toc-page-break] [--no-toc-page-break] [-V key:value] [--variable key:value] [--keep-md]
-  npm run workspace -- render-pdf <compiled.md> --out <book.pdf> [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title "Title"] [--subtitle "Subtitle"] [--author Name] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--date "Revised 2026-06-26"] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title "AI Statement"] [--front-matter-toc] [--show-version-on-cover] [--documentclass ctexbook] [--title-page] [--no-title-page] [--cover-style simple] [--title-size 32pt] [--subtitle-size 18pt] [--toc-page-break] [--no-toc-page-break] [-V key:value] [--variable key:value]
-  npm run workspace -- paths
-  npm run workspace -- help-ai
-  npm run workspace -- verify [--strict-chapters]
+  math-workspace export-md <file-or-dir> [...] --out <compiled.md>
+  math-workspace export-md-split <file-or-dir> [...] --out <dir>
+  math-workspace export-pdf <file-or-dir> [...] --out <book.pdf> [--md-out compiled.md] [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title "Title"] [--subtitle "Subtitle"] [--author Name] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--date "Revised 2026-06-26"] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title "AI Statement"] [--front-matter-toc] [--show-version-on-cover] [--documentclass ctexbook] [--title-page] [--no-title-page] [--cover-style simple] [--title-size 32pt] [--subtitle-size 18pt] [--toc-page-break] [--no-toc-page-break] [-V key:value] [--variable key:value] [--keep-md]
+  math-workspace render-pdf <compiled.md> --out <book.pdf> [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title "Title"] [--subtitle "Subtitle"] [--author Name] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--date "Revised 2026-06-26"] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title "AI Statement"] [--front-matter-toc] [--show-version-on-cover] [--documentclass ctexbook] [--title-page] [--no-title-page] [--cover-style simple] [--title-size 32pt] [--subtitle-size 18pt] [--toc-page-break] [--no-toc-page-break] [-V key:value] [--variable key:value]
+  math-workspace paths
+  math-workspace help-ai
+  math-workspace verify [--strict-chapters]
 
 Advanced:
-  npm run workspace -- finalize <file-or-dir> [...] [--all]
-  npm run workspace -- lint
-  npm run workspace -- audit [file-or-dir] [...]
-  npm run workspace -- perf-dummy [chapters] [blocks-per-chapter] [--max-ms N] [--max-heap-mb N]
-  npm run workspace -- report
+  math-workspace finalize <file-or-dir> [...] [--all]
+  math-workspace lint
+  math-workspace audit [file-or-dir] [...]
+  math-workspace perf-dummy [chapters] [blocks-per-chapter] [--max-ms N] [--max-heap-mb N]
+  math-workspace report
 
 Migrations are dry-run by default. Pass --apply to edit files.
 

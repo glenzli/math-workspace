@@ -232,11 +232,15 @@ Do not index generic variables, standard notation, or complete derivation formul
 
 ### Normal Workflow
 
+Codex installations use the enabled plugin’s CLI, Reader, and generic skills; independent environments use an explicitly installed Math Workspace CLI/npm. See [install.md](install.md) for setup. Keep manuscripts, configuration, and review records in the project; Codex integration does not require another copied tool bundle.
+
+Here `math-workspace` is shorthand for the selected actual CLI: reuse the Reader’s Node/CLI paths and working directory in plugin tasks, use `npx math-workspace` for an npm project dependency, or retain an existing wrapper whose provider is verified.
+
 Initialize a project, generate context, and open the Reader:
 
 ```bash
-npm run workspace -- init
-npm run workspace -- open
+math-workspace init
+math-workspace open
 ```
 
 `open` finds `.math-workspace/config.json` by walking up from the current directory. Use `prepare` when only the index needs to be refreshed, and `doctor` to inspect installation, project discovery, and optional tools.
@@ -244,13 +248,13 @@ npm run workspace -- open
 Edit a file or directory, then finalize temporary IDs and refresh reports:
 
 ```bash
-npm run workspace -- finish path/to/chapter-or-dir
+math-workspace finish path/to/chapter-or-dir
 ```
 
 `finish` already validates. Run the strict gate separately only after direct `finalize`, a migration, or when an independent release gate is required:
 
 ```bash
-npm run workspace -- verify
+math-workspace verify
 ```
 
 ### Creating Chapters and Front/Back Matter
@@ -266,7 +270,7 @@ Chapters, prefaces, afterwords, and continued pages each have one maintained sou
 
 Front/back matter roles come from placement and do not prescribe titles or genres. An “AI Retirement Note” usually belongs in back matter and can keep that title. Existing `intro.md`, `introduction.md`, and `summary.md` pages remain supported; adopting the new entry point does not require moving them.
 
-In the examples below, `math-workspace` represents the CLI entry from the current installation. An existing project `workspace` script can also use `npm run workspace --`. Use `paths` or `help-ai` to locate the rules and documentation shipped with the package. When the Reader supplies exact Node and CLI paths and a working directory, reuse them; projects do not need another global installation or script changes.
+In the examples below, `math-workspace` represents the CLI entry from the current installation. An existing project `workspace` script can also use `npm run workspace --`. Standalone CLI users can use `paths` or `help-ai` to locate shipped rules; Codex plugin tasks read current skills and the generated guide. When the Reader supplies exact Node and CLI paths and a working directory, reuse them; projects do not need another global installation or script changes.
 
 Run from the project root that owns `.math-workspace/config.json`. Give `--container` the actual project-relative book/volume directory, or `.` for the project root, rather than its display title. Start with a read-only plan:
 
@@ -291,13 +295,13 @@ The Reader's “＋” offers the same creation workflow: enter a title, choose 
 The normal Reader entry is:
 
 ```bash
-npm run workspace -- open /path/to/project
+math-workspace open /path/to/project
 ```
 
 You can run `open` from any subdirectory of an initialized project. If no path is supplied and the current directory is outside one, it opens the local project launcher. The lower-level `serve` command remains available for scripts that need explicit launch behavior:
 
 ```bash
-npm run workspace -- serve
+math-workspace serve
 ```
 
 The launcher can use the native folder chooser or reopen a recent project. A selected directory must already contain `.math-workspace/config.json`. Recent-project records stay in local user state and never write project sources or `.math-workspace/`; the browser submits only a recent-project index, while the local Math Workspace service retains the directory path.
@@ -369,7 +373,7 @@ State is stored in `.math-workspace/documents.json` by default and keyed by proj
 
 ### Codex MCP Entry
 
-The Math Workspace remains an independent local client and can also be opened through Codex MCP. MCP starts or reuses the local workspace and provides narrow selection, formal-object, strict-dependency, Lean-alignment, and read-only validation queries. Desktop hosts with MCP plugin extension support can open Math Workspace from the global sidebar or open a Reader panel beside a conversation. Both entrypoints reuse the existing Reader without a second renderer or Codex discussion interface.
+Codex installations use the plugin’s bundled runtime and generic skills; independent environments use the standalone local CLI. MCP starts or reuses the local workspace and provides narrow selection, formal-object, strict-dependency, Lean-alignment, and read-only validation queries. Desktop hosts with MCP plugin extension support can open Math Workspace from the global sidebar or open a Reader panel beside a conversation. Both entrypoints reuse the existing Reader without a second renderer or Codex discussion interface.
 
 ```bash
 math-workspace mcp
@@ -512,7 +516,9 @@ This feature handles source navigation only. It does not change the links Codex 
 
 ### AI Workflow Integration
 
-AI rules no longer live in a separate public documentation page. Target projects should read the AI artifacts shipped with the package:
+Codex plugin tasks read the currently enabled plugin’s generic skills and generate the workspace `agent-guide.md` through the same plugin. Project-specific skills retain project constraints without embedding generic rules or installing another tool bundle.
+
+Standalone CLI and other-host users may review the AI artifacts shipped with the package:
 
 ```text
 skills/editor.md      # writing and migration rules
@@ -530,7 +536,7 @@ node_modules/math-workspace/skills/integrator.md
 node_modules/math-workspace/skills/lean-formalization.md
 ```
 
-If the target project uses VASMC, lock the workspace, mathematical-writing, and integration artifacts through the catalog; Lean projects should also lock the Lean artifact:
+Explicit standalone artifact/VASMC consumers can lock the required catalog exports; this is not a default dependency for Codex plugin projects:
 
 ```bash
 vasmc add --catalog node_modules/math-workspace/vasm-catalog/vasmc-catalog.yaml --export editor --alias math-workspace-editor
@@ -545,10 +551,10 @@ For release bundles, use this catalog path instead:
 dist/vasm-catalog/vasmc-catalog.yaml
 ```
 
-The CLI can print the key paths for the current installation:
+The standalone CLI can print shipped artifact paths; Codex plugin tasks use their current plugin skills and generated guide:
 
 ```bash
-npm run workspace -- paths
+math-workspace paths
 ```
 
 Do not auto-fetch remote skills, and do not append the integrator guide verbatim to a target prompt. Review the artifacts first, then merge the rules into the target project's existing `AGENTS.md`, writing skill, style guide, or release instructions.
@@ -558,25 +564,25 @@ Do not auto-fetch remote skills, and do not append the integrator guide verbatim
 Dry-run text reference migration:
 
 ```bash
-npm run workspace -- migrate-text-refs path/to/chapter-or-volume
+math-workspace migrate-text-refs path/to/chapter-or-volume
 ```
 
 Apply text reference migration:
 
 ```bash
-npm run workspace -- migrate-text-refs --apply path/to/chapter-or-volume
+math-workspace migrate-text-refs --apply path/to/chapter-or-volume
 ```
 
 Dry-run old ID migration:
 
 ```bash
-npm run workspace -- migrate-ids path/to/chapter-or-volume
+math-workspace migrate-ids path/to/chapter-or-volume
 ```
 
 Apply old ID migration:
 
 ```bash
-npm run workspace -- migrate-ids --apply path/to/chapter-or-volume
+math-workspace migrate-ids --apply path/to/chapter-or-volume
 ```
 
 ### Dependency Graph
@@ -584,31 +590,31 @@ npm run workspace -- migrate-ids --apply path/to/chapter-or-volume
 Generate the graph summary:
 
 ```bash
-npm run workspace -- graph summary
+math-workspace graph summary
 ```
 
 Inspect one dependency node (a theorem-like object or proof-backed hash remark):
 
 ```bash
-npm run workspace -- graph focus <h-id> --depth 2
+math-workspace graph focus <h-id> --depth 2
 ```
 
 Find downstream impact:
 
 ```bash
-npm run workspace -- graph impact <h-id>
+math-workspace graph impact <h-id>
 ```
 
 Inspect upstream dependencies:
 
 ```bash
-npm run workspace -- graph upstream <h-id>
+math-workspace graph upstream <h-id>
 ```
 
 Summarize chapter-level flow:
 
 ```bash
-npm run workspace -- graph matrix chapter
+math-workspace graph matrix chapter
 ```
 
 The graph records explicit `@h-...` references only. Its reports separate mainline theorem-like statistics from supplemental hash-remark statistics, and plain `注（...）` / `Remark (...)` entries are excluded. Suggested or inferred mathematical dependencies should be stored separately by the target project.
@@ -629,12 +635,12 @@ After declaring a Lean project in `.math-workspace/config.json`, `prepare` scans
 Use `lean scan` to rebuild the index, `lean coverage` to print the anchor report, and `lean verify` to reject unknown hashes, unreadable roots, or anchored docstrings without a supported named declaration:
 
 ```bash
-npm run workspace -- lean scan
-npm run workspace -- lean coverage
-npm run workspace -- lean verify
-npm run workspace -- lean capture
-npm run workspace -- lean build [--project <key>]
-npm run workspace -- lean dependencies
+math-workspace lean scan
+math-workspace lean coverage
+math-workspace lean verify
+math-workspace lean capture
+math-workspace lean build [--project <key>]
+math-workspace lean dependencies
 ```
 
 `capture` records a reviewed baseline for the Markdown object's type, title, statement, associated proof/solution content, and anchored declaration signature; later changes surface as contract drift. `build` runs `lake build [target]` in configured project roots and records the result; source changes make an older result stale. `dependencies` uses Lean elaboration to inspect direct references in anchored declaration types and proof values, then compares them only with explicit strict Markdown `@h-...` edges. Markdown-only edges merit review; Lean-only edges usually provide implementation or reusable-support context. Neither kind establishes a mathematical conflict by itself.
@@ -895,25 +901,25 @@ The new draft provides a new edition DOI; do not carry the previous edition DOI 
 Export formal source to ordinary Markdown before using other publication tools:
 
 ```bash
-npm run workspace -- export-md path/to/book --out dist/book.md
+math-workspace export-md path/to/book --out dist/book.md
 ```
 
 Export formal source while preserving the source file tree:
 
 ```bash
-npm run workspace -- export-md-split path/to/book --out dist/public
+math-workspace export-md-split path/to/book --out dist/public
 ```
 
 Export formal source directly to PDF with the local Pandoc/LaTeX engine:
 
 ```bash
-npm run workspace -- export-pdf path/to/book --out dist/book.pdf
+math-workspace export-pdf path/to/book --out dist/book.pdf
 ```
 
 Render an already compiled Markdown file:
 
 ```bash
-npm run workspace -- render-pdf dist/book.md --out dist/book.pdf
+math-workspace render-pdf dist/book.md --out dist/book.pdf
 ```
 
 `render-pdf` does not scan formal source, rewrite `#h-*`, or resolve `@h-*`.
@@ -1201,11 +1207,15 @@ Definition (Bounded operator): A linear map \(T:X\to Y\) is bounded if ...
 
 ## 常规流程
 
+通过 Codex 安装时，CLI、Reader 和通用 skills 使用当前启用插件提供的一份；独立使用时，使用明确安装的 Math Workspace CLI/npm。安装步骤见 [install.md](install.md)。项目保留原稿、配置与审阅记录，Codex 接入无需再复制工具包。
+
+下文 `math-workspace` 代表所选实际 CLI：插件任务复用 Reader 提供的 Node/CLI 与工作目录；npm 项目依赖使用 `npx math-workspace`；已有且核对来源的项目 wrapper 可继续使用。
+
 首次接入项目并生成上下文：
 
 ```bash
-npm run workspace -- init
-npm run workspace -- open
+math-workspace init
+math-workspace open
 ```
 
 `open` 会从当前目录向上查找 `.math-workspace/config.json`。需要单独刷新索引时仍可运行 `prepare`；检查安装、项目发现和可选工具链时运行 `doctor`。
@@ -1213,13 +1223,13 @@ npm run workspace -- open
 编辑文件或目录后，固化临时 ID 并刷新报告：
 
 ```bash
-npm run workspace -- finish path/to/chapter-or-dir
+math-workspace finish path/to/chapter-or-dir
 ```
 
 `finish` 已执行校验。只有直接使用 `finalize`、执行迁移，或需要独立 release 门禁时，再运行：
 
 ```bash
-npm run workspace -- verify
+math-workspace verify
 ```
 
 ## 创建章节与前后文
@@ -1235,7 +1245,7 @@ npm run workspace -- verify
 
 前后文的角色由所在位置决定，不限定标题或文体。“AI 退休寄语”通常属于后文，可以保留这个标题。旧 `intro.md`、`introduction.md` 与 `summary.md` 继续兼容，不必为采用新入口搬动旧稿。
 
-下例的 `math-workspace` 代表当前安装的 CLI 入口；项目已有 `workspace` script 时也可用 `npm run workspace --`。以 `paths` 或 `help-ai` 查看随包规则和文档的位置。Reader 交接提供确切的 Node、CLI 路径和工作目录时，直接复用；不要求项目额外安装全局命令或修改脚本。
+下例的 `math-workspace` 代表所选安装提供的 CLI 入口；项目已有且核对来源的 `workspace` script 时也可用 `npm run workspace --`。独立 CLI 可用 `paths` 或 `help-ai` 定位随包规则；Codex 插件读取当前 skills 和生成指南。Reader 交接提供确切的 Node、CLI 路径和工作目录时，直接复用；不要求项目额外安装全局命令或修改脚本。
 
 从拥有 `.math-workspace/config.json` 的项目根运行。`--container` 使用真实的项目相对书/卷目录，项目根为 `.`，不要填写显示书名。先查看只读计划：
 
@@ -1260,13 +1270,13 @@ Reader 的“＋”提供同一创建入口：填写标题、选择类型和当�
 Math Workspace 是 `math-workspace` 引擎之上的本地工作区界面。日常入口是：
 
 ```bash
-npm run workspace -- open /path/to/project
+math-workspace open /path/to/project
 ```
 
 也可以在项目内的任意子目录运行 `open`。不传项目路径且当前目录不在已初始化项目中时，会打开本机项目启动台。底层 `serve` 命令保留给需要明确控制启动行为的脚本：
 
 ```bash
-npm run workspace -- serve
+math-workspace serve
 ```
 
 启动台可以从系统目录选择器选择项目，或重开最近项目。选择的目录必须已有 `.math-workspace/config.json`；最近记录只保存在本机用户状态目录，不写入项目源码或 `.math-workspace/`。网页只提交最近项目的索引，目录路径始终由本地 Math Workspace 服务处理。
@@ -1337,7 +1347,7 @@ npm run workspace -- serve
 
 ## Codex MCP 入口
 
-Math Workspace 可作为独立本地客户端运行，也可通过 Codex MCP 打开。MCP 可启动或复用本机工作区，也提供命题、严格依赖、Lean 对齐与只读校验查询。支持 MCP 插件扩展的桌面端还可从全局侧边栏打开 Math Workspace，或在当前会话旁打开 Reader 面板；两个入口复用同一 Reader，不维护第二套渲染器或 Codex 对话实现。
+通过 Codex 安装的 Math Workspace 使用插件自带的运行时和通用 skills；非 Codex 环境使用独立本地 CLI。MCP 可启动或复用本机工作区，也提供命题、严格依赖、Lean 对齐与只读校验查询。支持 MCP 插件扩展的桌面端还可从全局侧边栏打开 Math Workspace，或在当前会话旁打开 Reader 面板；两个入口复用同一 Reader，不维护第二套渲染器或 Codex 对话实现。
 
 CLI 入口是：
 
@@ -1484,7 +1494,9 @@ math-workspace codex-handler remove
 
 ## AI 工作流接入
 
-AI 规则不再放在单独的 public doc 中。目标项目应直接读取随包发布的 AI artifacts：
+Codex 插件任务读取当前启用插件的通用 skills，并由同一插件生成工作区 `agent-guide.md`；项目特化 skill 只保存项目约束，不内嵌通用规则或另装工具包。
+
+独立 CLI/其他 AI 宿主可以按需审阅随包的 AI artifacts：
 
 ```text
 skills/editor.md      # 具体写作和迁移规则
@@ -1502,7 +1514,7 @@ node_modules/math-workspace/skills/integrator.md
 node_modules/math-workspace/skills/lean-formalization.md
 ```
 
-如果目标项目使用 VASMC，使用 catalog 锁定工作区、数学写作与融合 artifact；Lean 项目再锁定 Lean artifact：
+独立 artifact 消费者明确选择 VASMC 时，使用 catalog 锁定所需 artifact；这不是 Codex 插件项目的默认依赖：
 
 ```bash
 vasmc add --catalog node_modules/math-workspace/vasm-catalog/vasmc-catalog.yaml --export editor --alias math-workspace-editor
@@ -1517,10 +1529,10 @@ vasmc add --catalog node_modules/math-workspace/vasm-catalog/vasmc-catalog.yaml 
 dist/vasm-catalog/vasmc-catalog.yaml
 ```
 
-CLI 可打印当前安装中的关键路径：
+独立 CLI 可打印随包 artifact 的关键路径；Codex 插件使用其当前 skills 和生成指南：
 
 ```bash
-npm run workspace -- paths
+math-workspace paths
 ```
 
 不要自动拉取远端 skill，也不要把 integrator 原样追加到目标 prompt 末尾。应先审阅 artifact，再把规则融合到目标项目已有的 `AGENTS.md`、写作 skill、风格指南或 release 指令中。
@@ -1530,25 +1542,25 @@ npm run workspace -- paths
 试运行文字编号引用迁移：
 
 ```bash
-npm run workspace -- migrate-text-refs path/to/chapter-or-volume
+math-workspace migrate-text-refs path/to/chapter-or-volume
 ```
 
 应用文字编号引用迁移：
 
 ```bash
-npm run workspace -- migrate-text-refs --apply path/to/chapter-or-volume
+math-workspace migrate-text-refs --apply path/to/chapter-or-volume
 ```
 
 试运行旧 ID 迁移：
 
 ```bash
-npm run workspace -- migrate-ids path/to/chapter-or-volume
+math-workspace migrate-ids path/to/chapter-or-volume
 ```
 
 应用旧 ID 迁移：
 
 ```bash
-npm run workspace -- migrate-ids --apply path/to/chapter-or-volume
+math-workspace migrate-ids --apply path/to/chapter-or-volume
 ```
 
 ## 依赖图
@@ -1556,31 +1568,31 @@ npm run workspace -- migrate-ids --apply path/to/chapter-or-volume
 生成依赖图摘要：
 
 ```bash
-npm run workspace -- graph summary
+math-workspace graph summary
 ```
 
 查看某个命题类对象或带 hash 补充注释的局部图：
 
 ```bash
-npm run workspace -- graph focus <h-id> --depth 2
+math-workspace graph focus <h-id> --depth 2
 ```
 
 查看下游影响范围：
 
 ```bash
-npm run workspace -- graph impact <h-id>
+math-workspace graph impact <h-id>
 ```
 
 查看上游依赖：
 
 ```bash
-npm run workspace -- graph upstream <h-id>
+math-workspace graph upstream <h-id>
 ```
 
 汇总章节层面的依赖流：
 
 ```bash
-npm run workspace -- graph matrix chapter
+math-workspace graph matrix chapter
 ```
 
 依赖图只记录显式 `@h-...` 引用。报告把主线 theorem-like 对象与带 hash 补充注释分别统计，避免旁支事实改变主线结论；普通 `注（...）` 不成为节点。AI 或领域工具推测出的数学依赖应由目标项目单独维护，不要混入 canonical graph。
@@ -1601,12 +1613,12 @@ npm run workspace -- graph matrix chapter
 常用命令：
 
 ```bash
-npm run workspace -- lean scan
-npm run workspace -- lean coverage
-npm run workspace -- lean verify
-npm run workspace -- lean capture
-npm run workspace -- lean build [--project <key>]
-npm run workspace -- lean dependencies
+math-workspace lean scan
+math-workspace lean coverage
+math-workspace lean verify
+math-workspace lean capture
+math-workspace lean build [--project <key>]
+math-workspace lean dependencies
 ```
 
 `scan` 重建索引，`coverage` 打印锚点报告，`verify` 在锚点无法解析、源码根不可读或 docstring 后没有受支持的具名声明时失败。`capture` 把当前正文类型、标题、题面、相关提示/证明/解答与锚定声明签名作为显式审阅基线；基线后的正文或声明改动会显示为漂移。`build` 在每个已配置项目根执行 `lake build [target]` 并记录结果；任何源码变动都会使旧构建结果过期。
@@ -1869,25 +1881,25 @@ math-workspace publication reserve-doi book --expected-revision <profile.revisio
 先把 formal 源导出为普通 Markdown，再交给其他发布流程处理：
 
 ```bash
-npm run workspace -- export-md path/to/book --out dist/book.md
+math-workspace export-md path/to/book --out dist/book.md
 ```
 
 导出时保留源目录结构：
 
 ```bash
-npm run workspace -- export-md-split path/to/book --out dist/public
+math-workspace export-md-split path/to/book --out dist/public
 ```
 
 使用本机 Pandoc/LaTeX 引擎从 formal 源直接导出 PDF：
 
 ```bash
-npm run workspace -- export-pdf path/to/book --out dist/book.pdf
+math-workspace export-pdf path/to/book --out dist/book.pdf
 ```
 
 渲染已经处理好的普通 Markdown：
 
 ```bash
-npm run workspace -- render-pdf dist/book.md --out dist/book.pdf
+math-workspace render-pdf dist/book.md --out dist/book.pdf
 ```
 
 `render-pdf` 不扫描 formal 源，不重写 `#h-*`，也不解析 `@h-*`。
