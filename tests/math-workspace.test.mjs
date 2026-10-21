@@ -29,6 +29,7 @@ import { testArchives, testArchiveReaderApi } from './archives.test.mjs';
 import { testReaderArchiveVolumes } from './reader-archive-volume.test.mjs';
 import { testArchiveVolumes } from './archive-volumes.test.mjs';
 import { testPublications } from './publications.test.mjs';
+import { testPublicationVerification } from './publication-verification.test.mjs';
 import { testReaderPublication } from './reader-publication.test.mjs';
 import { testPublicationPdfRuntime } from './publication-pdf-runtime.test.mjs';
 import { testReaderPublicationPdf } from './reader-publication-pdf.test.mjs';
@@ -2772,9 +2773,13 @@ async function testRenderPdfUsesPandocRenderer() {
         '-V',
         'title:算子演化论',
         '-V',
+        'title-meta:算子演化论',
+        '-V',
         'subtitle:卷 I：规范空间与算子',
         '-V',
         'author:GLENZLI',
+        '-V',
+        'author-meta:GLENZLI',
         '-V',
         'date:Revised 2026-06-26',
         '-V',
@@ -2880,7 +2885,7 @@ async function testRenderPdfMetadataPage() {
     assert.match(metadataInput, /\\item\[本名\] 李喆/);
     assert.match(metadataInput, /\\item\[别名\] Glen Li \/ glenzli; G\. Li/);
     assert.match(metadataInput, /\\item\[ORCID\] https:\/\/orcid\.org\/0009-0006-6536-3453/);
-    assert.match(metadataInput, /\\item\[项目地址\] https:\/\/github\.com\/glenzli\/formal-math/);
+    assert.match(metadataInput, /\\item\[源码仓库\] https:\/\/github\.com\/glenzli\/formal-math/);
     assert.match(metadataInput, /\\item\[许可协议\] CC BY 4\.0 \(https:\/\/creativecommons\.org\/licenses\/by\/4\.0\/\)/);
     assert.match(metadataInput, /\\item\[本版版本\] rc\.1/);
     assert.match(metadataInput, /\\item\[发布标签\] v0\.1\.0/);
@@ -2917,6 +2922,18 @@ async function testRenderPdfMetadataPage() {
     assert.match(englishMetadata, /\\item\[Author\] Zhe Li/);
     assert.match(englishMetadata, /\\item\[Work DOI\] 10\.1234\/work/);
     assert.match(englishMetadata, /\\item\[DOI provenance\] Author supplied; status follows/);
+    const config = JSON.parse(await read(root, '.math-workspace/config.json'));
+    config.metadata = { title: 'Common title', language: 'en-US', authors: [{ name: 'First Author', orcid: '0000-0002-1825-0097', affiliation: 'First Institute' }, { name: 'Second Author', affiliation: 'Second Institute' }], website: 'https://example.org/work', repository: 'https://github.com/example/work', description: 'A common abstract.', keywords: ['measure theory', 'examples'], preferredCitation: 'First Author and Second Author. Common title.' };
+    await fs.writeFile(path.join(root, '.math-workspace/config.json'), JSON.stringify(config));
+    const inherited = runCliWithEnv(root, ['render-pdf', 'compiled.md', '--out', 'dist/common.pdf', '--metadata-page', '--website=https://example.org/edition'], { PATH: `${bin}${path.delimiter}${process.env.PATH || ''}`, PANDOC_LOG: logPath, PANDOC_INCLUDE_BEFORE_LOG: includeBeforeLogPath });
+    assert.equal(inherited.status, 0, combinedOutput(inherited));
+    const commonMetadata = await fs.readFile(includeBeforeLogPath, 'utf8'), commonArgs = JSON.parse(await fs.readFile(logPath, 'utf8'));
+    assert.match(commonMetadata, /Author 1\] First Author/); assert.match(commonMetadata, /Author 2\] Second Author/);
+    assert.match(commonMetadata, /First Institute/); assert.match(commonMetadata, /Second Institute/); assert.match(commonMetadata, /0000-0002-1825-0097/);
+    assert.match(commonMetadata, /https:\/\/example\.org\/edition/); assert.match(commonMetadata, /https:\/\/github\.com\/example\/work/);
+    assert.doesNotMatch(commonMetadata, /Zhe Li|0009-0006-6536-3453|glenzli/);
+    assert(commonArgs.includes('subject:A common abstract.')); assert(commonArgs.includes('keywords:measure theory, examples'));
+    assert(commonArgs.includes('title-meta:Common title')); assert(commonArgs.includes('author-meta:First Author; Second Author'));
 }
 
 async function testAuditReport() {
@@ -2987,6 +3004,7 @@ const tests = [
     ['academic archive Reader API', testArchiveReaderApi],
     ['volume and total signing Reader workflow', testReaderArchiveVolumes],
     ['selected-chapter PDF publication and DOI lifecycle', testPublications],
+    ['published Zenodo record, PDF bytes and DOI verification', testPublicationVerification],
     ['Reader publication workflow and project boundaries', testReaderPublication],
     ['publication PDF runtime packaging and bound transport', testPublicationPdfRuntime],
     ['publication PDF page preview and resource lifecycle', testReaderPublicationPdf],

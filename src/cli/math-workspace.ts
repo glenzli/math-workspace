@@ -55,6 +55,7 @@ import { collectLeanDependencies } from '../lean/lean-dependencies';
 import { runCodexFileHandler } from '../codex/file-handler';
 import { runArchiveCli } from '../archive/cli';
 import { runPublicationCli } from '../publication/cli';
+import { projectMetadata, normalizeWorkMetadata, type WorkAuthor } from '@math-workspace/core';
 import { safePath as publicationSafePath, relativeInput as publicationRelativeInput } from '../publication/store';
 import { createManuscriptPage, planManuscriptPage, type CreatePageInput } from '../manuscript/create-page';
 
@@ -1004,11 +1005,11 @@ function publicationMetadataRows(options): Array<[string, string]> {
     const rows: Array<[string, string]> = [];
     const chinese = String(options.lang || '').toLowerCase().startsWith('zh');
     const labels = chinese ? {
-        author: '作者', nativeName: '本名', aliases: '别名', repository: '项目地址', license: '许可协议',
+        author: '作者', nativeName: '本名', aliases: '别名', affiliation: '机构', website: '作品网站', repository: '源码仓库', license: '许可协议',
         version: '本版版本', tag: '发布标签', commit: '提交版本', doi: '本版 DOI', workDoi: '作品 DOI',
         doiNote: 'DOI 说明', citation: '推荐引用'
     } : {
-        author: 'Author', nativeName: 'Native name', aliases: 'Also known as', repository: 'Repository', license: 'License',
+        author: 'Author', nativeName: 'Native name', aliases: 'Also known as', affiliation: 'Affiliation', website: 'Website', repository: 'Repository', license: 'License',
         version: 'Release version', tag: 'Release tag', commit: 'Commit', doi: 'DOI', workDoi: 'Work DOI',
         doiNote: 'DOI provenance', citation: 'Preferred citation'
     };
@@ -1017,10 +1018,20 @@ function publicationMetadataRows(options): Array<[string, string]> {
         if (normalized) rows.push([label, normalized]);
     };
 
-    add(labels.author, options.author);
-    add(labels.nativeName, options.authorNative);
-    add(labels.aliases, (options.authorAliases || []).join('; '));
-    add('ORCID', normalizedMetadataUrl(options.orcid));
+    if (options.authors?.length) for (const [index, author] of options.authors.entries()) {
+        const prefix = options.authors.length > 1 ? `${labels.author} ${index + 1} · ` : '';
+        add(options.authors.length > 1 ? `${labels.author} ${index + 1}` : labels.author, author.name);
+        add(`${prefix}${labels.nativeName}`, author.nativeName);
+        add(`${prefix}${labels.aliases}`, (author.aliases || []).join('; '));
+        add(`${prefix}ORCID`, author.orcid);
+        add(`${prefix}${labels.affiliation}`, author.affiliation);
+    } else {
+        add(labels.author, options.author);
+        add(labels.nativeName, options.authorNative);
+        add(labels.aliases, (options.authorAliases || []).join('; '));
+        add('ORCID', normalizedMetadataUrl(options.orcid));
+    }
+    add(labels.website, options.website);
     add(labels.repository, normalizedMetadataUrl(options.repository));
     const license = options.licenseUrl
         ? `${options.license || options.licenseUrl}${options.license ? ' ' : ''}(${normalizedMetadataUrl(options.licenseUrl)})`
@@ -1162,31 +1173,37 @@ function pdfTocTitleDefault(config) {
 function pdfConfigDefaults(configInput: any = DEFAULT_CONFIG) {
     const config = mergeConfig(configInput);
     const pdf = config.pdf || {};
+    const metadata = projectMetadata(config);
+    const structuredAuthors = config.metadata?.authors !== undefined || pdf.authors !== undefined;
     return {
         pdfEngine: pdf.pdfEngine || 'xelatex',
         toc: pdf.toc !== false,
         tocDepth: Number.isFinite(Number(pdf.tocDepth)) && Number(pdf.tocDepth) >= 1 ? Math.floor(Number(pdf.tocDepth)) : 2,
         margin: pdf.margin || '2.5cm',
         paper: pdf.paper || 'a4',
-        lang: pdf.lang || pdfLanguageDefault(config),
+        lang: metadata.language || pdf.lang || pdfLanguageDefault(config),
         tocTitle: pdf.tocTitle || pdfTocTitleDefault(config),
-        title: pdf.title || '',
-        subtitle: pdf.subtitle || '',
-        author: pdf.author || '',
-        authorNative: pdf.authorNative || '',
-        authorAliases: Array.isArray(pdf.authorAliases) ? pdf.authorAliases.filter(value => typeof value === 'string' && value) : [],
-        orcid: pdf.orcid || '',
-        repository: pdf.repository || '',
-        license: pdf.license || '',
-        licenseUrl: pdf.licenseUrl || '',
-        preferredCitation: pdf.preferredCitation || '',
+        title: metadata.title ?? pdf.title ?? '',
+        subtitle: metadata.subtitle ?? pdf.subtitle ?? '',
+        author: metadata.authors?.map(author => author.name).join('; ') ?? pdf.author ?? '',
+        authors: structuredAuthors ? metadata.authors || [] : [],
+        website: metadata.website || '',
+        description: metadata.description || '',
+        keywords: metadata.keywords || [],
+        authorNative: structuredAuthors ? '' : pdf.authorNative || '',
+        authorAliases: !structuredAuthors && Array.isArray(pdf.authorAliases) ? pdf.authorAliases.filter(value => typeof value === 'string' && value) : [],
+        orcid: structuredAuthors ? '' : pdf.orcid || '',
+        repository: metadata.repository || '',
+        license: metadata.license || '',
+        licenseUrl: metadata.licenseUrl || '',
+        preferredCitation: metadata.preferredCitation || '',
         date: pdf.date || '',
         releaseVersion: pdf.releaseVersion || '',
         releaseTag: pdf.releaseTag || '',
         releaseCommit: pdf.releaseCommit || '',
         doi: pdf.doi || '',
-        workDoi: pdf.workDoi || '',
-        doiState: pdf.doiState || '',
+        workDoi: metadata.doi?.conceptDoi ?? pdf.workDoi ?? '',
+        doiState: metadata.doi?.provenance ?? pdf.doiState ?? '',
         showVersionOnCover: pdf.showVersionOnCover === true,
         metadataPage: pdf.metadataPage === true,
         documentClass: pdf.documentClass || '',
@@ -1219,6 +1236,10 @@ function parseExportArgs(args, defaultOutput, configInput = DEFAULT_CONFIG) {
         title: string;
         subtitle: string;
         author: string;
+        authors: WorkAuthor[];
+        website: string;
+        description: string;
+        keywords: string[];
         authorNative: string;
         authorAliases: string[];
         orcid: string;
@@ -1262,6 +1283,10 @@ function parseExportArgs(args, defaultOutput, configInput = DEFAULT_CONFIG) {
         title: pdfDefaults.title,
         subtitle: pdfDefaults.subtitle,
         author: pdfDefaults.author,
+        authors: pdfDefaults.authors,
+        website: pdfDefaults.website,
+        description: pdfDefaults.description,
+        keywords: [...pdfDefaults.keywords],
         authorNative: pdfDefaults.authorNative,
         authorAliases: [...pdfDefaults.authorAliases],
         orcid: pdfDefaults.orcid,
@@ -1291,6 +1316,15 @@ function parseExportArgs(args, defaultOutput, configInput = DEFAULT_CONFIG) {
         frontMatter: [...pdfDefaults.frontMatter],
         variables: [...pdfDefaults.variables],
         paths: []
+    };
+
+    let keywordsOverridden = false;
+    const authorIdentity = (field: 'nativeName' | 'orcid' | 'aliases', value: string) => {
+        if (options.authors.length > 1) throw new Error('Use --authors-json to change identities when several authors are configured.');
+        if (options.authors.length === 1) {
+            if (field === 'aliases') options.authors[0].aliases = [...(options.authors[0].aliases || []), value];
+            else options.authors[0][field] = value;
+        }
     };
 
     for (let i = 0; i < args.length; i++) {
@@ -1341,22 +1375,46 @@ function parseExportArgs(args, defaultOutput, configInput = DEFAULT_CONFIG) {
             options.subtitle = arg.slice('--subtitle='.length);
         } else if (arg === '--author') {
             options.author = args[++i] || options.author;
+            if (options.authors.length) { options.authorNative = ''; options.authorAliases = []; options.orcid = ''; }
+            options.authors = [];
         } else if (arg.startsWith('--author=')) {
             options.author = arg.slice('--author='.length);
+            if (options.authors.length) { options.authorNative = ''; options.authorAliases = []; options.orcid = ''; }
+            options.authors = [];
+        } else if (arg === '--authors-json' || arg.startsWith('--authors-json=')) {
+            const value = arg === '--authors-json' ? args[++i] : arg.slice('--authors-json='.length);
+            options.authors = normalizeWorkMetadata({ authors: JSON.parse(value) }).authors;
+            options.author = options.authors.map(author => author.name).join('; ');
+            options.authorNative = ''; options.authorAliases = []; options.orcid = '';
+        } else if (arg === '--website' || arg.startsWith('--website=')) {
+            const value = arg === '--website' ? args[++i] : arg.slice('--website='.length);
+            options.website = normalizeWorkMetadata({ website: value }).website;
+        } else if (arg === '--description' || arg.startsWith('--description=')) {
+            options.description = arg === '--description' ? args[++i] || '' : arg.slice('--description='.length);
+        } else if (arg === '--keyword' || arg.startsWith('--keyword=')) {
+            const value = arg === '--keyword' ? args[++i] : arg.slice('--keyword='.length);
+            if (!keywordsOverridden) { options.keywords = []; keywordsOverridden = true; }
+            if (value) options.keywords.push(value);
         } else if (arg === '--author-native') {
             options.authorNative = args[++i] || options.authorNative;
+            authorIdentity('nativeName', options.authorNative);
         } else if (arg.startsWith('--author-native=')) {
             options.authorNative = arg.slice('--author-native='.length);
+            authorIdentity('nativeName', options.authorNative);
         } else if (arg === '--author-alias') {
             const value = args[++i];
             if (value) options.authorAliases.push(value);
+            if (value) authorIdentity('aliases', value);
         } else if (arg.startsWith('--author-alias=')) {
             const value = arg.slice('--author-alias='.length);
             if (value) options.authorAliases.push(value);
+            if (value) authorIdentity('aliases', value);
         } else if (arg === '--orcid') {
             options.orcid = args[++i] || options.orcid;
+            authorIdentity('orcid', options.orcid);
         } else if (arg.startsWith('--orcid=')) {
             options.orcid = arg.slice('--orcid='.length);
+            authorIdentity('orcid', options.orcid);
         } else if (arg === '--repository') {
             options.repository = args[++i] || options.repository;
         } else if (arg.startsWith('--repository=')) {
@@ -1587,8 +1645,12 @@ function buildPandocPdfArgs(inputMarkdownPath, outputPdfPath, options) {
         options.tocTitle ? `toc-title:${options.tocTitle}` : '',
         options.documentClass ? `documentclass:${options.documentClass}` : '',
         options.title ? `title:${options.title}` : '',
+        options.title ? `title-meta:${latexEscapeText(options.title)}` : '',
         options.subtitle ? `subtitle:${options.subtitle}` : '',
         options.author ? `author:${options.author}` : '',
+        options.author ? `author-meta:${latexEscapeText(options.author)}` : '',
+        options.description ? `subject:${latexEscapeText(options.description.replace(/\r?\n/g, ' '))}` : '',
+        options.keywords?.length ? `keywords:${latexEscapeText(options.keywords.join(', '))}` : '',
         options.date ? `date:${options.date}` : '',
         options.releaseVersion ? `version:${options.releaseVersion}` : '',
         options.titlePage ? 'classoption:titlepage' : '',
@@ -2746,6 +2808,9 @@ Advanced commands:
   math-workspace export-md-split <file-or-dir> [...] --out <dir>
   math-workspace export-pdf <file-or-dir> [...] --out <book.pdf> [--no-toc] [--toc-depth N] [--margin 2.5cm]
   math-workspace render-pdf <compiled.md> --out <book.pdf> [--title "Title"] [--toc-title 目录]
+  math-workspace publication metadata
+  math-workspace publication save-metadata metadata.json --expected-revision SHA256
+  math-workspace publication help
   math-workspace paths
 
 Migrations are dry-run by default. Pass --apply to edit files.
@@ -2787,8 +2852,8 @@ Advanced commands:
   math-workspace codex-handler install|remove|status
   math-workspace export-md <file-or-dir> [...] --out <compiled.md>
   math-workspace export-md-split <file-or-dir> [...] --out <dir>
-  math-workspace export-pdf <file-or-dir> [...] --out <book.pdf> [--md-out compiled.md] [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title "Title"] [--subtitle "Subtitle"] [--author Name] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--date "Revised 2026-06-26"] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title "AI Statement"] [--front-matter-toc] [--show-version-on-cover] [--documentclass ctexbook] [--title-page] [--no-title-page] [--cover-style simple] [--title-size 32pt] [--subtitle-size 18pt] [--toc-page-break] [--no-toc-page-break] [-V key:value] [--variable key:value] [--keep-md]
-  math-workspace render-pdf <compiled.md> --out <book.pdf> [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title "Title"] [--subtitle "Subtitle"] [--author Name] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--date "Revised 2026-06-26"] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title "AI Statement"] [--front-matter-toc] [--show-version-on-cover] [--documentclass ctexbook] [--title-page] [--no-title-page] [--cover-style simple] [--title-size 32pt] [--subtitle-size 18pt] [--toc-page-break] [--no-toc-page-break] [-V key:value] [--variable key:value]
+  math-workspace export-pdf <file-or-dir> [...] --out <book.pdf> [--md-out compiled.md] [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title "Title"] [--subtitle "Subtitle"] [--author Name] [--authors-json JSON] [--website URL] [--description Text] [--keyword Text] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--date "Revised 2026-06-26"] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title "AI Statement"] [--front-matter-toc] [--show-version-on-cover] [--documentclass ctexbook] [--title-page] [--no-title-page] [--cover-style simple] [--title-size 32pt] [--subtitle-size 18pt] [--toc-page-break] [--no-toc-page-break] [-V key:value] [--variable key:value] [--keep-md]
+  math-workspace render-pdf <compiled.md> --out <book.pdf> [--pdf-engine xelatex] [--no-toc] [--toc-depth N] [--margin 2.5cm] [--paper a4] [--lang zh-CN] [--toc-title 目录] [--title "Title"] [--subtitle "Subtitle"] [--author Name] [--authors-json JSON] [--website URL] [--description Text] [--keyword Text] [--author-native Name] [--author-alias Alias] [--orcid URL] [--repository URL] [--license Name] [--license-url URL] [--preferred-citation Text] [--date "Revised 2026-06-26"] [--release-version rc.1] [--release-tag v1] [--release-commit abc123] [--doi DOI] [--metadata-page] [--front-matter page.md] [--front-matter-title "AI Statement"] [--front-matter-toc] [--show-version-on-cover] [--documentclass ctexbook] [--title-page] [--no-title-page] [--cover-style simple] [--title-size 32pt] [--subtitle-size 18pt] [--toc-page-break] [--no-toc-page-break] [-V key:value] [--variable key:value]
   math-workspace paths
   math-workspace help-ai
   math-workspace verify [--strict-chapters]

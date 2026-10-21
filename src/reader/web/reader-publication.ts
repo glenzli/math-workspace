@@ -2,6 +2,8 @@ import { readerText, readerLabel, readerAttribute, refreshReaderLabels, readerWo
 import { readerFetch } from './reader-route';
 import { readerIcon, type ReaderIconName } from './reader-icons';
 import { ReaderPublicationPdf } from './reader-publication-pdf';
+import { mergeWorkMetadata, type WorkMetadata, type WorkAuthor } from '../../../packages/core/src/project-metadata';
+import { discoverPublicationMatter, resolvePublicationMatter } from '../../publication/matter';
 import type {
     PublicationArtifact, PublicationBuild, PublicationInspection, PublicationPlan,
     PublicationProfile, PublicationProfileRecord, PublicationStatus, PublicationManifest, PublicationUploadPlan, PublicationPage
@@ -16,6 +18,11 @@ interface Inspection extends PublicationInspection { job?: PublicationJob }
 
 const copy = {
     zh: {
+        commonMetadata: '项目公共信息', commonHint: '在项目中维护作品信息；本版只保存需要单独设置的项目。保存后供后续出版版本共同使用。', resolvedMetadata: '本版使用的信息',
+        commonPrefix: '项目', saveCommon: '保存项目公共信息', savingCommon: '正在保存项目公共信息…', commonSaved: '项目公共信息已保存。请重新审阅本版。', reloadCommon: '重新载入并放弃未保存的公共信息', commonConflict: '项目公共信息已在其他地方更新。未保存的内容仍保留；重新载入后再编辑和保存。',
+        override: '本版单独设置', inherited: '沿用项目公共信息', website: '作品网站', repository: '源码仓库', licenseUrl: '许可链接', keywords: '关键词（每行一个）', preferredCitation: '推荐引用',
+        authorName: '作者姓名', authorNative: '本名', authorAliases: '别名（每行一个）', affiliation: '所属机构', addAuthor: '添加作者', removeAuthor: '移除作者',
+        autoMatter: '自动收录所选书卷的序言、后记、附录等内容', autoMatterHint: '依据稿件的结构角色识别，保留原标题和附录编号。可以逐项取消收录；已有方案需主动开启。', autoIncluded: '自动识别的内容', customMatter: '手动调整收录与顺序', moveUp: '上移', moveDown: '下移',
         title: 'PDF 出版', close: '关闭', refresh: '刷新出版状态', loading: '正在读取出版计划…',
         intro: '选择这次出版的章节，审阅范围与版面，再生成可留存的 PDF。每一版都保留独立的文件与标识。',
         steps: ['章节', '版面与信息', '审阅范围', 'PDF 与 DOI'], plan: '出版计划', newPlan: '新建计划',
@@ -23,7 +30,7 @@ const copy = {
         work: '作品标识', workHint: '同一作品的后续版本沿用这个标识。', save: '保存出版计划', saved: '出版计划已保存。',
         selectHint: '只纳入已勾选的章节，并按下面的顺序排版。', all: '全选', none: '清空选择',
         ungrouped: '其他章节', selectedCount: '已选章节', titleField: '书名 / 标题', subtitle: '副标题',
-        author: '作者（每行一位）', version: '本版版本', edition: '版次说明', license: '许可协议',
+        author: '作者', version: '本版版本', edition: '版次说明', license: '许可协议', releaseTag: '本版源码标签', releaseCommit: '本版源码提交',
         description: '作品介绍', publicationDate: '出版日期', cover: '封面', coverHint: '默认使用书名、副标题、作者与版本制作文字封面。',
         coverImage: '封面图片（可选，项目内的相对路径）', coverVersion: '封面显示版本',
         front: '前文', back: '后文', addMatter: '添加', removeMatter: '移除', matterTitle: '标题（留空沿用稿件标题）', matterText: '手填正文（支持 Markdown，兼容旧方案）',
@@ -63,6 +70,12 @@ const copy = {
         filesUnchanged: '没有这一类变更。',
         publishCheck: '我确认将下面的 PDF 和信息公开发布到 Zenodo。', publishWarning: '公开发布后保留该版记录。此操作需要最后明确确认。',
         remoteRecord: 'Zenodo 记录', oldEditions: '保留的旧版', noRemote: '尚未连接 Zenodo 草稿。',
+        verifyPublished: '核验公开版本', verification: '发布后核验', verificationNone: '已发布，尚未独立核验公开文件和 DOI。',
+        verificationHint: '匿名读取公开记录，下载 PDF 比对，并检查本版 DOI 是否解析到同一记录。此操作不会再次发布。',
+        verificationSandbox: 'Zenodo 官方说明：sandbox 测试 DOI 不是真实 DOI，且不会解析；该项不能在 sandbox 验收。正式环境通过 doi.org 核验。',
+        verificationSandboxIncomplete: '公开文件核验通过；sandbox DOI 解析未验收',
+        verificationPassed: '核验通过', verificationPending: '核验尚未完成，可稍后重试', verificationFailed: '核验发现不一致或访问错误',
+        recordCheck: '公开记录', fileCheck: '下载的 PDF', doiCheck: '本版 DOI 解析', checkPassed: '通过', checkPending: '待核验', checkFailed: '未通过', checkedAt: '核验时间',
         exactPdf: '本版文件校验值', needBuildReserved: '预留或修改 DOI 后，请重新审阅并生成 PDF，再上传。',
         confirmNew: '我确认创建同一作品的新版本，并保留已发布的旧版。', errors: '错误详情',
         empty: '项目中尚无可出版章节。', language: '出版语言', zh: '中文', en: 'English',
@@ -72,6 +85,11 @@ const copy = {
         renderPhase: '排版 PDF', retainPhase: '保存本版文件', noToken: 'Reader 项目状态尚未准备好，请刷新后重试。'
     },
     en: {
+        commonMetadata: 'Project metadata', commonHint: 'Maintain shared work details in the project. This edition stores only its overrides; saved values are reused by future editions.', resolvedMetadata: 'Metadata used for this edition',
+        commonPrefix: 'Project', saveCommon: 'Save project metadata', savingCommon: 'Saving project metadata…', commonSaved: 'Project metadata saved. Review this edition again.', reloadCommon: 'Reload and discard unsaved project metadata', commonConflict: 'Project metadata changed elsewhere. Your unsaved draft is retained; reload before editing and saving again.',
+        override: 'Override for this edition', inherited: 'Use project metadata', website: 'Work website', repository: 'Source repository', licenseUrl: 'License URL', keywords: 'Keywords (one per line)', preferredCitation: 'Preferred citation',
+        authorName: 'Author name', authorNative: 'Native name', authorAliases: 'Aliases (one per line)', affiliation: 'Affiliation', addAuthor: 'Add author', removeAuthor: 'Remove author',
+        autoMatter: 'Automatically include prefaces, endings and appendices for the selected books and volumes', autoMatterHint: 'Uses manuscript roles, preserving titles and appendix numbering. Exclude individual pages as needed; existing plans require enabling this option.', autoIncluded: 'Automatically identified pages', customMatter: 'Customize inclusion and order', moveUp: 'Move up', moveDown: 'Move down',
         title: 'PDF publication', close: 'Close', refresh: 'Refresh publication status', loading: 'Loading publication plans…',
         intro: 'Select this edition’s chapters, review its scope and layout, then create a PDF to keep. Each edition retains its own files and identity.',
         steps: ['Chapters', 'Layout & details', 'Review scope', 'PDF & DOI'], plan: 'Publication plan', newPlan: 'New plan',
@@ -79,7 +97,7 @@ const copy = {
         work: 'Work identity', workHint: 'Keep this identity for later versions of the same work.', save: 'Save publication plan', saved: 'Publication plan saved.',
         selectHint: 'Only checked chapters are included, in the order shown below.', all: 'Select all', none: 'Clear selection',
         ungrouped: 'Other chapters', selectedCount: 'Selected chapters', titleField: 'Book title / title', subtitle: 'Subtitle',
-        author: 'Authors (one per line)', version: 'Edition version', edition: 'Edition note', license: 'License',
+        author: 'Authors', version: 'Edition version', edition: 'Edition note', license: 'License', releaseTag: 'Source release tag', releaseCommit: 'Source commit',
         description: 'Description', publicationDate: 'Publication date', cover: 'Cover', coverHint: 'The default text cover uses the title, subtitle, authors and version.',
         coverImage: 'Cover image (optional, path within this project)', coverVersion: 'Show version on cover',
         front: 'Front matter', back: 'Back matter', addMatter: 'Add', removeMatter: 'Remove', matterTitle: 'Heading (leave blank to use the manuscript heading)', matterText: 'Inline text (Markdown, existing plans supported)',
@@ -119,6 +137,12 @@ const copy = {
         filesUnchanged: 'No changes of this kind.',
         publishCheck: 'I confirm publishing the PDF and details shown below publicly on Zenodo.', publishWarning: 'Publishing retains this edition as a public record. An explicit final confirmation is required.',
         remoteRecord: 'Zenodo record', oldEditions: 'Retained editions', noRemote: 'No Zenodo draft is connected.',
+        verifyPublished: 'Verify public edition', verification: 'Post-publication verification', verificationNone: 'Published; public files and DOI have not been independently verified.',
+        verificationHint: 'Read the public record anonymously, download and compare the PDF, and check that the edition DOI reaches the same record. This does not publish again.',
+        verificationSandbox: 'Zenodo states that sandbox DOIs are not real and do not resolve. DOI resolution cannot be accepted in sandbox; production uses doi.org.',
+        verificationSandboxIncomplete: 'Public files verified; DOI resolution is not verified in sandbox',
+        verificationPassed: 'Verification passed', verificationPending: 'Verification is incomplete; retry later', verificationFailed: 'Verification found a mismatch or access error',
+        recordCheck: 'Public record', fileCheck: 'Downloaded PDF', doiCheck: 'Edition DOI resolution', checkPassed: 'Passed', checkPending: 'Pending', checkFailed: 'Failed', checkedAt: 'Checked',
         exactPdf: 'PDF checksum', needBuildReserved: 'After reserving or changing a DOI, review and rebuild the PDF before uploading.',
         confirmNew: 'I confirm creating a new version of the same work and retaining the published edition.', errors: 'Error details',
         empty: 'This project has no chapters available to publish.', language: 'Publication language', zh: '中文', en: 'English',
@@ -160,6 +184,10 @@ export class ReaderPublication {
     private controller = new AbortController();
     private timer?: ReturnType<typeof setTimeout>;
     private inspection?: Inspection;
+    private metadataDraft?: WorkMetadata;
+    private metadataDraftRevision?: string;
+    private metadataDirty = false;
+    private metadataExpanded = false;
     private profile?: PublicationProfile;
     private revision: number | null = null;
     private status?: PublicationStatus;
@@ -206,6 +234,7 @@ export class ReaderPublication {
         this.close(); this.project = context.project; this.token = context.token; this.locale = context.language;
         this.returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
         if (previousProject !== this.project) {
+            this.metadataDraft = undefined; this.metadataDraftRevision = undefined; this.metadataDirty = false; this.metadataExpanded = false;
             this.profile = undefined; this.revision = null; this.status = undefined; this.plan = undefined;
             this.build = undefined; this.manifest = undefined; this.job = undefined; this.dirty = false; this.scopeConfirmed = false; this.step = 0;
         }
@@ -243,6 +272,7 @@ export class ReaderPublication {
             const inspection = await this.request<Inspection>('/api/publication', undefined, generation);
             if (!this.current(generation)) return;
             this.inspection = inspection;
+            if (!this.metadataDirty) { this.metadataDraft = clone(inspection.metadata?.value || {}); this.metadataDraftRevision = inspection.metadata?.revision; }
             if (!this.profile) this.chooseProfile(inspection.profiles[0]);
             if (this.profile && this.revision !== null) await this.readStatus(generation);
             if (!this.current(generation)) return;
@@ -263,6 +293,9 @@ export class ReaderPublication {
     }
     private acceptResumedResult(job: PublicationJob): void {
         this.handledJobs.add(job.id); const result = job.result;
+        if (job.action === 'save-metadata' && result?.revision) {
+            this.inspection!.metadata = result; this.metadataDraft = clone(result.value); this.metadataDraftRevision = result.revision; this.metadataDirty = false; this.changed();
+        }
         if (job.action === 'save' && result?.profile?.id === this.profile?.id) {
             this.profile = clone(result.profile); this.revision = result.revision; this.dirty = false;
         } else if (job.action === 'review' && result?.profile?.id === this.profile?.id) {
@@ -290,6 +323,7 @@ export class ReaderPublication {
         const status = await this.request<PublicationStatus>('/api/publication/status?profile=' + encodeURIComponent(profileId), undefined, generation);
         if (!this.current(generation) || this.profile?.id !== profileId || view !== this.viewRequest || request !== this.statusRequest) return;
         this.status = status;
+        if (status.metadata && !this.metadataDirty) { this.inspection!.metadata = status.metadata; this.metadataDraft = clone(status.metadata.value); this.metadataDraftRevision = status.metadata.revision; }
         if (!this.dirty) { this.profile = clone(status.profile.profile); this.revision = status.profile.revision; }
         this.build = this.build || status.builds[0];
         if (this.build && this.manifest?.buildId !== this.build.id) {
@@ -302,16 +336,18 @@ export class ReaderPublication {
         this.dirty = true; this.plan = undefined; this.uploadPlan = undefined; this.scopeConfirmed = false; this.publishConfirmed = false;
         this.content?.querySelector<HTMLButtonElement>('[data-build]')?.setAttribute('disabled', '');
     }
-    private input(parent: HTMLElement, label: string, value: string, update: (value: string) => void, multiline = false, hint: string | (() => string) = '', invalidate = true): HTMLInputElement | HTMLTextAreaElement {
+    private input(parent: HTMLElement, label: string | (() => string), value: string, update: (value: string) => void, multiline = false, hint: string | (() => string) = '', invalidate = true): HTMLInputElement | HTMLTextAreaElement {
+        const labelText = typeof label === 'function' ? label : () => label;
         const field = node('label', '', 'publication-field'), control = multiline ? node('textarea') : node('input');
         if (control instanceof HTMLInputElement) control.type = 'text';
-        control.value = value; control.setAttribute('aria-label', label);
+        control.value = value; readerAttribute(control, 'aria-label', labelText);
         control.addEventListener('input', () => { update(control.value); if (invalidate) this.changed(); });
-        field.append(node('span', label), control); if (hint) field.append(readerText(node('small'), typeof hint === 'function' ? hint : () => hint)); parent.append(field); return control;
+        field.append(readerText(node('span'), labelText), control); if (hint) field.append(readerText(node('small'), typeof hint === 'function' ? hint : () => hint)); parent.append(field); return control;
     }
-    private check(parent: HTMLElement, label: string, value: boolean, update: (value: boolean) => void): HTMLInputElement {
+    private check(parent: HTMLElement, label: string | (() => string), value: boolean, update: (value: boolean) => void): HTMLInputElement {
+        const labelText = typeof label === 'function' ? label : () => label;
         const field = node('label', '', 'publication-check'), control = node('input'); control.type = 'checkbox'; control.checked = value;
-        control.addEventListener('change', () => update(control.checked)); field.append(control, node('span', label)); parent.append(field); return control;
+        control.addEventListener('change', () => update(control.checked)); field.append(control, readerText(node('span'), labelText)); parent.append(field); return control;
     }
     private render(): void {
         if (!this.content) return;
@@ -342,7 +378,7 @@ export class ReaderPublication {
         const w = this.words(), profile = this.profile!, plans = node('div', '', 'publication-plan-row');
         const label = readerLabel(node('label', w.plan, 'publication-field'), () => this.words().plan), select = node('select'); readerAttribute(select, 'aria-label', () => this.words().plan);
         const empty = readerLabel(node('option', w.newPlan), () => this.words().newPlan); empty.value = ''; select.append(empty);
-        for (const record of this.inspection!.profiles) { const option = node('option', `${record.profile.id} · ${record.profile.title}`); option.value = record.profile.id; select.append(option); }
+        for (const record of this.inspection!.profiles) { const option = node('option', `${record.profile.id} · ${record.profile.title || this.inspection!.metadata?.value.title || ''}`); option.value = record.profile.id; select.append(option); }
         select.value = this.revision === null ? '' : profile.id;
         select.addEventListener('change', () => {
             this.chooseProfile(this.inspection!.profiles.find(record => record.profile.id === select.value)); this.render();
@@ -352,9 +388,29 @@ export class ReaderPublication {
             }).catch(error => { if (this.current(generation) && view === this.viewRequest) this.report(String(error), true); });
         }); label.append(select); plans.append(label, readerLabel(icon(w.refresh, 'reload', () => void this.refresh()), () => this.words().refresh)); parent.append(plans);
         parent.append(readerLabel(node('p', w.selectHint, 'publication-hint'), () => this.words().selectHint));
+        readerLabel(this.check(parent, w.autoMatter, profile.matter?.automatic === true, automatic => { profile.matter = { ...profile.matter, automatic }; this.changed(); this.render(); }), () => this.words().autoMatter);
+        parent.append(readerLabel(node('p', w.autoMatterHint, 'publication-hint'), () => this.words().autoMatterHint));
+        if (profile.matter?.automatic) {
+            const allCandidates = discoverPublicationMatter({ ...profile, matter: { ...profile.matter, exclude: [] } }, this.inspection!.pages);
+            const found = [...allCandidates.frontMatter, ...allCandidates.volumeMatter, ...allCandidates.appendices, ...allCandidates.backMatter, ...(allCandidates.continued.length === 1 ? allCandidates.continued : [])];
+            if (found.length) {
+                const section = readerLabel(this.section(parent, w.autoIncluded), () => this.words().autoIncluded);
+                for (const page of found) this.check(section, pageTitle(page), !profile.matter.exclude?.includes(page.path), checked => {
+                    const exclude = new Set(profile.matter?.exclude || []); checked ? exclude.delete(page.path) : exclude.add(page.path);
+                    profile.matter = { ...profile.matter, exclude: [...exclude] }; profile.chapters = profile.chapters.filter(name => name !== page.path); this.changed(); this.render();
+                });
+            }
+        }
         const actions = node('div', '', 'publication-actions');
         const assigned = this.matterFiles(), available = this.inspection!.pages.filter(page => !assigned.has(page.path));
-        const choose = (paths: string[]) => { profile.chapters = paths; this.changed(); this.render(); };
+        const choose = (paths: string[]) => {
+            if (profile.matter?.automatic) {
+                const exclude = new Set(profile.matter.exclude || []);
+                paths.forEach(name => exclude.delete(name));
+                profile.matter = { ...profile.matter, exclude: [...exclude] };
+            }
+            profile.chapters = paths; this.changed(); this.render();
+        };
         actions.append(readerLabel(icon(w.all, 'list-plus', () => choose(available.map(page => page.path))), () => this.words().all), readerLabel(icon(w.none, 'eraser', () => choose([])), () => this.words().none),
             readerLabel(node('span', `${w.selectedCount}: ${profile.chapters.filter(file => !assigned.has(file)).length}`, 'publication-hint'), () => `${this.words().selectedCount}: ${profile.chapters.filter(file => !assigned.has(file)).length}`)); parent.append(actions);
         if (!this.inspection!.pages.length) parent.append(readerLabel(node('p', w.empty), () => this.words().empty));
@@ -366,15 +422,24 @@ export class ReaderPublication {
         for (const [title, pages] of groups) {
             const group = node('fieldset', '', 'publication-chapter-group'), legend = node('legend', title); group.append(legend);
             const selectable = pages.filter(page => !assigned.has(page.path));
-            const selected = new Set(profile.chapters), groupCheck = readerLabel(this.check(group, w.all + ' · ' + title, !!selectable.length && selectable.every(page => selected.has(page.path)), checked => {
-                selectable.forEach(page => checked ? selected.add(page.path) : selected.delete(page.path));
-                choose(available.filter(page => selected.has(page.path)).map(page => page.path));
+            const explicit = new Set(profile.chapters);
+            const choosePages = (items: PublicationPage[], checked: boolean) => {
+                const exclude = new Set(profile.matter?.exclude || []), candidates = profile.matter?.automatic ? discoverPublicationMatter({ ...profile, matter: { ...profile.matter, exclude: [] } }, this.inspection!.pages) : undefined;
+                const automatic = new Set([...(candidates?.appendices || []), ...(candidates?.volumeMatter || [])].map(page => page.path));
+                for (const page of items) {
+                    checked ? explicit.add(page.path) : explicit.delete(page.path);
+                    if (!checked && automatic.has(page.path)) exclude.add(page.path);
+                }
+                if (profile.matter?.automatic) profile.matter = { ...profile.matter, exclude: [...exclude] };
+                choose(available.filter(page => explicit.has(page.path)).map(page => page.path));
+            };
+            const selected = new Set(resolvePublicationMatter(profile, this.inspection!.pages).chapters), groupCheck = readerLabel(this.check(group, w.all + ' · ' + title, !!selectable.length && selectable.every(page => selected.has(page.path)), checked => {
+                choosePages(selectable, checked);
             }), () => this.words().all + ' · ' + title); groupCheck.disabled = !selectable.length; groupCheck.indeterminate = selectable.some(page => selected.has(page.path)) && !groupCheck.checked;
             for (const page of pages) {
                 const row = node('div', '', 'publication-chapter');
                 const control = this.check(row, pageTitle(page), !assigned.has(page.path) && selected.has(page.path), checked => {
-                    checked ? selected.add(page.path) : selected.delete(page.path);
-                    choose(available.filter(item => selected.has(item.path)).map(item => item.path));
+                    choosePages([page], checked);
                 }); control.disabled = assigned.has(page.path);
                 row.append(readerLabel(node('small', page.path + (assigned.has(page.path) ? ` · ${w.usedAs} ${assigned.get(page.path)}` : '')), () => page.path + (assigned.has(page.path) ? ` · ${this.words().usedAs} ${this.matterFiles().get(page.path)}` : ''))); group.append(row);
             } parent.append(group);
@@ -382,12 +447,59 @@ export class ReaderPublication {
         this.renderNext(parent);
     }
     private matterFiles(): Map<string, string> {
-        const files = new Map<string, string>(), w = this.words(), profile = this.profile;
+        const files = new Map<string, string>(), w = this.words(), profile = this.profile ? resolvePublicationMatter(this.profile, this.inspection?.pages || []) : undefined;
         for (const [entries, role] of [[profile?.frontMatter, w.front], [profile?.backMatter, w.back]] as const) {
             for (const entry of entries || []) if (entry.file) files.set(entry.file, role);
         }
         if (profile?.continued?.file && profile.continued.enabled !== false) files.set(profile.continued.file, w.continued);
         return files;
+    }
+    private commonChanged(): void { this.metadataDirty = true; this.changed(); }
+    private authorEditor(parent: HTMLElement, authors: WorkAuthor[], update: (authors: WorkAuthor[]) => void, common = false): void {
+        const w = this.words(), prefix = () => common ? `${w.commonPrefix} · ` : '';
+        authors.forEach((author, index) => {
+            const card = node('div', '', 'publication-matter'), grid = node('div', '', 'publication-fields');
+            for (const [key, label] of [['name', () => w.authorName], ['nativeName', () => w.authorNative], ['orcid', () => 'ORCID'], ['affiliation', () => w.affiliation]] as const) {
+                this.input(grid, () => `${prefix()}${label()} ${index + 1}`, author[key] || '', value => { author[key] = value; update(authors); }, false, '', !common);
+            }
+            this.input(grid, () => `${prefix()}${w.authorAliases} ${index + 1}`, (author.aliases || []).join('\n'), value => { author.aliases = value.split('\n').map(name => name.trim()).filter(Boolean); update(authors); }, true, '', !common);
+            card.append(grid, readerLabel(icon(`${prefix()}${w.removeAuthor} ${index + 1}`, 'trash', () => { update(authors.filter((_, position) => position !== index)); this.render(); }), () => `${prefix()}${this.words().removeAuthor} ${index + 1}`)); parent.append(card);
+        });
+        parent.append(readerLabel(icon(`${prefix()}${w.addAuthor}`, 'plus', () => { update([...authors, { name: '' }]); this.render(); }), () => `${prefix()}${this.words().addAuthor}`));
+    }
+    private renderMetadata(parent: HTMLElement): void {
+        if (!this.inspection?.metadata) return;
+        const w = this.words(), value = this.metadataDraft ||= clone(this.inspection.metadata.value), details = node('details', '', 'publication-metadata-editor');
+        details.open = this.metadataExpanded || !this.inspection.metadata.value.title;
+        details.addEventListener('toggle', () => { this.metadataExpanded = details.open; });
+        details.append(readerLabel(node('summary', w.commonMetadata), () => this.words().commonMetadata), readerLabel(node('p', w.commonHint, 'publication-hint'), () => this.words().commonHint));
+        const grid = node('div', '', 'publication-fields');
+        for (const [key, labelKey] of [['title', 'titleField'], ['subtitle', 'subtitle'], ['language', 'language'], ['license', 'license'], ['licenseUrl', 'licenseUrl'], ['website', 'website'], ['repository', 'repository'], ['description', 'description'], ['preferredCitation', 'preferredCitation']] as const) {
+            this.input(grid, () => `${w.commonPrefix} · ${w[labelKey]}`, value[key] || '', text => { value[key] = text; this.commonChanged(); }, ['description', 'preferredCitation'].includes(key), '', false);
+        }
+        this.input(grid, () => `${w.commonPrefix} · ${w.keywords}`, (value.keywords || []).join('\n'), text => { value.keywords = text.split('\n').map(item => item.trim()).filter(Boolean); this.commonChanged(); }, true, '', false);
+        this.input(grid, () => `${w.commonPrefix} · ${w.conceptDoi}`, value.doi?.conceptDoi || '', text => { value.doi = { ...value.doi, conceptDoi: text }; this.commonChanged(); }, false, '', false);
+        this.input(grid, () => `${w.commonPrefix} · ${w.provenance}`, value.doi?.provenance || '', text => { value.doi = { ...value.doi, provenance: text }; this.commonChanged(); }, false, '', false);
+        details.append(grid);
+        this.authorEditor(details, value.authors || [], authors => { value.authors = authors; this.commonChanged(); }, true);
+        const conflict = this.metadataDirty && this.metadataDraftRevision !== this.inspection.metadata.revision;
+        if (conflict) details.append(readerLabel(node('p', w.commonConflict, 'publication-warning'), () => this.words().commonConflict));
+        const save = readerLabel(icon(w.saveCommon, 'save', () => void this.saveCommon()), () => this.words().saveCommon); save.disabled = conflict;
+        details.append(save, readerLabel(icon(w.reloadCommon, 'reload', () => {
+            void this.request<Inspection>('/api/publication').then(inspection => {
+                this.inspection!.metadata = inspection.metadata; this.metadataDraft = clone(inspection.metadata.value); this.metadataDraftRevision = inspection.metadata.revision; this.metadataDirty = false; this.changed(); this.render();
+            }).catch(error => this.report(String(error), true));
+        }), () => this.words().reloadCommon)); parent.append(details);
+    }
+    private editionField(parent: HTMLElement, key: keyof WorkMetadata, label: () => string, multiline = false): void {
+        const p = this.profile!, w = this.words(), effective = mergeWorkMetadata(this.inspection?.metadata?.value || {}, p), overridden = Object.prototype.hasOwnProperty.call(p, key);
+        const row = node('div', '', 'publication-override');
+        this.check(row, () => `${w.override} · ${label()}`, overridden, checked => {
+            if (checked) (p as any)[key] = clone((effective as any)[key] ?? ''); else delete (p as any)[key];
+            this.changed(); this.render();
+        });
+        const control = this.input(row, label, String((effective as any)[key] || ''), value => { (p as any)[key] = value; }, multiline, overridden ? '' : () => this.words().inherited);
+        control.readOnly = !overridden; parent.append(row);
     }
     private manuscriptPicker(parent: HTMLElement, role: 'front-matter' | 'back-matter' | 'continued', current: string | undefined,
         update: (value: string | undefined) => void, identity: string): void {
@@ -410,28 +522,53 @@ export class ReaderPublication {
     }
     private renderDetails(parent: HTMLElement): void {
         const w = this.words(), p = this.profile!, grid = node('div', '', 'publication-fields');
+        this.renderMetadata(parent);
         readerLabel(this.input(grid, w.planName, p.id, value => {
             p.id = value; this.revision = null; this.status = undefined; this.build = undefined; this.manifest = undefined; ++this.viewRequest;
         }, false, () => this.words().planHint), () => this.words().planName);
         readerLabel(this.input(grid, w.work, p.workId, value => { p.workId = value; }, false, () => this.words().workHint), () => this.words().work);
-        readerLabel(this.input(grid, w.titleField, p.title, value => { p.title = value; }), () => this.words().titleField);
-        readerLabel(this.input(grid, w.subtitle, p.subtitle || '', value => { p.subtitle = value; }), () => this.words().subtitle);
-        readerLabel(this.input(grid, w.author, p.authors.map(author => author.name).join('\n'), value => {
-            const existing = new Map(p.authors.map(author => [author.name, author]));
-            p.authors = value.split('\n').filter(name => name.trim()).map(name => existing.get(name.trim()) || { name: name.trim() });
-        }, true), () => this.words().author);
+        this.editionField(grid, 'title', () => w.titleField);
+        this.editionField(grid, 'subtitle', () => w.subtitle);
         readerLabel(this.input(grid, w.version, p.version, value => { p.version = value; }), () => this.words().version);
         readerLabel(this.input(grid, w.edition, p.edition || '', value => { p.edition = value; }), () => this.words().edition);
-        readerLabel(this.input(grid, w.license, p.license || '', value => { p.license = value; }), () => this.words().license);
+        readerLabel(this.input(grid, w.releaseTag, p.releaseTag || '', value => { p.releaseTag = value; }), () => this.words().releaseTag);
+        readerLabel(this.input(grid, w.releaseCommit, p.releaseCommit || '', value => { p.releaseCommit = value; }), () => this.words().releaseCommit);
+        this.editionField(grid, 'license', () => w.license);
+        this.editionField(grid, 'licenseUrl', () => w.licenseUrl);
+        this.editionField(grid, 'website', () => w.website);
+        this.editionField(grid, 'repository', () => w.repository);
+        this.editionField(grid, 'preferredCitation', () => w.preferredCitation, true);
         readerLabel(this.input(grid, w.publicationDate, p.publicationDate || '', value => { p.publicationDate = value; }), () => this.words().publicationDate);
-        const language = readerLabel(node('label', w.language, 'publication-field'), () => this.words().language), select = node('select'); readerAttribute(select, 'aria-label', () => this.words().language);
-        for (const locale of ['zh', 'en'] as const) { const option = readerLabel(node('option', w[locale]), () => this.words()[locale]); option.value = locale; select.append(option); }
-        select.value = (p.language || this.context().manuscriptLanguage || this.context().language).startsWith('zh') ? 'zh' : 'en';
-        select.addEventListener('change', () => { p.language = select.value; this.changed(); }); language.append(select); grid.append(language);
-        parent.append(grid); readerLabel(this.input(parent, w.description, p.description || '', value => { p.description = value; }, true), () => this.words().description);
+        const language = readerLabel(node('label', w.language, 'publication-field'), () => this.words().language), languageChoice = node('select'); readerAttribute(languageChoice, 'aria-label', () => this.words().language);
+        readerLabel(this.check(grid, `${w.override} · ${w.language}`, p.language !== undefined, checked => {
+            if (checked) p.language = this.inspection?.metadata?.value.language || this.context().manuscriptLanguage || this.context().language; else delete p.language;
+            this.changed(); this.render();
+        }), () => `${this.words().override} · ${this.words().language}`);
+        for (const locale of ['zh', 'en'] as const) { const option = readerLabel(node('option', w[locale]), () => this.words()[locale]); option.value = locale; languageChoice.append(option); }
+        languageChoice.value = (p.language || this.inspection?.metadata?.value.language || this.context().manuscriptLanguage || this.context().language).startsWith('zh') ? 'zh' : 'en'; languageChoice.disabled = p.language === undefined;
+        languageChoice.addEventListener('change', () => { p.language = languageChoice.value; this.changed(); }); language.append(languageChoice); grid.append(language);
+        parent.append(grid); this.editionField(parent, 'description', () => w.description, true);
+        const authors = readerLabel(this.section(parent, w.author), () => this.words().author), hasAuthors = p.authors !== undefined;
+        readerLabel(this.check(authors, `${w.override} · ${w.author}`, hasAuthors, checked => {
+            if (checked) p.authors = clone(this.inspection?.metadata?.value.authors || []); else delete p.authors;
+            this.changed(); this.render();
+        }), () => `${this.words().override} · ${this.words().author}`);
+        const authorFields = node('fieldset'); authorFields.disabled = !hasAuthors;
+        this.authorEditor(authorFields, clone(p.authors || this.inspection?.metadata?.value.authors || []), value => { p.authors = value; this.changed(); }); authors.append(authorFields);
+        if (!hasAuthors) authors.append(readerLabel(node('p', w.inherited, 'publication-hint'), () => this.words().inherited));
+        const effectiveKeywords = p.keywords || this.inspection?.metadata?.value.keywords || [];
+        const keywordRow = node('div', '', 'publication-override');
+        readerLabel(this.check(keywordRow, `${w.override} · ${w.keywords}`, p.keywords !== undefined, checked => { if (checked) p.keywords = [...effectiveKeywords]; else delete p.keywords; this.changed(); this.render(); }), () => `${this.words().override} · ${this.words().keywords}`);
+        const keywordInput = this.input(keywordRow, () => w.keywords, effectiveKeywords.join('\n'), value => { p.keywords = value.split('\n').map(item => item.trim()).filter(Boolean); }, true); keywordInput.readOnly = p.keywords === undefined; parent.append(keywordRow);
         const cover = readerLabel(this.section(parent, w.cover), () => this.words().cover); cover.append(readerLabel(node('p', w.coverHint, 'publication-hint'), () => this.words().coverHint));
         readerLabel(this.input(cover, w.coverImage, p.cover?.image || '', value => { p.cover = { ...p.cover, image: value || undefined }; }), () => this.words().coverImage);
         readerLabel(this.check(cover, w.coverVersion, p.cover?.showVersion !== false, value => { p.cover = { ...p.cover, showVersion: value }; this.changed(); }), () => this.words().coverVersion);
+        if (p.matter?.automatic) {
+            parent.append(readerLabel(node('p', w.autoMatterHint, 'publication-hint'), () => this.words().autoMatterHint), readerLabel(icon(w.customMatter, 'list-plus', () => {
+                const resolved = resolvePublicationMatter(p, this.inspection?.pages || []);
+                p.frontMatter = resolved.frontMatter; p.backMatter = resolved.backMatter; p.chapters = resolved.chapters; p.continued = resolved.continued; p.matter = { ...p.matter, automatic: false }; this.changed(); this.render();
+            }), () => this.words().customMatter));
+        }
         for (const [key, title] of [['frontMatter', w.front], ['backMatter', w.back]] as const) {
             const section = readerLabel(this.section(parent, title), () => this.words()[key === 'frontMatter' ? 'front' : 'back']);
             const role = key === 'frontMatter' ? 'front-matter' : 'back-matter';
@@ -442,6 +579,12 @@ export class ReaderPublication {
                 readerLabel(this.input(entry, w.matterText, matter.content || '', value => { matter.content = value || undefined; }, true), () => this.words().matterText);
                 readerLabel(this.check(entry, w.inToc, matter.includeInToc !== false, value => { matter.includeInToc = value; this.changed(); }), () => this.words().inToc);
                 entry.append(readerLabel(icon(`${w.removeMatter} ${matter.title || title}`, 'trash', () => { p[key].splice(index, 1); this.changed(); this.render(); }), () => `${this.words().removeMatter} ${matter.title || this.words()[key === 'frontMatter' ? 'front' : 'back']}`)); section.append(entry);
+                for (const direction of [-1, 1]) {
+                    const move = readerLabel(icon(`${direction < 0 ? w.moveUp : w.moveDown} ${matter.title || matter.file || title}`, direction < 0 ? 'chevron-up' : 'chevron-down', () => {
+                        const target = index + direction; [p[key][index], p[key][target]] = [p[key][target], p[key][index]]; this.changed(); this.render();
+                    }), () => `${direction < 0 ? this.words().moveUp : this.words().moveDown} ${matter.title || matter.file || this.words()[key === 'frontMatter' ? 'front' : 'back']}`);
+                    move.disabled = index + direction < 0 || index + direction >= p[key].length; entry.append(move);
+                }
             });
             section.append(readerLabel(icon(`${w.addMatter} ${title}`, 'plus', () => {
                 (p[key] ||= []).push({ includeInToc: true }); this.changed(); this.render();
@@ -476,6 +619,10 @@ export class ReaderPublication {
         const w = this.words(); parent.append(readerLabel(node('p', w.reviewHint, 'publication-hint'), () => this.words().reviewHint));
         const actions = node('div', '', 'publication-actions'); actions.append(readerLabel(icon(w.review, 'scan', () => void this.review(), true), () => this.words().review)); parent.append(actions);
         const plan = this.plan; if (!plan) { parent.append(readerLabel(node('p', w.needReview, 'publication-hint'), () => this.words().needReview)); return; }
+        const metadata = readerLabel(this.section(parent, w.resolvedMetadata), () => this.words().resolvedMetadata), effective = plan.profile;
+        for (const [label, value] of [['titleField', effective.title], ['subtitle', effective.subtitle], ['version', effective.version], ['author', (effective.authors || []).map(author => [author.name, author.nativeName, author.aliases?.join('; '), author.orcid, author.affiliation].filter(Boolean).join(' · ')).join('\n')], ['website', effective.website], ['repository', effective.repository], ['license', effective.license], ['publicationDate', effective.publicationDate], ['versionDoi', plan.doi.versionDoi], ['conceptDoi', plan.doi.conceptDoi]]) {
+            if (value) { const row = node('p', '', 'publication-prose'); row.append(readerText(node('span'), () => `${w[label]}: `), node('span', value)); metadata.append(row); }
+        }
         const summary = node('div', '', 'publication-review-grid');
         for (const [key, pages] of [['selected', plan.selected], ['omitted', plan.omitted]] as const) {
             const section = readerLabel(this.section(summary, `${w[key]} (${pages.length})`), () => `${this.words()[key]} (${pages.length})`), list = node('ol');
@@ -530,8 +677,10 @@ export class ReaderPublication {
         const manual = node('details', '', 'publication-section'); manual.append(readerLabel(node('summary', w.manual), () => this.words().manual));
         const p = this.profile!;
         readerLabel(this.input(manual, w.versionDoi, p.doi?.versionDoi || '', value => { p.doi = { ...p.doi, versionDoi: value || undefined }; }), () => this.words().versionDoi);
-        readerLabel(this.input(manual, w.conceptDoi, p.doi?.conceptDoi || '', value => { p.doi = { ...p.doi, conceptDoi: value || undefined }; }), () => this.words().conceptDoi);
-        readerLabel(this.input(manual, w.provenance, p.doi?.provenance || '', value => { p.doi = { ...p.doi, provenance: value || undefined }; }), () => this.words().provenance);
+        const workDoi = this.input(manual, w.conceptDoi, p.doi?.conceptDoi ?? this.inspection?.metadata?.value.doi?.conceptDoi ?? '', value => { p.doi = { ...p.doi, conceptDoi: value }; });
+        readerLabel(workDoi, () => this.words().conceptDoi);
+        manual.append(readerLabel(icon(`${w.inherited} · ${w.conceptDoi}`, 'reset', () => { if (p.doi) delete p.doi.conceptDoi; this.changed(); this.render(); }), () => `${this.words().inherited} · ${this.words().conceptDoi}`));
+        readerLabel(this.input(manual, w.provenance, p.doi?.provenance ?? this.inspection?.metadata?.value.doi?.provenance ?? '', value => { p.doi = { ...p.doi, provenance: value }; }), () => this.words().provenance);
         manual.append(readerLabel(node('p', w.manualHint, 'publication-hint'), () => this.words().manualHint), readerLabel(icon(w.save, 'save', () => void this.save()), () => this.words().save)); doi.append(manual);
         const zenodo = readerLabel(this.section(doi, w.zenodo), () => this.words().zenodo), remote = this.status?.remote;
         const environment = readerLabel(node('label', w.environment, 'publication-field'), () => this.words().environment), select = node('select'); readerAttribute(select, 'aria-label', () => this.words().environment);
@@ -547,6 +696,23 @@ export class ReaderPublication {
         if (remote?.recordId || remote?.draftId) zenodo.append(readerLabel(node('p', `${w.remoteRecord}: ${remote.recordId || remote.draftId}`), () => `${this.words().remoteRecord}: ${remote.recordId || remote.draftId}`));
         if (remote?.history?.length) { const history = readerLabel(this.section(zenodo, w.oldEditions), () => this.words().oldEditions); remote.history.forEach(edition => history.append(node('p', `${edition.recordId} · ${edition.versionDoi || ''}`))); }
         if (remote?.status === 'published') {
+            const section = readerLabel(this.section(zenodo, w.verification), () => this.words().verification);
+            section.append(readerLabel(node('p', w.verificationHint, 'publication-hint'), () => this.words().verificationHint));
+            if (remote.environment === 'sandbox') section.append(readerLabel(node('p', w.verificationSandbox, 'publication-hint'), () => this.words().verificationSandbox));
+            const receipt = this.status?.verifications?.find(item => item.buildId === build?.id && item.pdfSha256 === build?.pdfSha256 && item.recordId === remote.recordId && item.environment === remote.environment);
+            const verdict = () => !receipt ? this.words().verificationNone : receipt.status === 'verified' ? this.words().verificationPassed : receipt.status === 'failed' ? this.words().verificationFailed : receipt.environment === 'sandbox' && receipt.record.status === 'passed' && receipt.file.status === 'passed' && receipt.doi.httpStatus === 404 ? this.words().verificationSandboxIncomplete : this.words().verificationPending;
+            section.append(readerLabel(node('p', verdict(), receipt?.status === 'failed' ? 'publication-warning' : 'publication-hint'), verdict));
+            if (receipt) {
+                section.append(readerLabel(node('p', `${w.checkedAt}: ${new Date(receipt.checkedAt).toLocaleString(this.context().language)}`), () => `${this.words().checkedAt}: ${new Date(receipt.checkedAt).toLocaleString(this.context().language)}`));
+                for (const [key, label] of [['record', 'recordCheck'], ['file', 'fileCheck'], ['doi', 'doiCheck']] as const) {
+                    const check = receipt[key], line = () => `${this.words()[label]}: ${check.status === 'passed' ? this.words().checkPassed : check.status === 'failed' ? this.words().checkFailed : this.words().checkPending}`;
+                    section.append(readerLabel(node('p', line()), line));
+                }
+            }
+            const verify = readerLabel(icon(w.verifyPublished, 'scan', () => {
+                if (build && remote.recordId) void this.remoteAction('verify-published', { buildId: build.id, pdfSha256: build.pdfSha256, recordId: remote.recordId });
+            }), () => this.words().verifyPublished);
+            verify.disabled = !build || !remote.recordId; section.append(verify);
             const confirm = readerLabel(this.check(zenodo, w.confirmNew, this.versionConfirmed, value => { this.versionConfirmed = value; next.disabled = !value || !credentialReady; }), () => this.words().confirmNew);
             confirm.dataset.newVersionConfirm = 'true';
             const next = readerLabel(icon(w.newVersion, 'plus', () => { if (this.versionConfirmed) void this.remoteAction('reserve-doi', { mode: 'new-version', expectedRecordId: remote.recordId, confirmedNewVersion: true }); }), () => this.words().newVersion);
@@ -593,6 +759,7 @@ export class ReaderPublication {
     private async save(): Promise<boolean> {
         if (!this.profile || this.busy) return false;
         const generation = this.generation;
+        if (this.metadataDirty && !await this.saveCommon()) return false;
         const result = await this.run('save', { profile: clone(this.profile), expectedRevision: this.revision });
         if (!result || !this.current(generation)) return false;
         const record = result as PublicationProfileRecord; this.profile = clone(record.profile); this.revision = record.revision; this.dirty = false;
@@ -600,6 +767,12 @@ export class ReaderPublication {
         this.busy = true; this.render(); this.report(this.words().saved);
         try { await this.readStatus(generation); } catch (error) { if (this.current(generation)) this.report(String(error), true); }
         if (!this.current(generation)) return false; this.busy = false; this.render(); return true;
+    }
+    private async saveCommon(): Promise<boolean> {
+        if (this.busy || !this.inspection?.metadata || !this.metadataDraft) return false;
+        const generation = this.generation, result = await this.run('save-metadata', { metadata: clone(this.metadataDraft), expectedRevision: this.metadataDraftRevision });
+        if (!result || !this.current(generation)) return false;
+        this.inspection.metadata = result; this.metadataDraft = clone(result.value); this.metadataDraftRevision = result.revision; this.metadataDirty = false; this.changed(); this.render(); this.report(this.words().commonSaved); return true;
     }
     private async review(): Promise<void> {
         if (!this.profile?.chapters.length) { this.report(this.words().noSelection, true); return; }
@@ -619,8 +792,8 @@ export class ReaderPublication {
     private async remoteAction(action: string, fields: Record<string, unknown>): Promise<void> {
         if (!this.profile || this.busy) return;
         const generation = this.generation;
-        if (this.dirty && !await this.save()) return;
-        if (this.revision === null && !await this.save()) return;
+        if (action !== 'verify-published' && this.dirty && !await this.save()) return;
+        if (action !== 'verify-published' && this.revision === null && !await this.save()) return;
         if (!this.current(generation)) return;
         const result = await this.run(action, { profileId: this.profile!.id, expectedRevision: this.revision, ...fields });
         if (!result || !this.current(generation)) return;
@@ -639,7 +812,7 @@ export class ReaderPublication {
     private async run(action: string, fields: Record<string, unknown>): Promise<any | undefined> {
         if (this.busy) return undefined;
         const generation = this.generation; this.busy = true; this.render();
-        const w = this.words(); this.report(action === 'save' ? w.savePhase : action === 'review' ? w.reviewPhase : action === 'build' ? w.buildPhase : w.remotePhase);
+        const w = this.words(); this.report(action === 'save-metadata' ? w.savingCommon : action === 'save' ? w.savePhase : action === 'review' ? w.reviewPhase : action === 'build' ? w.buildPhase : w.remotePhase);
         try {
             const job = await this.request<PublicationJob>('/api/publication/action', { action, ...fields }, generation);
             if (!this.current(generation)) return undefined;
@@ -671,6 +844,7 @@ export class ReaderPublication {
     private phase(job: PublicationJob): string {
         const w = this.words();
         if (job.action === 'save') return w.savePhase;
+        if (job.action === 'save-metadata') return w.savingCommon;
         if (job.action === 'review') return w.reviewPhase;
         if (job.action !== 'build') return w.remotePhase;
         if (/immutable|saved|saving/i.test(job.phase)) return w.retainPhase;

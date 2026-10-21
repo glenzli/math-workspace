@@ -15,17 +15,42 @@ const hash = (bytes, algorithm = 'sha256') => createHash(algorithm).update(bytes
 const clone = value => JSON.parse(JSON.stringify(value));
 
 class MockZenodo {
-    records = new Map(); calls = []; next = 101; unknownCreate = false; unknownUpload = false; maliciousBucket = false; publicationAckChange;
-    expectedToken = 'TEST_ONLY_SECRET'; createStatus; getStatus; malformedCreate = false;
+    records = new Map(); calls = []; next = 101; unknownCreate = false; unknownUpload = false; unknownReservation = false; placeholderReservation = false; maliciousBucket = false; publicationAckChange;
+    expectedToken = 'TEST_ONLY_SECRET'; createStatus; getStatus; malformedCreate = false; bareFileChecksums = false; nullableCreatorAffiliations = false;
     async fetch(input, options = {}) {
         const url = new URL(input), method = options.method || 'GET';
         assert.equal(url.origin, 'https://sandbox.zenodo.org'); assert.equal(options.redirect, 'error');
         assert.equal(options.headers.Authorization, `Bearer ${this.expectedToken}`);
         this.calls.push({ path: url.pathname, method });
-        const result = (value, status = 200) => ({ ok: true, status, json: async () => clone(value) });
+        const result = (value, status = 200) => ({ ok: true, status, json: async () => {
+            const copy = clone(value);
+            if (this.bareFileChecksums && copy?.files) copy.files.forEach(file => { file.checksum = file.checksum.replace(/^md5:/, ''); });
+            if (this.nullableCreatorAffiliations && copy?.metadata?.creators) copy.metadata.creators.forEach(author => { if (author.affiliation === undefined) author.affiliation = null; });
+            return copy;
+        } });
+        const native = /^\/api\/records\/(\d+)\/draft(?:\/(pids\/doi))?$/.exec(url.pathname);
+        if (native) {
+            assert.equal(options.headers.Accept, 'application/vnd.inveniordm.v1+json');
+            const record = this.records.get(native[1]); assert.ok(record);
+            if (method === 'POST' && native[2] === 'pids/doi') {
+                record.nativeDoi = `10.5072/zenodo.${record.id}`;
+                record.nativeProvider = 'datacite';
+                if (this.unknownReservation) { this.unknownReservation = false; throw new Error('Lost DOI reservation acknowledgement'); }
+            } else if (method === 'PUT' && !native[2]) {
+                assert.equal(options.headers['Content-Type'], 'application/json');
+                const body = JSON.parse(options.body), metadata = body.metadata;
+                record.nativeDoi = body.pids?.doi?.identifier; record.nativeProvider = body.pids?.doi?.provider; record.nativeMetadata = metadata;
+                record.metadata = { upload_type: 'publication', publication_type: 'book', title: metadata.title, creators: metadata.creators.map(author => ({ name: author.person_or_org.name, ...(author.affiliations?.length ? { affiliation: author.affiliations[0].name } : {}), ...(author.person_or_org.identifiers?.length ? { orcid: author.person_or_org.identifiers[0].identifier } : {}) })), description: metadata.description, version: metadata.version, publication_date: metadata.publication_date, access_right: 'open', license: metadata.rights[0].id, ...(metadata.languages?.length ? { language: metadata.languages[0].id } : {}), prereserve_doi: { doi: record.nativeDoi, recid: record.id } };
+                if (metadata.subjects?.length) record.metadata.keywords = metadata.subjects.map(item => item.subject);
+                if (metadata.additional_descriptions?.length) record.metadata.notes = metadata.additional_descriptions.filter(item => item.type.id === 'notes').map(item => item.description).join('');
+                if (metadata.related_identifiers?.length) record.metadata.related_identifiers = metadata.related_identifiers.map(item => ({ identifier: item.identifier, scheme: item.scheme, relation: item.relation_type.id === 'isdescribedby' ? 'isDescribedBy' : 'isDerivedFrom' }));
+            } else assert.equal(method, 'GET');
+            return result({ id: record.id, is_published: false, is_draft: true, metadata: record.nativeMetadata || {}, pids: record.nativeDoi ? { doi: { identifier: record.nativeDoi, provider: record.nativeProvider || 'datacite' } } : {} });
+        }
         if (url.pathname === '/api/deposit/depositions' && method === 'POST') {
             if (this.createStatus) { const status = this.createStatus; this.createStatus = undefined; return { ok: false, status, json: async () => { throw new Error('A rejected response body must not be read.'); } }; }
             const id = String(this.next++), record = { id, submitted: false, state: 'unsubmitted', conceptdoi: '10.5072/zenodo.100', conceptrecid: '100', metadata: {}, files: [], links: { bucket: `https://sandbox.zenodo.org/api/files/bucket-${id}` } };
+            if (this.placeholderReservation) record.metadata.prereserve_doi = { doi: `10.5281/zenodo.${id}`, recid: id };
             this.records.set(id, record); if (this.unknownCreate) { this.unknownCreate = false; throw new Error('TEST_ONLY_SECRET must never escape'); }
             if (this.malformedCreate) { this.malformedCreate = false; return { ok: true, status: 201, json: async () => { throw new Error('Malformed JSON'); } }; } return result(record, 201);
         }
@@ -43,7 +68,7 @@ class MockZenodo {
             const copy = clone(record); if (this.maliciousBucket) copy.links.bucket = 'https://untrusted.invalid/api/files/stolen'; return result(copy);
         }
         if (suffix === 'actions/newversion' && method === 'POST') {
-            assert.equal(record.submitted, true); const id = String(this.next++), next = clone(record); next.id = id; next.submitted = false; next.state = 'unsubmitted'; delete next.doi; delete next.metadata.doi; delete next.metadata.prereserve_doi;
+            assert.equal(record.submitted, true); const id = String(this.next++), next = clone(record); next.id = id; next.submitted = false; next.state = 'unsubmitted'; delete next.doi; delete next.nativeDoi; delete next.metadata.doi; delete next.metadata.prereserve_doi;
             next.links.bucket = `https://sandbox.zenodo.org/api/files/bucket-${id}`; next.files = next.files.map(file => ({ ...file, id: `inherited-${id}` })); this.records.set(id, next);
             return result({ links: { latest_draft: `https://sandbox.zenodo.org/api/deposit/depositions/${id}` } }, 201);
         }
@@ -111,6 +136,94 @@ export async function testPublications() {
     await check('full selected book is not partial because of another book', async f => {
         f.profile.chapters = ['book1/01-one.md', 'book1/02-two.md', 'book1/03-three.md']; const plan = await f.service.plan(f.profile); assert.equal(plan.partial, false); assert.equal(plan.continuedNotice.enabled, false);
     });
+    const sharedMetadata = () => ({ title: 'Shared work', subtitle: 'A common subtitle', authors: [{ name: 'Li, Example', nativeName: '示例作者', aliases: ['Example Li'], orcid: '0000-0002-1825-0097', affiliation: 'Example Institute' }], language: 'en-US', description: 'Shared work description.', license: 'cc-by-4.0', licenseUrl: 'https://creativecommons.org/licenses/by/4.0/', website: 'https://example.org/book', repository: 'https://github.com/example/book', preferredCitation: 'Li. Shared work.', keywords: ['mathematics', 'examples'] });
+    const inherit = profile => { for (const key of ['title', 'subtitle', 'authors', 'language', 'license', 'description', 'repository']) delete profile[key]; };
+    await check('shared metadata is inherited without copying it into edition overrides', async f => {
+        const initial = await f.service.metadata(); await f.service.saveMetadata(sharedMetadata(), initial.revision); inherit(f.profile);
+        const saved = await f.service.save(f.profile, null), plan = await f.service.plan(saved.profile);
+        assert.equal(saved.profile.title, undefined); assert.equal(saved.profile.authors, undefined); assert.equal(plan.profile.title, 'Shared work');
+        assert.equal(plan.profile.authors[0].orcid, 'https://orcid.org/0000-0002-1825-0097'); assert.equal(plan.projectMetadata.website, 'https://example.org/book');
+        assert.equal(plan.profileOverrides.title, undefined);
+        const overridden = await f.service.plan({ ...f.profile, title: 'This edition', website: '', authors: [] });
+        assert.equal(overridden.profile.title, 'This edition'); assert.equal(overridden.profile.website, ''); assert.deepEqual(overridden.profile.authors, []);
+    });
+    await check('project metadata CAS preserves config and rejects concurrent or invalid updates', async f => {
+        await f.put('.math-workspace/config.json', JSON.stringify({ language: 'en', custom: { retained: true }, pdf: { margin: '3cm' } }));
+        const initial = await f.service.metadata(), saved = await f.service.saveMetadata(sharedMetadata(), initial.revision);
+        const config = JSON.parse(await fs.readFile(path.join(f.root, '.math-workspace/config.json')));
+        assert.deepEqual(config.custom, { retained: true }); assert.equal(config.pdf.margin, '3cm'); assert.notEqual(initial.revision, saved.revision);
+        await assert.rejects(f.service.saveMetadata({ title: 'Stale' }, initial.revision), /changed/);
+        await assert.rejects(f.service.saveMetadata({ website: 'javascript:alert(1)' }, saved.revision), /HTTP or HTTPS/);
+        await assert.rejects(f.service.saveMetadata({ repository: 'https://token@example.org/repo' }, saved.revision), /Invalid/);
+        await assert.rejects(f.service.saveMetadata({ authors: [{ name: 'A', orcid: 'not-an-orcid' }] }, saved.revision), /ORCID/);
+        assert.equal((await f.service.metadata()).value.title, 'Shared work'); assert.equal(f.remote.calls.length, 0);
+    });
+    await check('old PDF identity remains a fallback while explicit common values take precedence', async f => {
+        await f.put('.math-workspace/config.json', JSON.stringify({ language: 'en', pdf: { title: 'Old title', author: 'Old author', repository: 'https://example.org/old' }, metadata: { title: 'Common title', website: 'https://example.org/new' } }));
+        inherit(f.profile); const plan = await f.service.plan(f.profile);
+        assert.equal(plan.profile.title, 'Common title'); assert.equal(plan.profile.authors[0].name, 'Old author'); assert.equal(plan.profile.repository, 'https://example.org/old');
+        assert.equal((await f.service.plan({ ...f.profile, title: 'Legacy explicit title' })).profile.title, 'Legacy explicit title');
+    });
+    await check('PDF, citation and Zenodo use the same resolved author and source metadata', async f => {
+        await f.service.saveMetadata(sharedMetadata(), (await f.service.metadata()).revision); inherit(f.profile);
+        const remote = await reserve(f), release = await build(f), rendered = f.rendered.at(-1), citation = JSON.parse((await f.service.readArtifact('book', release.id, 'citation.json')).bytes);
+        assert(rendered.args.includes('--website=https://example.org/book')); assert(rendered.args.includes('--repository=https://github.com/example/book'));
+        const authors = JSON.parse(rendered.args.find(value => value.startsWith('--authors-json=')).slice('--authors-json='.length));
+        assert.equal(authors[0].affiliation, 'Example Institute'); assert.deepEqual(authors[0].aliases, ['Example Li']);
+        assert.equal(citation.URL, 'https://example.org/book'); assert.equal(citation.repository, 'https://github.com/example/book'); assert.equal(citation.author[0].ORCID, authors[0].orcid); assert.equal(citation.author[0].affiliation, authors[0].affiliation);
+        assert.equal(citation.language, 'en-US'); assert.equal(citation.abstract, 'Shared work description.'); assert.equal(citation.note, 'Li. Shared work.');
+        const uploaded = await upload(f, release, remote), native = f.remote.records.get(uploaded.draftId).nativeMetadata;
+        assert.equal(native.creators[0].affiliations[0].name, authors[0].affiliation); assert.equal(native.creators[0].person_or_org.identifiers[0].identifier, '0000-0002-1825-0097');
+        assert.deepEqual(native.related_identifiers.map(item => [item.identifier, item.relation_type.id]), [['https://example.org/book', 'isdescribedby'], ['https://github.com/example/book', 'isderivedfrom']]);
+        assert.deepEqual(native.subjects.map(item => item.subject), ['mathematics', 'examples']);
+        assert.match(native.additional_descriptions.find(item => item.type.id === 'notes').description, /Preferred citation: Li\. Shared work\./);
+        assert.match(native.additional_descriptions.find(item => item.type.id === 'notes').description, /示例作者/);
+        const before = await f.service.metadata(); await f.service.saveMetadata({ ...before.value, website: 'https://example.org/revised' }, before.revision);
+        await assert.rejects(f.service.publish('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: uploaded.revision, recordId: uploaded.draftId }), /sources, profile, or DOI/);
+        assert.equal(f.remote.records.get(uploaded.draftId).submitted, false);
+        assert.equal(JSON.parse((await f.service.readArtifact('book', release.id, 'citation.json')).bytes).website, 'https://example.org/book');
+    });
+    await check('changing shared metadata invalidates a reviewed build fingerprint', async f => {
+        await f.service.saveMetadata(sharedMetadata(), (await f.service.metadata()).revision); inherit(f.profile); const plan = await f.service.plan(f.profile);
+        await f.service.saveMetadata({ ...sharedMetadata(), title: 'New common title' }, (await f.service.metadata()).revision);
+        await assert.rejects(f.service.build(f.profile, plan.fingerprint), /plan changed/);
+    });
+    await check('common work DOI is inherited while edition DOI remains an edition value', async f => {
+        const value = { ...sharedMetadata(), doi: { conceptDoi: '10.1234/work', provenance: 'From the existing work record.' } };
+        await f.service.saveMetadata(value, (await f.service.metadata()).revision); inherit(f.profile);
+        const plan = await f.service.plan({ ...f.profile, doi: { versionDoi: '10.1234/edition' } });
+        assert.equal(plan.doi.conceptDoi, '10.1234/work'); assert.equal(plan.doi.versionDoi, '10.1234/edition'); assert.equal(plan.doi.source, 'manual');
+    });
+    await check('new plans discover structural matter and numbered appendices in the selected book only', async f => {
+        await f.put('book1/front-matter/preface.md', '# #h-5555555555555555 A personal preface\n\nBefore the chapters.');
+        await f.put('book1/back-matter/afterword.md', '# #h-6666666666666666 A personal ending\n\nAfter the appendices.');
+        await f.put('book1/appendix-a-details.md', '# #h-7777777777777777 Details\n\nTheorem #h-dddddddddddddddd (Appendix result): True.');
+        await f.put('book2/back-matter/other.md', '# Another book ending');
+        f.profile.frontMatter = []; f.profile.backMatter = [];
+        assert.equal((await f.service.plan(f.profile)).frontMatter.length, 0, 'Existing explicit plans do not silently expand.');
+        assert.equal((await f.service.inspect()).defaultProfile.matter.automatic, true);
+        f.profile.matter = { automatic: true }; const plan = await f.service.plan(f.profile);
+        assert.deepEqual(plan.frontMatter.map(item => item.file), ['book1/front-matter/preface.md']);
+        assert.deepEqual(plan.backMatter.map(item => item.file), ['book1/back-matter/afterword.md']);
+        assert(plan.selected.some(page => page.path === 'book1/appendix-a-details.md')); assert(!plan.backMatter.some(item => item.file.startsWith('book2/')));
+        const release = await f.service.build(f.profile, plan.fingerprint), compiled = (await f.service.readArtifact('book', release.id, 'compiled.md')).bytes.toString();
+        assert.match(compiled, /Theorem A\.1/); assert(compiled.indexOf('Details') < compiled.indexOf('A personal ending'));
+        assert.equal(f.rendered.at(-1).front.includes('A personal preface'), true);
+        const excluded = await f.service.plan({ ...f.profile, matter: { automatic: true, exclude: ['book1/back-matter/afterword.md', 'book1/appendix-a-details.md'] } });
+        assert.equal(excluded.backMatter.length, 0); assert(!excluded.selected.some(page => page.kind === 'appendix'));
+    });
+    await check('automatic volume matter stays around the selected volume without importing another volume', async f => {
+        await f.put('book1/vol-i/01-main.md', '# #h-5555555555555555 Volume one main\n\nVolume one body.');
+        await f.put('book1/vol-i/front-matter/preface.md', '# #h-6666666666666666 Volume one preface\n\nFirst volume only.');
+        await f.put('book1/vol-i/back-matter/ending.md', '# #h-7777777777777777 Volume one ending\n\nEnd of first volume.');
+        await f.put('book1/vol-ii/01-main.md', '# #h-8888888888888888 Volume two main');
+        await f.put('book1/vol-ii/back-matter/ending.md', '# #h-9999999999999999 Volume two ending');
+        f.profile.chapters = ['book1/vol-i/01-main.md']; f.profile.frontMatter = []; f.profile.backMatter = []; f.profile.matter = { automatic: true };
+        const plan = await f.service.plan(f.profile);
+        assert.deepEqual(plan.selected.map(page => page.path), ['book1/vol-i/front-matter/preface.md', 'book1/vol-i/01-main.md', 'book1/vol-i/back-matter/ending.md']);
+        assert.equal(plan.frontMatter.length, 0); assert.equal(plan.backMatter.length, 0);
+        assert.equal(plan.selected.some(page => page.path.includes('vol-ii')), false);
+    });
     await check('CAS keeps work identity and concurrent edits bounded', async f => {
         const one = await f.service.save(f.profile, null); await assert.rejects(f.service.save(f.profile, null), /changed/); await assert.rejects(f.service.save({ ...f.profile, workId: 'different' }, one.revision), /stable work/); const two = await f.service.save({ ...f.profile, version: '0.2.0' }, one.revision); assert.equal(two.revision, 2);
     });
@@ -176,11 +289,13 @@ export async function testPublications() {
     await check('Chinese publication language selects CTeX without changing the saved profile', async f => {
         f.profile.language = 'zh-CN'; const saved = await f.service.save(f.profile, null); await build(f);
         assert(f.rendered[0].args.includes('--lang=zh-CN')); assert.deepEqual(f.rendered[0].args.filter(arg => arg.startsWith('--documentclass=')), ['--documentclass=ctexart']);
-        assert(f.rendered[0].args.includes('--variable=classoption:fontset=fandol'));
+        const fonts = (await f.service.plan(f.profile)).tools.chineseFonts;
+        assert(f.rendered[0].args.includes(`--variable=classoption:fontset=${fonts ? 'none' : 'fandol'}`));
+        if (fonts) assert(f.rendered[0].args.includes(`--variable=CJKmainfont:${fonts.family}`));
         assert.equal((await f.service.status(f.profile.id)).profile.revision, saved.revision); assert.equal((await f.service.status(f.profile.id)).profile.profile.pdf.documentClass, undefined);
         await f.put('.math-workspace/config.json', JSON.stringify({ language: 'zh' })); delete f.profile.language; await build(f);
         assert(f.rendered[1].args.includes('--lang=zh-CN')); assert.deepEqual(f.rendered[1].args.filter(arg => arg.startsWith('--documentclass=')), ['--documentclass=ctexart']);
-        assert(f.rendered[1].args.includes('--variable=classoption:fontset=fandol'));
+        assert(f.rendered[1].args.includes(`--variable=classoption:fontset=${fonts ? 'none' : 'fandol'}`));
         f.profile.language = 'en-US'; await build(f);
         assert(f.rendered[2].args.includes('--lang=en-US')); assert.equal(f.rendered[2].args.some(arg => arg.startsWith('--documentclass=')), false, 'Explicit English overrides the Chinese project language.');
         assert.equal(f.rendered[2].args.some(arg => arg.includes('fontset=')), false);
@@ -330,6 +445,51 @@ export async function testPublications() {
         await assert.rejects(f.service.reserveDoi(other.id, saved.revision), /already has a Zenodo binding/); assert.equal(f.remote.calls.filter(call => call.path === '/api/deposit/depositions' && call.method === 'POST').length, creates);
     });
     await check('internal provider guard cannot collide with a valid profile identity', async f => { f.profile.id = 'zenodo-work-bindings'; const remote = await reserve(f); assert.equal(remote.status, 'draft'); });
+    await check('compatibility placeholder is replaced by an actual native DOI reservation', async f => {
+        f.remote.placeholderReservation = true; const remote = await reserve(f);
+        assert.equal(remote.versionDoi, '10.5072/zenodo.101');
+        assert.equal(f.remote.calls.filter(call => call.method === 'POST' && call.path.endsWith('/pids/doi')).length, 1);
+        await f.service.reserveDoi('book', 1);
+        assert.equal(f.remote.calls.filter(call => call.method === 'POST' && call.path.endsWith('/pids/doi')).length, 1);
+    });
+    await check('lost native DOI acknowledgement is reconciled without a second reservation', async f => {
+        f.remote.unknownReservation = true; await f.service.save(f.profile, null);
+        await assert.rejects(f.service.reserveDoi('book', 1), /unknown/);
+        assert.equal((await f.service.status('book')).remote.pending.action, 'reserve-doi');
+        await assert.rejects(f.service.reserveDoi('book', 1), /unresolved/);
+        const attached = await f.service.attachZenodo('book', 1, { id: '101', kind: 'draft' }); assert.equal(attached.versionDoi, '10.5072/zenodo.101'); assert.equal(attached.pending, undefined);
+        await f.service.reserveDoi('book', 1); assert.equal(f.remote.calls.filter(call => call.method === 'POST' && call.path.endsWith('/pids/doi')).length, 1);
+    });
+    await check('a PDF with a stale native reservation cannot be uploaded', async f => {
+        const remote = await reserve(f), release = await build(f); delete f.remote.records.get(remote.draftId).nativeDoi;
+        await assert.rejects(f.service.reviewUpload('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: remote.revision }), /native Zenodo DOI/);
+        assert.equal(f.remote.calls.some(call => call.method === 'DELETE'), false);
+    });
+    await check('legacy bare MD5 retains owned files and exact upload across publication', async f => {
+        f.remote.bareFileChecksums = true; const remote = await reserve(f), release = await build(f), uploaded = await upload(f, release, remote);
+        assert.equal(uploaded.draftFiles[0].owned, true); assert.equal(uploaded.upload.buildId, release.id);
+        const changes = await f.service.reviewUpload('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: uploaded.revision }); assert.deepEqual(changes.blocked, []);
+        const published = await f.service.publish('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: uploaded.revision, recordId: uploaded.draftId });
+        assert.equal(published.upload.buildId, release.id); assert.equal(published.draftFiles[0].owned, true);
+    });
+    await check('nullable creator fields normalize without accepting changed affiliations', async f => {
+        f.remote.nullableCreatorAffiliations = true; const remote = await reserve(f), release = await build(f), uploaded = await upload(f, release, remote);
+        const review = { pdfSha256: release.pdfSha256, remoteRevision: uploaded.revision, recordId: uploaded.draftId };
+        f.remote.records.get(uploaded.draftId).metadata.creators[0].affiliation = 'Changed affiliation';
+        await assert.rejects(f.service.publish('book', release.id, review), /metadata changed/);
+        delete f.remote.records.get(uploaded.draftId).metadata.creators[0].affiliation;
+        assert.equal((await f.service.publish('book', release.id, review)).status, 'published');
+    });
+    await check('metadata updates retain the native DOI registration provider and unrelated metadata', async f => {
+        const remote = await reserve(f), release = await build(f), record = f.remote.records.get(remote.draftId);
+        record.nativeMetadata = { keywords: ['retained'] };
+        await upload(f, release, remote); assert.equal(record.nativeProvider, 'datacite'); assert.deepEqual(record.nativeMetadata.keywords, ['retained']);
+        assert.equal(f.remote.calls.some(call => call.method === 'PUT' && call.path === `/api/deposit/depositions/${remote.draftId}`), false);
+    });
+    await check('externally reclassified DOI blocks a provider-owned edition', async f => {
+        const remote = await reserve(f), release = await build(f); f.remote.records.get(remote.draftId).nativeProvider = 'external';
+        await assert.rejects(f.service.reviewUpload('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: remote.revision }), /registration provider/);
+    });
     await check('exact upload and explicit publication preserve old version', async f => {
         const remote = await reserve(f), release = await build(f); await assert.rejects(f.service.publish('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: remote.revision, recordId: remote.draftId }), /exact uploaded/);
         const uploaded = await upload(f, release, remote); await assert.rejects(f.service.publish('book', release.id, { pdfSha256: release.pdfSha256, remoteRevision: uploaded.revision, recordId: '999' }), /record identity/);

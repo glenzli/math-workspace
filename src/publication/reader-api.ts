@@ -16,7 +16,7 @@ export interface PublicationReaderJob {
 }
 
 type ReaderPublicationService = Pick<PublicationService,
-    'inspect' | 'save' | 'plan' | 'build' | 'status' | 'reserveDoi' | 'attachZenodo' | 'reviewUpload' | 'upload' | 'publish' | 'readArtifact'>;
+    'inspect' | 'save' | 'saveMetadata' | 'plan' | 'build' | 'status' | 'reserveDoi' | 'attachZenodo' | 'reviewUpload' | 'upload' | 'publish' | 'verifyPublished' | 'readArtifact'>;
 
 export interface PublicationReaderApiOptions { service?: (root: string) => ReaderPublicationService }
 
@@ -24,7 +24,7 @@ export class PublicationReaderError extends Error {
     constructor(message: string, readonly status = 400) { super(message); }
 }
 
-const ACTIONS = new Set(['save', 'review', 'build', 'reserve-doi', 'attach-zenodo', 'review-upload', 'upload', 'publish']);
+const ACTIONS = new Set(['save', 'save-metadata', 'review', 'build', 'reserve-doi', 'attach-zenodo', 'review-upload', 'upload', 'publish', 'verify-published']);
 const ARTIFACTS = new Set<PublicationArtifact>(['publication.pdf', 'compiled.md', 'manifest.json', 'citation.json']);
 
 /** Admits one publication operation per captured project; modal navigation never owns the job. */
@@ -69,6 +69,7 @@ export class PublicationReaderApi {
             try {
                 const service = this.service(root);
                 if (body.action === 'save') job.result = await service.save(body.profile, body.expectedRevision);
+                else if (body.action === 'save-metadata') job.result = await service.saveMetadata(body.metadata, body.expectedRevision);
                 else if (body.action === 'review') job.result = await service.plan(body.profile);
                 else if (body.action === 'build') job.result = await service.build(body.profile, body.expectedFingerprint,
                     { onProgress: message => { job.phase = message; } });
@@ -80,6 +81,8 @@ export class PublicationReaderApi {
                     { pdfSha256: body.pdfSha256, remoteRevision: body.remoteRevision });
                 else if (body.action === 'upload') job.result = await service.upload(body.profileId, body.buildId,
                     { pdfSha256: body.pdfSha256, remoteRevision: body.remoteRevision, uploadFingerprint: body.uploadFingerprint });
+                else if (body.action === 'verify-published') job.result = await service.verifyPublished(body.profileId, body.buildId,
+                    { pdfSha256: body.pdfSha256, recordId: body.recordId });
                 else job.result = await service.publish(body.profileId, body.buildId,
                     { pdfSha256: body.pdfSha256, remoteRevision: body.remoteRevision, recordId: body.recordId });
                 job.state = 'completed'; job.phase = 'Completed';

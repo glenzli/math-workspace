@@ -201,7 +201,11 @@ export async function readerToolbarHarness(options = {}) {
     await load('reader-toolbar-menu.ts', './reader-toolbar-menu');
     await load('reader-toolbar-panel.ts', './reader-toolbar-panel');
     await load('reader-create-page.ts', './reader-create-page');
-    if (options.publication) await load('reader-publication.ts', './reader-publication');
+    if (options.publication) {
+        await load('../../../packages/core/src/project-metadata.ts', '../../../packages/core/src/project-metadata');
+        await load('../../publication/matter.ts', '../../publication/matter');
+        await load('reader-publication.ts', './reader-publication');
+    }
     const { ReaderApplication, words } = await load('main.ts', './main', '\nexports.ReaderApplication = ReaderApplication; exports.words = words;');
     const app = Object.create(ReaderApplication.prototype); app.root = document.createElement('main'); document.body.append(app.root);
     app.state = { language: 'zh', projectId: 'project-a', revision: 1, pages: [], definitions: [] };

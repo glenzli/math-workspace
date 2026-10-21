@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import type { PublicationArtifact, PublicationBuild, PublicationProfile, PublicationProfileRecord, PublicationRemoteState } from './types';
+import type { PublicationArtifact, PublicationBuild, PublicationProfile, PublicationProfileRecord, PublicationRemoteState, PublicationVerification } from './types';
 
 const fs = require('node:fs/promises');
 export const sha256 = (value: any): string => crypto.createHash('sha256').update(value).digest('hex');
@@ -51,7 +51,7 @@ export class PublicationStore {
     readonly relativeDirectory = '.math-workspace/publications';
     constructor(root: string) { this.root = path.resolve(root); }
     async directory(relative = ''): Promise<string> { return safePath(this.root, `${this.relativeDirectory}${relative ? `/${relative}` : ''}`); }
-    async locked<T>(id: string, action: () => Promise<T>, namespace: 'profile' | 'provider' = 'profile'): Promise<T> {
+    async locked<T>(id: string, action: () => Promise<T>, namespace: 'profile' | 'provider' | 'metadata' = 'profile'): Promise<T> {
         publicationId(id);
         const parent = await this.directory(`locks/${namespace}`); await fs.mkdir(parent, { recursive: true });
         const lock = await this.directory(`locks/${namespace}/${id}`);
@@ -112,6 +112,20 @@ export class PublicationStore {
         const previous = await this.remote(id);
         const next = { ...value, revision: (previous?.revision || 0) + 1, updatedAt: new Date().toISOString() } as PublicationRemoteState;
         await atomicJson(this.root, `${this.relativeDirectory}/remote/${publicationId(id)}.json`, next); return next;
+    }
+    async verifications(id: string): Promise<PublicationVerification[]> {
+        const directory = await this.directory(`verifications/${publicationId(id)}`); let names: string[];
+        try { names = await fs.readdir(directory); } catch (error: any) { if (error.code === 'ENOENT') return []; throw error; }
+        const values: PublicationVerification[] = [];
+        for (const name of names.sort()) if (/^[a-f0-9]{32}\.json$/.test(name)) {
+            const value = await optionalJson(await safePath(directory, name));
+            if (value?.schema !== 'math-workspace.publication-verification/v1' || value.profileId !== id || value.buildId !== name.slice(0, -5)) throw new Error('Invalid publication verification record.');
+            values.push(value);
+        }
+        return values.sort((a, b) => b.checkedAt.localeCompare(a.checkedAt));
+    }
+    async writeVerification(value: PublicationVerification): Promise<void> {
+        await atomicJson(this.root, `${this.relativeDirectory}/verifications/${publicationId(value.profileId)}/${buildId(value.buildId)}.json`, value);
     }
     async builds(id: string): Promise<PublicationBuild[]> {
         const directory = await this.directory(`builds/${publicationId(id)}`); let names: string[];

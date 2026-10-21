@@ -65,9 +65,15 @@ class Element {
 installReaderTextNodes(Element);
 
 async function harness(language = 'en') {
+    const pureModule = async file => {
+        const exports = {};
+        vm.runInNewContext(ts.transpileModule(await fs.readFile(path.join(root, file), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText, { exports });
+        return exports;
+    };
+    const metadataModule = await pureModule('packages/core/src/project-metadata.ts'), matterModule = await pureModule('src/publication/matter.ts');
     const document = { downloads: [], activeElement: null, createElement(tag) { return new Element(tag, this); } }; document.body = document.createElement('body'); document.activeElement = document.body;
     const context = { language, project: 'project-a', token: 'token-a' }, requests = [], revoked = [], timers = new Map(), previews = []; let sequence = 0, override;
-    const model = { pages: structuredClone(pages), sources: {}, partial: true, warnings: [], profiles: [{ profile: profile(), revision: 1, updatedAt: '' }], builds: [edition()], remote: remote(), job: undefined,
+    const model = { pages: structuredClone(pages), sources: {}, partial: true, warnings: [], profiles: [{ profile: profile(), revision: 1, updatedAt: '' }], builds: [edition()], remote: remote(), job: undefined, verifications: [], credentialConfigured: true,
         uploadPlan: { profileId: 'edition', buildId: hash('b'), draftId: '123', remoteRevision: 4, pdfSha256: hash('a'), fingerprint: hash('c'),
             files: [{ name: 'notes.txt', checksum: 'md5:retained', owned: false }], add: ['publication.pdf'], replace: [], remove: [], blocked: ['notes.txt'] } };
     const currentPlan = (value = profile()) => {
@@ -83,16 +89,24 @@ async function harness(language = 'en') {
         const value = { route, options, body: options.body ? JSON.parse(options.body) : undefined }; requests.push(value);
         assert.equal(options.headers['x-math-workspace-token'], context.token); assert.equal(options.headers['x-math-workspace-project'], context.project);
         if (override) { const result = override(value); if (result) return result; }
-        if (route === '/api/publication') return response({ pages: model.pages, profiles: model.profiles, defaultProfile: profile(), language, tools,
-            credentialStatus: [{ profileId: 'edition', environment: 'sandbox', tokenEnv: 'TEST_TOKEN', configured: true }], job: model.job });
-        if (route.startsWith('/api/publication/status')) return response({ profile: model.profiles[0], builds: model.builds, remote: model.remote, credential: { configured: true } });
+        if (route === '/api/publication') return response({ pages: model.pages, profiles: model.profiles, metadata: model.metadata, defaultProfile: profile(), language, tools,
+            credentialStatus: [{ profileId: 'edition', environment: 'sandbox', tokenEnv: 'TEST_TOKEN', configured: model.credentialConfigured }], job: model.job });
+        if (route.startsWith('/api/publication/status')) return response({ profile: model.profiles[0], metadata: model.metadata, builds: model.builds, remote: model.remote, credential: { configured: model.credentialConfigured }, verifications: model.verifications });
         if (route.includes('/artifact?')) return response({ buildId: hash('b'), plan: currentPlan(), layout: [] });
         if (route === '/api/publication/action') {
             let result;
             if (value.body.action === 'save') { result = { profile: value.body.profile, revision: model.profiles[0].revision + 1, updatedAt: '' }; model.profiles[0] = result; }
+            else if (value.body.action === 'save-metadata') {
+                if (value.body.expectedRevision !== model.metadata.revision) return response('Project metadata changed.', 409);
+                result = { value: value.body.metadata, revision: hash('e') }; model.metadata = result;
+            }
             else if (value.body.action === 'review') result = currentPlan(value.body.profile);
             else if (value.body.action === 'build') result = edition();
             else if (value.body.action === 'review-upload') result = model.uploadPlan;
+            else if (value.body.action === 'verify-published') {
+                result = { profileId: 'edition', buildId: hash('b'), pdfSha256: hash('a'), recordId: '123', environment: 'sandbox', status: 'pending', checkedAt: '2026-10-21T00:00:00Z', record: { status: 'passed' }, file: { status: 'passed' }, doi: { status: 'pending', httpStatus: 404 } };
+                model.verifications = [result];
+            }
             else result = model.remote;
             return response({ id: 'job-' + (++sequence), action: value.body.action, state: 'completed', phase: 'done', result });
         }
@@ -104,7 +118,7 @@ async function harness(language = 'en') {
         { exports, document, HTMLElement: Element, HTMLInputElement: Element, AbortController, Blob, console,
             URL: { createObjectURL: () => 'blob:publication-' + (++sequence), revokeObjectURL: value => revoked.push(value) },
             setTimeout: run => { const id = ++sequence; timers.set(id, run); return id; }, clearTimeout: id => timers.delete(id),
-            require: name => ({ './reader-ui-labels': readerUiLabels, './reader-route': { readerFetch: request }, './reader-publication-pdf': { ReaderPublicationPdf: class {
+            require: name => ({ '../../../packages/core/src/project-metadata': metadataModule, '../../publication/matter': matterModule, './reader-ui-labels': readerUiLabels, './reader-route': { readerFetch: request }, './reader-publication-pdf': { ReaderPublicationPdf: class {
                 constructor(parent, host) { this.host = host; this.canvas = document.createElement('canvas'); parent.append(this.canvas); this.abort = new AbortController(); previews.push(this); }
                 async open(load) { this.blob = await load(this.abort.signal); if (!this.abort.signal.aborted) this.canvas.dataset.rendered = 'true'; }
                 destroy() { this.abort.abort(); this.canvas.remove(); }
@@ -118,6 +132,71 @@ const step = async (h, index) => { const nav = h.document.body.querySelector('.p
 const check = async (h, attribute) => { const control = h.document.body.querySelector('[' + attribute + ']'); assert.ok(control); control.checked = true; await control.emit('change'); await drain(); };
 
 export async function testPublicationUi() {
+    for (const locale of ['en', 'zh']) {
+        const h = await harness(locale);
+        h.model.metadata = { revision: hash('d'), value: { title: 'Shared title', authors: [{ name: 'A', orcid: 'https://orcid.org/0000-0002-1825-0097', affiliation: 'Original institute' }], website: 'https://example.org/book', repository: 'https://github.com/example/book' } };
+        for (const key of ['title', 'authors', 'language', 'description', 'license']) delete h.model.profiles[0].profile[key];
+        await h.reader.open(); await step(h, 1);
+        const field = name => h.document.body.querySelectorAll('input, textarea').find(input => input.getAttribute('aria-label') === name);
+        const prefix = locale === 'en' ? 'Project · ' : '项目 · ', website = locale === 'en' ? 'Work website' : '作品网站', repository = locale === 'en' ? 'Source repository' : '源码仓库';
+        assert.equal(field(website).value, 'https://example.org/book'); assert.equal(field(website).readOnly, true);
+        field(prefix + repository).value = 'https://github.com/example/revised'; await field(prefix + repository).emit('input');
+        field(prefix + 'ORCID 1').value = 'https://orcid.org/0000-0001-5109-3700'; await field(prefix + 'ORCID 1').emit('input');
+        const affiliation = prefix + (locale === 'en' ? 'Affiliation' : '所属机构') + ' 1'; field(affiliation).value = 'Revised institute'; await field(affiliation).emit('input');
+        await action(h, locale === 'en' ? 'Save project metadata' : '保存项目公共信息').emit('click'); await drain();
+        const common = h.requests.find(request => request.body?.action === 'save-metadata').body;
+        assert.equal(common.expectedRevision, hash('d')); assert.equal(common.metadata.repository, 'https://github.com/example/revised'); assert.equal(common.metadata.authors[0].affiliation, 'Revised institute');
+        await action(h, locale === 'en' ? 'Save publication plan' : '保存出版计划').emit('click'); await drain();
+        const saved = h.requests.find(request => request.body?.action === 'save').body.profile;
+        assert.equal(saved.title, undefined); assert.equal(saved.authors, undefined); assert.equal(saved.repository, undefined, 'Shared values do not leak into stored overrides.');
+        const checkbox = h.document.body.querySelectorAll('input').find(input => input.type === 'checkbox' && input.parent.textContent.includes((locale === 'en' ? 'Override for this edition' : '本版单独设置') + ' · ' + website));
+        checkbox.checked = true; await checkbox.emit('change'); assert.equal(field(website).readOnly, false);
+        field(website).value = 'https://example.org/edition'; await field(website).emit('input');
+        await action(h, locale === 'en' ? 'Save publication plan' : '保存出版计划').emit('click'); await drain();
+        assert.equal(h.requests.filter(request => request.body?.action === 'save').at(-1).body.profile.website, 'https://example.org/edition');
+        assert.equal(h.model.metadata.value.website, 'https://example.org/book'); h.reader.close();
+    }
+    const conflict = await harness(); conflict.model.metadata = { value: { title: 'Original common title' }, revision: hash('d') };
+    await conflict.reader.open(); await step(conflict, 1);
+    const commonTitle = conflict.document.body.querySelectorAll('input').find(input => input.getAttribute('aria-label') === 'Project · Book title / title');
+    assert.ok(commonTitle); commonTitle.value = 'Unsaved draft'; await commonTitle.emit('input');
+    conflict.model.metadata = { value: { title: 'Changed elsewhere' }, revision: hash('c') };
+    await step(conflict, 0);
+    await action(conflict, 'Refresh publication status').emit('click'); await drain(); await step(conflict, 1);
+    assert.equal(action(conflict, 'Save project metadata').disabled, true, 'Refreshing cannot silently rebase a dirty common draft over another writer.');
+    assert.ok(conflict.document.body.querySelectorAll('input').some(input => input.value === 'Unsaved draft'));
+    await action(conflict, 'Reload and discard unsaved project metadata').emit('click'); await drain();
+    assert.equal(action(conflict, 'Save project metadata').disabled, false); conflict.reader.close();
+    const automatic = await harness(); automatic.model.profiles[0].profile.matter = { automatic: true };
+    const extra = [
+        { ...page('book/front-matter/01.md', 'Automatic preface'), kind: 'front-matter', volume: undefined },
+        { ...page('book/front-matter/02.md', 'Another preface'), kind: 'front-matter', volume: undefined },
+        { ...page('book/back-matter/01.md', 'Automatic ending'), kind: 'back-matter', volume: undefined },
+        { ...page('book/appendix-a.md', 'Appendix A'), kind: 'appendix', volume: undefined }
+    ]; automatic.model.pages.push(...extra); await automatic.reader.open();
+    assert.match(automatic.document.body.textContent, /Automatically identified pages/);
+    const ending = automatic.document.body.querySelectorAll('input').find(input => input.type === 'checkbox' && !input.disabled && input.parent.textContent === 'Automatic ending');
+    assert.equal(ending.checked, true); ending.checked = false; await ending.emit('change');
+    await step(automatic, 1); await action(automatic, 'Customize inclusion and order').emit('click'); await drain();
+    await action(automatic, 'Save publication plan').emit('click'); await drain();
+    const savedAutomatic = () => automatic.requests.filter(request => request.body?.action === 'save').at(-1).body.profile;
+    assert.deepEqual(savedAutomatic().frontMatter.map(item => item.file).filter(Boolean), extra.slice(0, 2).map(item => item.path));
+    await action(automatic, 'Move up book/front-matter/02.md').emit('click'); await drain();
+    await action(automatic, 'Save publication plan').emit('click'); await drain();
+    assert.deepEqual(savedAutomatic().frontMatter.map(item => item.file).filter(Boolean), extra.slice(0, 2).map(item => item.path).reverse());
+    assert(!savedAutomatic().backMatter.some(item => item.file === extra[2].path));
+    assert(savedAutomatic().chapters.includes(extra[3].path)); automatic.reader.close();
+    const scopes = await harness(); scopes.model.profiles[0].profile.matter = { automatic: true };
+    scopes.model.pages[2].volume = 'vol-2';
+    scopes.model.pages.push({ ...page('book/vol-2/back-matter/ending.md', 'Second volume ending', 'Later volume'), volume: 'vol-2', kind: 'back-matter' });
+    await scopes.reader.open();
+    const chapter = () => scopes.document.body.querySelectorAll('input').find(input => input.type === 'checkbox' && input.parent.textContent === 'Later chapter');
+    chapter().checked = true; await chapter().emit('change');
+    assert(scopes.document.body.querySelectorAll('input').some(input => input.parent.textContent === 'Second volume ending' && input.checked));
+    chapter().checked = false; await chapter().emit('change');
+    assert(!scopes.document.body.querySelectorAll('input').some(input => input.parent.textContent === 'Second volume ending' && input.checked), 'Removing the last selected chapter must also drop its automatically discovered volume matter.');
+    await step(scopes, 1); await action(scopes, 'Save publication plan').emit('click'); await drain();
+    assert.deepEqual(scopes.requests.find(request => request.body?.action === 'save').body.profile.chapters, ['book/01.md', 'book/02.md'], 'Unrelated checkbox edits must never copy automatically added pages into explicit scope.'); scopes.reader.close();
     const focus = await harness(), more = focus.document.createElement('button'), contents = focus.document.createElement('button');
     focus.document.body.append(more, contents); more.focus(); await focus.reader.open(); focus.reader.close();
     assert.equal(focus.document.activeElement, more, 'Closing the actual publication dialog returns focus to its visible launcher.');
@@ -176,6 +255,22 @@ export async function testPublicationUi() {
         assert.ok(h.requests.some(request => request.route.includes('file=manifest.json')), 'Public metadata comes from the frozen manifest.');
         h.reader.close(); assert.ok(h.revoked.length > 0); assert.equal(h.document.body.querySelector('canvas'), null);
         assert.equal(h.previews[0].abort.signal.aborted, true, 'Closing the publication dialog disposes its preview.');
+    }
+    for (const language of ['en', 'zh']) {
+        const v = await harness(language); v.model.remote = { ...remote(), status: 'published', recordId: '123' }; v.model.credentialConfigured = false;
+        await v.reader.open(); await step(v, 3);
+        assert.match(v.document.body.textContent, language === 'en' ? /have not been independently verified/ : /尚未独立核验/);
+        const title = v.document.body.querySelectorAll('input').find(input => input.getAttribute('aria-label') === (language === 'en' ? 'Edition DOI' : '本版 DOI'));
+        title.value = '10.1234/unsaved'; await title.emit('input');
+        const verify = action(v, language === 'en' ? 'Verify public edition' : '核验公开版本'); assert.equal(verify.disabled, false, 'Public verification needs no Zenodo credential.');
+        await verify.emit('click'); await drain();
+        const request = v.requests.find(request => request.body?.action === 'verify-published');
+        assert.equal(request.body.buildId, hash('b')); assert.equal(request.body.recordId, '123'); assert.equal(request.body.pdfSha256, hash('a'));
+        assert.equal(v.requests.some(request => ['save', 'publish', 'reserve-doi', 'upload'].includes(request.body?.action)), false, 'Verifying a frozen edition never saves edits or repeats publication.');
+        assert.match(v.document.body.textContent, language === 'en' ? /Public files verified; DOI resolution is not verified in sandbox/ : /公开文件核验通过；sandbox DOI 解析未验收/);
+        assert.match(v.document.body.textContent, language === 'en' ? /Downloaded PDF: Passed/ : /下载的 PDF: 通过/);
+        assert.match(v.document.body.textContent, language === 'en' ? /Edition DOI resolution: Pending/ : /本版 DOI 解析: 待核验/);
+        v.reader.close();
     }
     const h = await harness(); h.model.remote = { ...remote(), status: 'published', recordId: '123', history: [{ recordId: '99', versionDoi: '10.5072/zenodo.99' }] };
     await h.reader.open(); await step(h, 3);
@@ -285,6 +380,7 @@ export class PublicationService {
  constructor(root) { this.root = root; }
  inspect() { return Promise.resolve({ pages: [], profiles: [], tools: {}, credentialStatus: [] }); }
  save(profile, revision) { state.calls.push({ action: 'save', root: this.root, profile }); return Promise.resolve({ profile, revision: (revision || 0) + 1 }); }
+ saveMetadata(metadata, revision) { state.calls.push({ action: 'save-metadata', root: this.root, metadata, revision }); return Promise.resolve({ value: metadata, revision: 'new-project-revision' }); }
  plan(profile) { state.calls.push({ action: 'review', root: this.root, profile }); return Promise.resolve({ fingerprint: 'f', selected: profile.chapters }); }
  build(profile, fingerprint, options) { state.calls.push({ action: 'build', root: this.root, profile, fingerprint }); options.onProgress('PDF pages'); return new Promise(resolve => state.releases.set(this.root, () => resolve({ id: 'build-a', profileId: profile.id, pdfSha256: 'pdf-sha' }))); }
  status(id) { return Promise.resolve({ id, root: this.root }); }
@@ -293,6 +389,7 @@ export class PublicationService {
  reviewUpload(id, buildId, review) { return Promise.resolve({ profileId: id, buildId, fingerprint: 'files-fingerprint', files: [], add: ['publication.pdf'], replace: [], remove: [], blocked: [] }); }
  upload(id, buildId, review) { state.calls.push({ action: 'upload', root: this.root, id, buildId, review }); return Promise.resolve({ status: 'draft' }); }
  publish(id, buildId, review) { state.calls.push({ action: 'publish', root: this.root, id, buildId, review }); return Promise.resolve({ status: 'published' }); }
+ verifyPublished(id, buildId, request) { state.calls.push({ action: 'verify-published', root: this.root, id, buildId, request }); return Promise.resolve({ status: 'verified', profileId: id, buildId }); }
  readArtifact(profileId, buildId, artifact) { state.calls.push({ action: 'artifact', root: this.root, profileId, buildId, artifact }); if (profileId !== 'edition' || buildId !== 'build-a') throw new Error('Unknown frozen edition'); return Promise.resolve({ bytes: Buffer.from('%PDF fixed fixture'), contentType: 'application/pdf', fileName: artifact }); }
 }`;
 
@@ -329,6 +426,9 @@ async function testPublicationHttp() {
         const artifact = await fetch(server.url + '/api/publication/artifact?profile=edition&build=build-a&file=publication.pdf', { headers });
         assert.equal(artifact.status, 200); assert.equal(artifact.headers.get('content-type'), 'application/pdf'); assert.match(artifact.headers.get('content-disposition'), /publication\.pdf/);
         assert.equal(await artifact.text(), '%PDF fixed fixture');
+        const verified = await post({ action: 'verify-published', profileId: 'edition', buildId: 'build-a', pdfSha256: 'pdf-sha', recordId: '123' });
+        assert.equal(verified.status, 202); await drain();
+        assert.deepEqual(globalThis.__publicationReaderFixture.calls.find(call => call.action === 'verify-published'), { action: 'verify-published', root: roots[0], id: 'edition', buildId: 'build-a', request: { pdfSha256: 'pdf-sha', recordId: '123' } });
         const jobResponse = await post({ action: 'build', profile: profile(), expectedFingerprint: 'f' }); assert.equal(jobResponse.status, 202); const job = await jobResponse.json();
         assert.equal(job.state, 'running'); assert.equal((await post({ action: 'save', profile: profile(), expectedRevision: 0 })).status, 409);
         const resumed = await (await fetch(server.url + '/api/publication', { headers })).json(); assert.equal(resumed.job.id, job.id);

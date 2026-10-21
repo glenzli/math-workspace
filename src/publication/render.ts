@@ -1,6 +1,8 @@
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import { mergeConfig, scanFormalDocuments, shouldExcludeScanPath, formatPageHeading, formatPageReference, stripIgnoredMarkdown, toPosix, sortManuscriptPages } from '@math-workspace/core';
+import { mergeConfig, scanFormalDocuments, shouldExcludeScanPath, formatPageHeading, formatPageReference, stripIgnoredMarkdown, toPosix, sortManuscriptPages, normalizeWorkMetadata, metadataDoi, projectMetadata } from '@math-workspace/core';
+import { resolvePublicationMetadata } from './metadata';
+import { resolvePublicationMatter } from './matter';
 import { PublicationStore, safePath, relativeInput, publicationId, canonical, sha256, atomicJson } from './store';
 import type { PublicationProfile, PublicationPlan, PublicationPage, PublicationInput, PublicationTools, PublicationTool, PublicationServiceOptions, PublicationDoiBinding, PublicationBuild, PublicationBuildOptions, PublicationManifest, PublicationResolvedMatter } from './types';
 
@@ -17,9 +19,7 @@ const list = (value: any, name: string, limit = 1000): any[] => {
     return value;
 };
 export function normalizeDoi(value: unknown): string | undefined {
-    const text = optionalText(value, 'DOI', 300)?.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '');
-    if (text && !/^10\.\d{4,9}\/[^\s<>]+$/i.test(text)) throw new Error('Enter a DOI such as 10.1234/example.');
-    return text;
+    return metadataDoi(value) || undefined;
 }
 export function normalizeProfile(input: PublicationProfile): PublicationProfile {
     if (!input || typeof input !== 'object') throw new Error('A publication profile is required.');
@@ -30,15 +30,12 @@ export function normalizeProfile(input: PublicationProfile): PublicationProfile 
         if (!value.file && !value.content && !value.title) throw new Error(`An empty ${role} entry cannot be published.`);
         return value;
     });
-    const authors = list(input.authors, 'authors', 100).map(item => {
-        const name = optionalText(item?.name, 'author name', 1000); if (!name) throw new Error('Every publication author needs a name.');
-        return { name, orcid: optionalText(item.orcid, 'ORCID', 1000), affiliation: optionalText(item.affiliation, 'affiliation', 3000) };
-    });
+    const metadata = normalizeWorkMetadata(input);
     const chapters = [...new Set<string>(list(input.chapters, 'chapter selection', 10000).map(relativeInput))];
     if (!chapters.length) throw new Error('Select at least one chapter or page.');
     if (chapters.some(file => !/\.md$/i.test(file))) throw new Error('Publication chapters must be Markdown files.');
-    const title = optionalText(input.title, 'title', 3000), version = optionalText(input.version, 'version', 200);
-    if (!title || !version) throw new Error('Publication title and version are required.');
+    const version = optionalText(input.version, 'version', 200);
+    if (!version) throw new Error('Publication version is required.');
     const engine = input.pdf?.engine || 'xelatex';
     if (!['xelatex', 'lualatex', 'pdflatex', 'tectonic'].includes(engine)) throw new Error('Unsupported publication PDF engine.');
     const paper = input.pdf?.paper || 'a4', margin = input.pdf?.margin || '2.5cm';
@@ -62,17 +59,16 @@ export function normalizeProfile(input: PublicationProfile): PublicationProfile 
     const matterFiles = [...frontMatter, ...backMatter, ...(input.continued?.enabled === false || !continuedFile ? [] : [{ file: continuedFile }])].map(entry => entry.file).filter(Boolean);
     if (new Set(matterFiles).size !== matterFiles.length) throw new Error('A publication file can only fill one matter role.');
     return JSON.parse(canonical({
-        id: publicationId(input.id), workId: publicationId(input.workId), title, version, authors, chapters, scope,
-        subtitle: optionalText(input.subtitle, 'subtitle', 3000), edition: optionalText(input.edition, 'edition', 300),
-        language: optionalText(input.language, 'language', 80), license: optionalText(input.license, 'license', 200),
-        description: optionalText(input.description, 'description', 100000), publicationDate: optionalText(input.publicationDate, 'publication date', 100),
-        repository: optionalText(input.repository, 'repository', 3000),
+        ...metadata, id: publicationId(input.id), workId: publicationId(input.workId), version, chapters, scope,
+        edition: optionalText(input.edition, 'edition', 300), publicationDate: optionalText(input.publicationDate, 'publication date', 100),
+        releaseTag: optionalText(input.releaseTag, 'release tag', 300), releaseCommit: optionalText(input.releaseCommit, 'release commit', 300),
         cover: { image: input.cover?.image ? relativeInput(input.cover.image) : undefined, showVersion: input.cover?.showVersion !== false },
         frontMatter, backMatter,
+        matter: input.matter ? { automatic: input.matter.automatic === true, exclude: [...new Set(list(input.matter.exclude, 'excluded matter', 10000).map(relativeInput))] } : undefined,
         toc: { enabled: input.toc?.enabled !== false, depth, title: optionalText(input.toc?.title, 'contents title', 500) },
         continued: { enabled: typeof input.continued?.enabled === 'boolean' ? input.continued.enabled : undefined, file: continuedFile, title: optionalText(input.continued?.title, 'continued title', 1000), text: optionalText(input.continued?.text, 'continued notice', 100000) },
         pdf: { engine, paper, margin, documentClass },
-        doi: { versionDoi: normalizeDoi(input.doi?.versionDoi), conceptDoi: normalizeDoi(input.doi?.conceptDoi), provenance: optionalText(input.doi?.provenance, 'DOI provenance', 3000) },
+        doi: { ...metadata.doi, versionDoi: input.doi?.versionDoi === '' ? '' : normalizeDoi(input.doi?.versionDoi) },
         zenodo: { environment, tokenEnv }
     }));
 }
@@ -90,7 +86,17 @@ export async function probeTool(command: string): Promise<PublicationTool> {
 }
 export async function publicationTools(profile?: PublicationProfile, options: PublicationServiceOptions = {}): Promise<PublicationTools> {
     const probe = options.toolProbe || probeTool, engineName = profile?.pdf?.engine || 'xelatex';
-    const [pandoc, engine] = await Promise.all([probe('pandoc'), probe(engineName)]); return { pandoc, engine, engineName };
+    const [pandoc, engine] = await Promise.all([probe('pandoc'), probe(engineName)]);
+    const tools: PublicationTools = { pandoc, engine, engineName };
+    if (process.platform === 'darwin' && profile?.language?.toLowerCase().startsWith('zh') && !profile.pdf?.documentClass) {
+        // Reuse an already installed, readable system font. No font installation or copying.
+        const file = '/System/Library/Fonts/Supplemental/Songti.ttc';
+        try {
+            await fs.access(file, require('node:fs').constants.R_OK); const stat = await fs.stat(file);
+            if (stat.isFile()) tools.chineseFonts = { family: 'Songti SC', source: 'macos', bytes: stat.size, modifiedAt: stat.mtime.toISOString() };
+        } catch { /* Other environments retain the portable TeX font set. */ }
+    }
+    return tools;
 }
 interface Snapshot { state: any; pages: PublicationPage[]; files: Map<string, any>; inputs: PublicationInput[]; config: any }
 async function readSnapshot(root: string): Promise<Snapshot> {
@@ -138,8 +144,10 @@ function resourceTargets(content: string): Array<{ target: string; image: boolea
     for (const match of content.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi)) targets.push({ target: match[1], image: true });
     return targets;
 }
-export async function makePublicationPlan(root: string, input: PublicationProfile, doi: PublicationDoiBinding, options: PublicationServiceOptions = {}): Promise<{ plan: PublicationPlan; snapshot: Snapshot }> {
-    const profile = normalizeProfile(input), snapshot = await readSnapshot(root), selectedPaths = new Set(profile.chapters);
+export async function makePublicationPlan(root: string, input: PublicationProfile, doiInput: PublicationDoiBinding | ((profile: PublicationProfile) => Promise<PublicationDoiBinding>), options: PublicationServiceOptions = {}): Promise<{ plan: PublicationPlan; snapshot: Snapshot }> {
+    const profileOverrides = normalizeProfile(input), snapshot = await readSnapshot(root);
+    const profile = normalizeProfile(resolvePublicationMatter(resolvePublicationMetadata(profileOverrides, snapshot.config), snapshot.pages)), selectedPaths = new Set(profile.chapters);
+    const doi = typeof doiInput === 'function' ? await doiInput(profile) : doiInput;
     for (const name of selectedPaths) if (!snapshot.files.has(name) || !snapshot.pages.some(page => page.path === name)) throw new Error(`Selected publication page is unavailable or excluded: ${name}`);
     const matters = new Set<string>();
     const resolveMatter = async (entry: any, role: 'front-matter' | 'back-matter' | 'continued'): Promise<PublicationResolvedMatter> => {
@@ -242,7 +250,7 @@ export async function makePublicationPlan(root: string, input: PublicationProfil
     const continuedNotice = { enabled: profile.continued.enabled ?? (!!continuedFile || omitted.length > 0), file: continuedFile?.file, title: profile.continued.title || continuedFile?.title || (english ? 'To be continued' : '未完待续'), text: continuedFile?.content ?? (profile.continued.text || (english ? 'This is a partial edition of a continuing work. Further chapters and revisions will appear in later versions of the same work.' : '本版为持续更新作品的部分内容。后续章节与修订将在同一作品的后续版本中继续发布。')) };
     const warnings = externalReferences.length ? [`${externalReferences.length} reference(s) point outside this edition; omitted pages are not added automatically.`] : [];
     const tools = await publicationTools(profile, options);
-    const content = { schema: 'math-workspace.publication-plan/v1' as const, profile, selected, omitted, externalReferences, partial: omitted.length > 0, frontMatter, backMatter, continuedNotice, doi, inputs: snapshot.inputs.sort((a, b) => a.path.localeCompare(b.path)), tools, warnings };
+    const content = { schema: 'math-workspace.publication-plan/v1' as const, profile, profileOverrides, projectMetadata: projectMetadata(snapshot.config), selected, omitted, externalReferences, partial: omitted.length > 0, frontMatter, backMatter, continuedNotice, doi, inputs: snapshot.inputs.sort((a, b) => a.path.localeCompare(b.path)), tools, warnings };
     return { plan: { ...content, fingerprint: sha256(canonical(content)) }, snapshot };
 }
 function firstHeadingTitle(content: string): string | undefined {
@@ -333,14 +341,27 @@ export async function renderPublication(store: PublicationStore, plan: Publicati
             const defaultChineseClass = !profile.pdf.documentClass && language.toLowerCase().startsWith('zh');
             const documentClass = profile.pdf.documentClass || (defaultChineseClass ? 'ctexart' : undefined);
             const args = ['render-pdf', '../compiled.md', '--out=../publication.pdf', '--no-project-pdf-defaults', '--title-page', '--metadata-page', '--toc-page-break', `--title=${profile.title}`, `--release-version=${profile.version}`, `--author=${profile.authors.map(author => author.name).join('; ')}`, `--pdf-engine=${profile.pdf.engine}`, `--paper=${profile.pdf.paper}`, `--margin=${profile.pdf.margin}`, `--lang=${language}`, `--toc-depth=${profile.toc.depth}`, `--toc-title=${profile.toc.title || (snapshot.config.language === 'en' ? 'Contents' : '目录')}`];
+            args.push(`--authors-json=${JSON.stringify(profile.authors)}`);
             args.push(profile.toc.enabled ? '--toc' : '--no-toc', profile.cover.showVersion ? '--show-version-on-cover' : '--no-show-version-on-cover');
             if (profile.subtitle || profile.edition) args.push(`--subtitle=${[profile.subtitle, profile.edition].filter(Boolean).join(' · ')}`);
             if (profile.cover.image) args.push(`--cover-image=${profile.cover.image}`);
             if (documentClass) args.push(`--documentclass=${documentClass}`);
-            if (defaultChineseClass) args.push('--variable=classoption:fontset=fandol');
+            if (defaultChineseClass) {
+                const family = plan.tools.chineseFonts?.family;
+                if (family) args.push('--variable=classoption:fontset=none', `--variable=CJKmainfont:${family}`, `--variable=CJKsansfont:${family}`, `--variable=CJKmonofont:${family}`);
+                else args.push('--variable=classoption:fontset=fandol');
+            }
             if (profile.license) args.push(`--license=${profile.license}`);
             if (profile.repository) args.push(`--repository=${profile.repository}`);
-            if (profile.publicationDate) args.push(`--date=${profile.publicationDate}`);
+            if (profile.website) args.push(`--website=${profile.website}`);
+            if (profile.licenseUrl) args.push(`--license-url=${profile.licenseUrl}`);
+            if (profile.preferredCitation) args.push(`--preferred-citation=${profile.preferredCitation}`);
+            if (profile.releaseTag) args.push(`--release-tag=${profile.releaseTag}`);
+            if (profile.releaseCommit) args.push(`--release-commit=${profile.releaseCommit}`);
+            if (profile.description) args.push(`--description=${profile.description}`);
+            for (const keyword of profile.keywords || []) args.push(`--keyword=${keyword}`);
+            const publicationDate = profile.publicationDate || createdAt.slice(0, 10);
+            args.push(`--date=${publicationDate}`);
             if (plan.doi.versionDoi) args.push(`--doi=${plan.doi.versionDoi}`);
             if (plan.doi.conceptDoi) args.push(`--work-doi=${plan.doi.conceptDoi}`);
             if (plan.doi.versionDoi || plan.doi.conceptDoi) {
@@ -350,7 +371,7 @@ export async function renderPublication(store: PublicationStore, plan: Publicati
                     : plan.doi.source === 'zenodo'
                         ? chinese ? 'DOI 由 Zenodo 分配；注册信息以 DOI 服务平台记录为准。' : 'DOI assigned through Zenodo; registration details follow the DOI provider record.'
                         : chinese ? 'DOI 信息以 DOI 服务平台记录为准。' : 'DOI information follows the DOI provider record.';
-                args.push(`--doi-state=${note}`);
+                args.push(`--doi-state=${[note, profile.doi?.provenance].filter(Boolean).join(' ')}`);
             }
             for (let index = 0; index < profile.frontMatter.length; index++) {
                 const entry = profile.frontMatter[index], name = `.math-workspace/publication-front-${index}.md`;
@@ -363,7 +384,18 @@ export async function renderPublication(store: PublicationStore, plan: Publicati
             const pdf = await fs.readFile(path.join(temporary, 'publication.pdf'));
             if (!pdf.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new Error('The PDF renderer did not produce a valid PDF file.');
             if ((await recheck().catch(() => null))?.fingerprint !== plan.fingerprint) throw new Error('Publication sources changed during PDF rendering. This build was not saved.');
-            const pdfSha256 = sha256(pdf), markdownBytes = Buffer.from(markdown), citation = { type: 'book', title: profile.title, author: profile.authors.map(author => ({ literal: author.name, ORCID: author.orcid })), version: profile.version, edition: profile.edition, DOI: plan.doi.versionDoi, conceptDOI: plan.doi.conceptDoi, doiProvenance: plan.doi, workId: profile.workId, partial: plan.partial, selectedPages: plan.selected.map(page => page.path) };
+            const pdfSha256 = sha256(pdf), markdownBytes = Buffer.from(markdown);
+            const citation = {
+                type: 'book', title: profile.title, subtitle: profile.subtitle,
+                author: profile.authors.map(author => ({ literal: author.name, ORCID: author.orcid, affiliation: author.affiliation, nativeName: author.nativeName, aliases: author.aliases })),
+                language: profile.language, abstract: profile.description,
+                URL: profile.website || profile.repository, website: profile.website, repository: profile.repository,
+                license: profile.license, licenseUrl: profile.licenseUrl, keyword: profile.keywords?.join(', '), note: profile.preferredCitation,
+                ...(/^\d{4}-\d{2}-\d{2}$/.test(publicationDate) ? { issued: { 'date-parts': [publicationDate.split('-').map(Number)] } } : {}),
+                version: profile.version, edition: profile.edition, sourceTag: profile.releaseTag, sourceCommit: profile.releaseCommit,
+                DOI: plan.doi.versionDoi, conceptDOI: plan.doi.conceptDoi, doiProvenance: plan.doi,
+                workId: profile.workId, partial: plan.partial, selectedPages: plan.selected.map(page => page.path)
+            };
             await fs.writeFile(path.join(temporary, 'citation.json'), canonical(citation), { flag: 'wx' });
             const citationBytes = await fs.readFile(path.join(temporary, 'citation.json'));
             const manifest: PublicationManifest = { schema: 'math-workspace.publication-manifest/v1', buildId: id, createdAt, plan, artifacts: { 'publication.pdf': { sha256: pdfSha256, bytes: pdf.length }, 'compiled.md': { sha256: sha256(markdownBytes), bytes: markdownBytes.length }, 'citation.json': { sha256: sha256(citationBytes), bytes: citationBytes.length } }, layout: ['cover', 'publication metadata', 'front matter', ...(profile.toc.enabled ? ['generated table of contents'] : []), 'selected chapters in original order and numbering', 'back matter', ...(plan.continuedNotice.enabled ? ['to be continued'] : [])], mathematicalCorrectnessAssessed: false, sourceArchiveSignatureAsserted: false };

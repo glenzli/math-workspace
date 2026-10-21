@@ -4,6 +4,8 @@ import type { PublicationProfile } from './types';
 const fs = require('node:fs/promises');
 
 const usage = `math-workspace publication inspect
+math-workspace publication metadata
+math-workspace publication save-metadata <metadata.json> --expected-revision SHA256
 math-workspace publication status <profile-id>
 math-workspace publication save <profile.json> --expected-revision new|N
 math-workspace publication plan <profile.json|profile-id>
@@ -12,7 +14,8 @@ math-workspace publication reserve-doi <profile-id> --expected-revision N [--new
 math-workspace publication attach-zenodo <profile-id> --expected-revision N --kind draft|record --record-id ID
 math-workspace publication review-upload <profile-id> --build ID --pdf-sha256 SHA256 --remote-revision N
 math-workspace publication upload <profile-id> --build ID --pdf-sha256 SHA256 --remote-revision N --upload-fingerprint SHA256
-math-workspace publication publish <profile-id> --build ID --pdf-sha256 SHA256 --remote-revision N --record-id ID`;
+math-workspace publication publish <profile-id> --build ID --pdf-sha256 SHA256 --remote-revision N --record-id ID
+math-workspace publication verify-published <profile-id> --build ID --pdf-sha256 SHA256 --record-id ID`;
 export async function runPublicationCli(args: string[], root = process.cwd()): Promise<void> {
     const [action, selector, ...flags] = args;
     if (!action || action === '--help' || action === 'help') { console.log(usage); return; }
@@ -33,15 +36,19 @@ export async function runPublicationCli(args: string[], root = process.cwd()): P
     };
     let result: any;
     if (action === 'inspect') result = await service.inspect();
+    else if (action === 'metadata') result = await service.metadata();
+    else if (action === 'save-metadata') result = await service.saveMetadata(JSON.parse(await fs.readFile(await safePath(root, relativeInput(selector)), 'utf8')), required('expected-revision'));
     else if (action === 'status') result = await service.status(selector);
     else if (action === 'save') result = await service.save(await profile(), required('expected-revision') === 'new' ? null : revision('expected-revision'));
     else if (action === 'plan') result = await service.plan(await profile());
     else if (action === 'build') result = await service.build(await profile(), required('fingerprint'));
     else if (action === 'reserve-doi') result = await service.reserveDoi(selector, revision('expected-revision'), { mode: options['new-version'] ? 'new-version' : 'reuse-or-create', expectedRecordId: options['new-version'] ? required('record-id') : undefined });
     else if (action === 'attach-zenodo') result = await service.attachZenodo(selector, revision('expected-revision'), { id: required('record-id'), kind: required('kind') as 'draft' | 'record' });
+    else if (action === 'verify-published') result = await service.verifyPublished(selector, required('build'), { pdfSha256: required('pdf-sha256'), recordId: required('record-id') });
     else if (action === 'review-upload' || action === 'upload' || action === 'publish') {
         const review = { pdfSha256: required('pdf-sha256'), remoteRevision: revision('remote-revision') };
         result = action === 'review-upload' ? await service.reviewUpload(selector, required('build'), review) : action === 'upload' ? await service.upload(selector, required('build'), { ...review, uploadFingerprint: required('upload-fingerprint') }) : await service.publish(selector, required('build'), { ...review, recordId: required('record-id') });
     } else throw new Error(`Unknown publication action.\n${usage}`);
     console.log(JSON.stringify(result, null, 2));
+    if (action === 'verify-published' && result.status !== 'verified') process.exitCode = result.status === 'pending' ? 2 : 1;
 }

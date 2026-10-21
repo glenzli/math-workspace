@@ -47,12 +47,13 @@ vasm:
 按任务使用以下规则；采用 Codex 插件的项目通过插件和生成指南读取，不把这些通用内容整份内嵌到项目 skill：
 
 - **写作与引用**：新编号对象用 `#tmp-*` 声明，正文只用 `@h-...`；已有 ID 从目标正文或 `reference-map.md` 的相关行复制；通常完成时只运行 `finish`，它会校验。直接 `finalize`、迁移或 release 门禁才另行 `verify`。
-- **新增稿件**：把 `create-page` 接入项目原生建章/建稿动作，先确认 `chapter|front-matter|back-matter|continued` 与真实书/卷容器（项目根用 `.`），以 `--dry-run --json` 审阅计划，再用 `--expect-state` 绑定计划；计划过期先重读，项目、类型、标题、容器与目标路径未变即可用新 token 继续。helper 分配路径、顺序和稳定页 ID，不覆盖已有稿件；AI 只续写返回的源文件并对它运行 `finish`。前后文可多篇、标题与文体自定，旧 intro/summary 兼容；出版方案显式引用同一 Markdown，不复制稿件、不因创建自动收录。Reader 的“＋”把请求加入输入框而不自动发送。
+- **新增稿件**：把 `create-page` 接入项目原生建章/建稿动作，先确认 `chapter|front-matter|back-matter|continued` 与真实书/卷容器（项目根用 `.`），以 `--dry-run --json` 审阅计划，再用 `--expect-state` 绑定计划；计划过期先重读，项目、类型、标题、容器与目标路径未变即可用新 token 继续。helper 分配路径、顺序和稳定页 ID，不覆盖已有稿件；AI 只续写返回的源文件并对它运行 `finish`。前后文可多篇、标题与文体自定，旧 intro/summary 兼容；出版引用同一 Markdown，不复制稿件；创建本身不修改方案，自动方案重新规划时识别匹配稿件并审阅收录范围。Reader 的“＋”把请求加入输入框而不自动发送。
 - **数学文风**：定义不加 hash；说明类注与随文举例不加 hash。完整独立的例、算例和反例可主动添加 hash，不要求已有后文引用；例与反例共用独立的章内编号。有证明、稳定锚点或后文实际引用的旁支事实可写带 hash 的注，作为未编号的补充事实节点；普通注不进入依赖图。
 - **项目知识**：工具自动抽标准定义，按明确文件名或页面主标题识别概念/术语与符号/记号专页，不限定附录序号；合并页保留两类上下文。`project-analysis.md` 是按需读取的派生摘要。AI 仅为缺失、别名/双语或不可靠边界维护 definitions override。
 - **符号**：只有项目明确新增或改写特殊记号语义时维护经审阅的符号源表；不索引普通变量或整条公式。
 - **结构审阅**：依赖图只来自显式 `@h-...`，覆盖主线命题类对象与带 hash 的补充注释；报告分开统计两层。需要时将 `graph impact`、`focus`、`cycles` 或 `matrix` 接入审阅流程。AI/Lean 推测边须单独存放。
 - **项目边界**：formal root 配置 `scan.exclude`；跨 book 引用或查询显式配置 `lookup.bookDependencies`。
+- **出版元信息**：公共作品信息只维护在项目 `config.json.metadata`，出版方案保存本版覆盖与版本身份；Reader 或同一 CLI 的 `publication save-metadata` 带当前修订号保存。网站与仓库分别维护，作者记录保留 ORCID、机构与别名；不要给每版复制继承值。Reader 新方案自动识别结构化前后文和附录，CLI 用 `matter.automatic`，旧方案主动开启后审阅变化；手动范围与逐项排除仍由作者控制。
 - **PDF 发布**：需要出版时，把卷章选择、原编号、前后文与部分发布声明的审阅接入项目流程；同一作品沿用稳定标识，区分作品 DOI 与本版 DOI。手填 DOI 保留未核验来源；Zenodo 先预留再构建，审阅成品与上传差异后上传草稿，最后显式正式发布，保护其他草稿材料。草稿复用，已发布文件通过同一作品的新版本更新。令牌只在服务进程环境中；发布清单、原稿签名与数学/Lean 证据分别判断。
 
 ## 可融合的最小片段
@@ -60,7 +61,7 @@ vasm:
 ```text
 先确定工具来源：Codex 插件任务复用当前插件 CLI/Reader/通用 skills；独立环境使用已选 CLI/npm。项目只维护特化规则、配置与审阅记录，不因 Codex 接入复制工具包或通用规则。
 进入任务或索引可能过期时运行所选入口的 prepare，并读取目标原文。需要当前上下文外的既有对象时，再从 .math-workspace/reference-map.md 读取匹配行。
-新增章节、前后文或未完待续页时，先用项目已验证入口的 create-page --dry-run --json 检查类型、真实书/卷容器和路径，再以计划 stateToken 创建；保留 helper 分配的稳定页 ID，写正文后 finish 该文件。多篇前后文标题自定，出版显式引用同一 Markdown。Reader 提供确切 Node/CLI/工作目录时直接复用，不为示例静默改项目脚本或替换原生 AI 规则。
+新增章节、前后文或未完待续页时，先用项目已验证入口的 create-page --dry-run --json 检查类型、真实书/卷容器和路径，再以计划 stateToken 创建；保留 helper 分配的稳定页 ID，写正文后 finish 该文件。多篇前后文标题自定，出版引用同一 Markdown，自动方案重新规划后审阅收录范围。Reader 提供确切 Node/CLI/工作目录时直接复用，不为示例静默改项目脚本或替换原生 AI 规则。
 新小节、命题、引理、定理、推论、公式、图、表和需要锚定的旁支事实用 #tmp-* 声明；正文引用只用 @h-... / @h-....title / @h-....full，不手写显示编号。
 定义不加 hash。概念与符号汇总新建时优先放在同书最后一个附录，沿用实际序号；已有合适页直接复用，可合为一页。工具按明确文件名或页面主标题识别专页，不限定附录序号；不要因普通文本编辑重写 definitions.json。只有查询缺失、别名/双语或边界不可靠时才维护 override。特殊符号只有语义明确变化时才维护 symbols.json。
 编辑后运行所选入口的 finish <file-or-dir>，保持 Markdown 和 LaTeX 原样；只有直接 finalize、迁移或 release 门禁才另行运行 verify。

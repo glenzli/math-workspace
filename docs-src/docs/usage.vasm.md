@@ -755,7 +755,7 @@ Lean 项目的 `root` 与 `sourceRoots` 都相对于 Math Workspace 项目根；
 
 ## 按章节发布 PDF
 
-需要逐步发布同一部书时，在 Reader 的“版本与出版 → PDF 出版”新建或继续已有方案。选择本版的卷和章节，填写书名、作者、版本与 DOI，配置封面、前文、目录和后文。前后文各可添加多个条目，在项目稿件列表中选择已有 Markdown，保留作者自己的标题。先审阅收录范围、未收录页、实际引用稿件与跨范围引用，再生成、预览和下载实际 PDF；Zenodo 的草稿上传与正式发布是之后分别启动的动作。
+需要逐步发布同一部书时，在 Reader 的“版本与出版 → PDF 出版”新建或继续已有方案。选择本版的卷和章节，在“版面与信息”的“项目公共信息”维护作品信息；本版只单独设置需要覆盖的字段、版本、日期与 DOI。网站、仓库和每位作者的本名、别名、ORCID、机构均可编辑。先审阅收录范围、实际使用的元信息、未收录页与跨范围引用，再生成、预览和下载实际 PDF；Zenodo 的草稿上传与正式发布是之后分别启动的动作。
 
 发布方案保存选择与元数据，不改写原稿。正文保留整书原有的章号与对象编号；选取第 3、5 章不会改成第 1、2 章。成品顺序为封面、出版信息、前文、目录、所选正文、后文，以及部分发布默认附上的“未完待续 / To be continued”声明；目录和声明可按方案关闭。范围外引用会列入审阅，不会因此自动加入其他章节。
 
@@ -778,22 +778,66 @@ book/
 
 `front-matter/` 与 `back-matter/` 可容纳多篇任意标题的文章，文件名前的 `01-`、`02-` 等数字只控制先后，不作为章号；例如 `ai-retirement-note.md` 的标题可以是“AI 退休寄语”，不必改写成“结语”。`to-be-continued.md` 是独立尾页。已有 `intro.md`、`introduction.md` 与 `summary.md` 继续兼容；卷内的前后文仍在该卷两端。各页按书稿规则保留稳定页标识，文件引用与相对图片沿用正文的编译规则。
 
-出版方案明确引用的全书前后文会排到对应位置；仅在章节列表中勾选的卷内前后文仍按所属卷顺序排版。同一文件被前文、后文或声明中的一个条目引用后，不会在正文重复输出；同一文件重复用于多个条目或角色时，需要先在方案中消除歧义。审阅页列出实际文件路径及内容，原稿或图片变化后需重新审阅。
+Reader 新方案默认开启“自动收录所选书卷的序言、后记、附录等内容”；CLI 方案设 `"matter": { "automatic": true }`。工具复用稿件扫描识别的结构角色：全书前后文进入对应位置，卷内前后文仍在对应卷的两端，附录作为正文保留原有附录号与对象编号；不会仅凭任意正文标题猜测角色，也不会把别的书或未选择卷的前后文加入本版。唯一匹配的“未完待续”稿件可沿用；存在多个候选时需明确选择声明稿件。
+
+可以逐项取消自动收录，CLI 用 `matter.exclude` 保存相对路径；“手动调整收录与顺序”把当前结果转成手动选择，前后文条目可以上移、下移和移除。已有方案保持原有选择，需主动开启自动收录再审阅变化。创建稿件不会改写保存的方案；自动方案在下一次规划时重新识别实际稿件。
+
+同一文件被前文、后文或声明中的一个条目引用后，不会在正文重复输出；同一文件重复用于多个条目或角色时，需要先在方案中消除歧义。审阅页列出实际文件路径及内容，原稿、资源或元信息变化后需重新审阅。
+
+### 公共元信息与本版覆盖
+
+公共作品信息维护在项目 `.math-workspace/config.json` 的 `metadata`，不要复制到每一版方案中。例如，在已有配置中合并：
+
+```json
+{
+  "metadata": {
+    "title": "My Book",
+    "subtitle": "Foundations",
+    "authors": [{
+      "name": "Author Name",
+      "nativeName": "作者本名",
+      "aliases": ["Author Alias"],
+      "orcid": "https://orcid.org/0000-0002-1825-0097",
+      "affiliation": "Research Institute"
+    }],
+    "language": "en-US",
+    "description": "A description of the work.",
+    "website": "https://example.org/book",
+    "repository": "https://github.com/example/book",
+    "license": "cc-by-4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "keywords": ["mathematics"],
+    "preferredCitation": "Author Name. My Book."
+  }
+}
+```
+
+已有作品 DOI 可维护在 `metadata.doi.conceptDoi`，来源说明在 `metadata.doi.provenance`；本版 DOI 始终在方案的 `doi.versionDoi` 或其 Zenodo 绑定中维护。不要把上一版 DOI 填成作品 DOI。
+
+Reader 提供项目公共信息与本版覆盖入口，作者按人编辑；关闭某字段的“本版单独设置”即可恢复继承。也可以使用同一工具入口：
+
+```bash
+math-workspace publication metadata
+math-workspace publication save-metadata metadata.json --expected-revision <metadata 返回的 revision>
+```
+
+`metadata.json` 仅包含上例中 `metadata` 内的公共字段，不含返回值的 `value`、`revision` 外壳。保存检查完整项目配置的当前修订，并保留其他配置；冲突时重新读取后再保存。Reader 会保留未保存的草稿，刷新不会自动用新修订覆盖别人的更改；可以明确重新载入公共信息后编辑。
+
+解析顺序为旧 `pdf` 身份字段的兼容回退、项目 `metadata`、本版明确覆盖。缺少字段表示继承；空字符串或空列表可以清除可选值，作者列表整体替换，DOI 按子字段覆盖。实际标题不能为空。版本、版次、出版日期与本版 DOI 属于本版。旧方案原来明确填写的字段继续作为覆盖保留，工具不会猜测并删除作者的选择。
+
+构建清单冻结公共信息、本版覆盖及解析结果；PDF、`citation.json` 和 Zenodo 使用同一结果。PDF 出版信息页显示网站、仓库、许可、作者身份与 DOI，简介和关键词还提供给 PDF 属性；引用文件保留作者 ORCID/机构、网址、仓库、许可、语言、简介、日期和 DOI。Zenodo 作者映射到 creators/ORCID/affiliations，关键词映射到 subjects，网站和仓库分别成为 `isDescribedBy`、`isDerivedFrom` 的 URL 关联；本名、别名、推荐引用、许可链接等补充信息进入 Notes。元信息修改后需要重新规划和构建，旧成品与已发布版本保留原值。服务字段说明见 [Zenodo API](https://developers.zenodo.org/) 与 [InvenioRDM 元信息](https://inveniordm.docs.cern.ch/reference/metadata/)。
 
 ### 最小方案与本地构建
 
-从拥有 `.math-workspace/config.json` 的项目根运行。将实际章节路径填入 `publication.json`；只需一个作者和至少一章即可建立方案，前后文为可选项：
+从拥有 `.math-workspace/config.json` 的项目根运行。将实际章节路径填入 `publication.json`；标题和作者可从项目公共信息继承，也可在本版单独设置，至少选择一章：
 
 ```json
 {
   "id": "book",
   "workId": "my-book",
-  "title": "My Book",
-  "subtitle": "Volume I",
   "version": "0.1.0",
-  "authors": [{ "name": "Author Name" }],
-  "language": "zh-CN",
   "chapters": ["book/vol-i/01-foundations.md", "book/vol-i/02-main-results.md"],
+  "matter": { "automatic": true },
   "frontMatter": [
     { "file": "book/front-matter/preface.md", "includeInToc": false },
     { "file": "book/front-matter/readers-letter.md", "includeInToc": true }
@@ -831,7 +875,7 @@ math-workspace publication status book
 
 旧方案的手填前后文与声明仍可直接使用，不会自动转换成稿件文件。选择文件后，已有 `content` 或 `text` 会保留为备用，不会附加到文件内容；清空文件选择后恢复手填或默认文字。这样既能保留旧方案，也能让日常阅读与 PDF 只维护一份稿件。引用文件须是未被扫描排除的项目内 Markdown，路径不能穿越目录或跟随符号链接。
 
-构建依赖本机 Pandoc 与 LaTeX 引擎，默认使用 `xelatex`；中文出版方案未指定 `pdf.documentClass` 时使用 `ctexart`，需要本机 TeX 发行版提供 CTeX 和中文字体。显式文档类与英文默认保持原设置。`inspect` 显示工具是否可用。工具缺失时可先保存和审阅方案，安装完成后再生成 PDF。
+构建依赖本机 Pandoc 与 LaTeX 引擎，默认使用 `xelatex`；中文出版方案未指定 `pdf.documentClass` 时使用 `ctexart`，需要本机 TeX 发行版提供 CTeX。macOS 已有可读取的系统宋体时复用该字体，否则使用 TeX 的 Fandol；所选字体及其文件信息记录在构建工具信息中，不安装或复制字体。显式文档类与英文默认保持原设置。`inspect` 显示工具是否可用。工具缺失时可先保存和审阅方案，安装完成后再生成 PDF。
 
 每次构建保存在 `.math-workspace/publications/builds/<id>/<build-id>/`，包含 `publication.pdf`、`compiled.md`、`manifest.json`、`citation.json`、`checksums.sha256` 和构建记录 `build.json`。Reader 可预览、下载 PDF，并取得本版清单和引用信息。清单记录收录与未收录范围、源输入摘要、DOI 状态和产物校验值；构建记录还保留 PDF 的 SHA-256。预览时核对封面、前后文、目录、编号、图片、范围外引用和 DOI，确认的是这份构建的实际文件。PDF 的 DOI 来源说明不是实时登记状态，请到对应平台记录核对。清单建立来源绑定，不是原稿签名、数学正确性或 Lean 证明覆盖的认证；学术留档仍使用独立的 `archive` 流程。
 
@@ -861,7 +905,7 @@ math-workspace publication status book
 
 预留 DOI 可让最终 PDF 在上传前就写入正确号码；预留与正式登记分开，登记在正式发布时发生，见 [Zenodo DOI 说明](https://help.zenodo.org/docs/deposit/describe-records/reserve-doi/)。流程为：
 
-1. 显式预留 DOI，创建或复用该方案已绑定的草稿。
+1. 显式预留 DOI，创建或复用该方案已绑定的草稿，并取得原生草稿 `pids.doi` 确认的真实预留号码；旧兼容接口中的占位 `prereserve_doi` 不作为预留证据。
 2. 重新规划，生成包含预留 DOI 的最终 PDF，并审阅成品。
 3. 显式读取上传差异，核对草稿文件、将替换的旧 PDF、目标文件与摘要。
 4. 使用已审阅差异的指纹，显式上传同一构建到草稿。
@@ -894,6 +938,21 @@ math-workspace publication reserve-doi book --expected-revision <profile.revisio
 ```
 
 新草稿提供新的本版 DOI；不要把上一版 DOI 继续填作新版 DOI。本流程保留此前版本的文件与 DOI。Zenodo 的作品 DOI（Concept DOI）表示版本集合并解析到最新版；引用精确文件时使用该版 DOI，见 [DOI 版本说明](https://zenodo.org/help/versioning)和[版本管理](https://help.zenodo.org/docs/deposit/manage-versions/)。本地状态若提示远端结果未知，先核对 Zenodo 现状，再接回正确草稿或记录，不为重试另建一部作品。
+
+### 发布后的独立核验
+
+Zenodo 的发布回执和公开版本核验分别记录。发布后，在 Reader 选择“核验公开版本”，或运行：
+
+```bash
+math-workspace publication verify-published book --build <build-id> --pdf-sha256 <已发布 PDF 的 SHA-256> --record-id <published-record-id>
+math-workspace publication status book
+```
+
+核验不使用令牌：匿名重新读取公开记录，核对本版与作品 DOI、标题、版本、作者、许可和文件名、大小、校验值；实际下载 PDF，比对字节数和 SHA-256；下载后再次读取公开记录，并检查本版 DOI 是否解析到同一版本的公开页面。只访问公开服务并保存本地核验凭据，不预留、上传或再次发布，也不保存方案内尚未保存的编辑。
+
+`status.verifications` 分别显示公开记录、下载文件和 DOI 的结果。三项均通过才是 `verified`；服务暂不可用、限流或 DOI 尚未解析时保持 `pending`，发现不一致时为 `failed`。核验命令相应退出码为 0、2、1。未完成或失败的核验不会抹掉“已发布”的回执；可对同一构建重试，不必重新发布。核验凭据保存在 `.math-workspace/publications/verifications/<profile-id>/<build-id>.json`，可核验已绑定的历史版本，不要求当前书稿仍与旧版相同。
+
+正式环境通过 `https://doi.org/` 核验本版 DOI；sandbox 检查 `https://handle.test.datacite.org/`。[Zenodo sandbox 首页](https://sandbox.zenodo.org/)明确说明其测试 DOI 不是真实 DOI，且不会解析。因此，测试号返回 404 时 DOI 项仍为未验收，界面明确区分“公开文件核验通过”和“DOI 解析未验收”；不能仅凭 sandbox 公开记录或文件可访问就报告整个核验通过。正式 DOI 注册和解析需要在正式记录上另行验收；这里不会自动创建正式记录。DataCite 自身测试系统与正式系统的区别见[测试说明](https://support.datacite.org/docs/testing-guide)。
 
 ## Markdown 与单次 PDF 导出
 
@@ -943,20 +1002,21 @@ export-md -> project postprocess -> render-pdf
 - 出版元数据页：可选，位于封面页之后、目录之前；
 - front matter 声明页：可选，位于 metadata 之后、目录之前。
 
-PDF 选项放在 `.math-workspace/config.json` 的 `pdf` 字段中：
+公共书名、作者和来源地址复用上文的 `metadata`；普通导出的版式选项放在 `.math-workspace/config.json` 的 `pdf` 字段中。旧 `pdf.title`、`pdf.author`、`pdf.repository` 等身份字段保留兼容回退，新配置集中维护公共信息：
 
 ```json
 {
   "language": "zh-CN",
-  "pdf": {
+  "metadata": {
     "title": "书名",
-    "subtitle": "卷 I：基础",
-    "author": "Author Name",
+    "authors": [{ "name": "Author Name" }],
+    "license": "cc-by-4.0",
+    "repository": "https://example.com/project"
+  },
+  "pdf": {
     "date": "Revised 2026-06-26",
     "titlePage": true,
     "metadataPage": true,
-    "license": "CC BY 4.0",
-    "repository": "https://example.com/project",
     "frontMatter": [
       {
         "title": "AI 辅助声明",
@@ -972,6 +1032,8 @@ CLI 可以覆盖配置，包括 `--pdf-engine`、`--paper`、`--margin`、
 `--toc-depth`、`--title`、`--subtitle`、`--author`、`--date`、
 `--metadata-page`、`--front-matter`、`--title-page`、`--cover-style`
 和 `-V key:value`。
+
+结构化作者可通过 `--authors-json '[{"name":"Author Name","orcid":"https://orcid.org/0000-0002-1825-0097","affiliation":"Institute"}]'` 传入；`--website`、`--repository`、`--description`、重复的 `--keyword` 与既有许可、引用和 DOI 参数可覆盖本次导出。参数不自动写回配置。`-V` 是 Pandoc 模板变量入口，不会创建新的项目元信息字段。
 
 本仓库不捆绑 Pandoc 或 LaTeX 发行版。如果本地缺少 PDF 引擎，先交付
 `export-md` 中间稿，等本机引擎安装完成后再运行 PDF 渲染。

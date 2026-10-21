@@ -1,19 +1,22 @@
+import type { WorkMetadata, WorkAuthor } from '../../packages/core/src/project-metadata';
+export type PublicationAuthor = WorkAuthor;
 /** Publication is an explicit PDF release workflow, independent of signed source archives. */
-export interface PublicationAuthor { name: string; orcid?: string; affiliation?: string }
 export interface PublicationMatter { title?: string; file?: string; content?: string; includeInToc?: boolean }
 export interface PublicationResolvedMatter { title?: string; file?: string; content: string; includeInToc: boolean }
-export interface PublicationProfile {
+export interface PublicationProfile extends WorkMetadata {
     id: string;
     workId: string;
-    title: string;
+    title?: string;
     subtitle?: string;
     edition?: string;
     version: string;
-    authors: PublicationAuthor[];
+    authors?: PublicationAuthor[];
     language?: string;
     license?: string;
     description?: string;
     publicationDate?: string;
+    releaseTag?: string;
+    releaseCommit?: string;
     repository?: string;
     chapters: string[];
     /** Optional work boundary; otherwise selected books define it, or all pages in a single-book workspace. */
@@ -21,6 +24,8 @@ export interface PublicationProfile {
     cover?: { image?: string; showVersion?: boolean };
     frontMatter?: PublicationMatter[];
     backMatter?: PublicationMatter[];
+    /** New plans discover structural matter; existing plans keep their explicit scope until enabled. */
+    matter?: { automatic?: boolean; exclude?: string[] };
     toc?: { enabled?: boolean; depth?: number; title?: string };
     continued?: { enabled?: boolean; file?: string; title?: string; text?: string };
     pdf?: { engine?: string; paper?: string; margin?: string; documentClass?: string };
@@ -28,6 +33,7 @@ export interface PublicationProfile {
     zenodo?: { environment?: 'sandbox' | 'production'; tokenEnv?: string };
 }
 export interface PublicationProfileRecord { profile: PublicationProfile; revision: number; updatedAt: string }
+export interface PublicationMetadataRecord { value: WorkMetadata; revision: string }
 export interface PublicationPage {
     path: string; title: string; kind: string; number?: string;
     book?: string; bookTitle?: string; volume?: string; volumeTitle?: string;
@@ -43,6 +49,9 @@ export interface PublicationDoiBinding {
 export interface PublicationPlan {
     schema: 'math-workspace.publication-plan/v1';
     profile: PublicationProfile;
+    /** The editable overrides and common values used to resolve this immutable edition. */
+    profileOverrides?: PublicationProfile;
+    projectMetadata?: WorkMetadata;
     fingerprint: string;
     selected: PublicationPage[];
     omitted: PublicationPage[];
@@ -57,7 +66,10 @@ export interface PublicationPlan {
     warnings: string[];
 }
 export interface PublicationTool { available: boolean; identity?: string }
-export interface PublicationTools { pandoc: PublicationTool; engine: PublicationTool; engineName: string }
+export interface PublicationTools {
+    pandoc: PublicationTool; engine: PublicationTool; engineName: string;
+    chineseFonts?: { family: string; source: 'macos'; bytes: number; modifiedAt: string };
+}
 export interface PublicationBuild {
     schema: 'math-workspace.publication-build/v1';
     id: string;
@@ -90,7 +102,7 @@ export interface PublicationRemoteState {
     draftId?: string; recordId?: string; conceptRecordId?: string;
     versionDoi?: string; conceptDoi?: string;
     recordUrl?: string; updatedAt: string;
-    pending?: { action: 'create' | 'new-version' | 'upload' | 'publish'; startedAt: string; recordId?: string; buildId?: string };
+    pending?: { action: 'create' | 'reserve-doi' | 'new-version' | 'upload' | 'publish'; startedAt: string; recordId?: string; buildId?: string };
     upload?: PublicationUpload;
     /** Exact file ownership recovered after an interrupted upload; this is not metadata or publication acknowledgement. */
     ownedFiles?: Array<{ draftId: string; buildId: string; pdfSha256: string; fileName: string; remoteChecksum: string }>;
@@ -98,6 +110,7 @@ export interface PublicationRemoteState {
     draftFiles?: Array<{ name: string; checksum: string; bytes?: number; owned: boolean }>;
 }
 export interface PublicationInspection {
+    metadata: PublicationMetadataRecord;
     pages: PublicationPage[];
     profiles: PublicationProfileRecord[];
     tools: PublicationTools;
@@ -106,11 +119,31 @@ export interface PublicationInspection {
     credentialStatus: Array<{ profileId: string; environment: 'sandbox' | 'production'; tokenEnv: string; configured: boolean }>;
 }
 export interface PublicationStatus {
+    metadata?: PublicationMetadataRecord;
     profile: PublicationProfileRecord;
     builds: PublicationBuild[];
     remote: PublicationRemoteState | null;
     credential: { tokenEnv: string; configured: boolean };
+    verifications: PublicationVerification[];
 }
+export interface PublicationVerificationCheck {
+    status: 'passed' | 'pending' | 'failed';
+    detail: string;
+    url?: string;
+    httpStatus?: number;
+}
+/** Anonymous observations of an exact published edition; distinct from a publish acknowledgement. */
+export interface PublicationVerification {
+    schema: 'math-workspace.publication-verification/v1';
+    profileId: string; workId: string; buildId: string; recordId: string;
+    environment: 'sandbox' | 'production'; checkedAt: string;
+    status: 'verified' | 'pending' | 'failed';
+    versionDoi: string; pdfSha256: string;
+    record: PublicationVerificationCheck;
+    file: PublicationVerificationCheck & { expectedBytes: number; observedBytes?: number; observedSha256?: string };
+    doi: PublicationVerificationCheck & { resolver: 'doi.org' | 'handle.test.datacite.org' };
+}
+export interface PublicationVerificationRequest { pdfSha256: string; recordId: string }
 export type PublicationArtifact = 'publication.pdf' | 'compiled.md' | 'manifest.json' | 'citation.json';
 export interface PublicationBuildOptions { onProgress?: (message: string) => void }
 export interface PublicationProviderReview { pdfSha256: string; remoteRevision: number }
