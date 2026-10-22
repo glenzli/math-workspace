@@ -116,8 +116,8 @@ async function uiContracts() {
         assert.equal(paragraph.classList.contains('has-uncommitted-change'), false, 'Polling clears markers when Git HEAD catches up.');
         assert.equal(find('#reader-uncommitted-status').textContent, 'No changes');
         h.setRequestHandler(async () => ({ ok: false, status: 404 })); h.flushTimers(); await drain();
-        assert.equal(find('#reader-uncommitted-status').textContent, 'Reopen panel', 'Old running services cannot silently leave the toggle looking enabled.');
-        assert.match(find('#reader-uncommitted').dataset.readerTooltip, /outdated/);
+        assert.equal(find('#reader-uncommitted-status').textContent, 'Restart Reader', 'Old running services cannot silently leave the toggle looking enabled.');
+        assert.match(find('#reader-uncommitted').dataset.readerTooltip, /restart the client/);
         h.setRequestHandler(async () => { throw new Error('Host transport unavailable'); }); h.flushTimers(); await drain();
         assert.equal(find('#reader-uncommitted-status').textContent, 'Read failed');
         h.setRequestHandler(async () => ({ ok: true, json: async () => ({ ...expected, status: 'not-git' }) })); h.flushTimers(); await drain();
