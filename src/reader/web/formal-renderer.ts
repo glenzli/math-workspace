@@ -468,6 +468,10 @@ function installFormalRules(markdown: MarkdownIt): void {
         const markers = state.env.readerMarkersByLine || {};
         for (let index = 0; index < state.tokens.length; index++) {
             const token = state.tokens[index];
+            if (token.map && ['list_item_open', 'table_open', 'tr_open', 'hr'].includes(token.type)) {
+                token.attrSet('data-source-start-line', String(token.map[0] + 1));
+                token.attrSet('data-source-end-line', String(token.map[1]));
+            }
             if (token.type !== 'inline' || !token.map) continue;
             const open = state.tokens[index - 1];
             if (!open || !open.map || open.nesting !== 1) continue;
@@ -517,6 +521,14 @@ function installFormalRules(markdown: MarkdownIt): void {
             }
         }
     });
+
+    for (const kind of ['fence', 'code_block']) {
+        const render = markdown.renderer.rules[kind]!;
+        markdown.renderer.rules[kind] = (tokens, index, options, env, self) => {
+            const html = render(tokens, index, options, env, self), range = tokens[index].map;
+            return range ? html.replace(/^<pre\b/, `<pre data-source-start-line="${range[0] + 1}" data-source-end-line="${range[1]}"`) : html;
+        };
+    }
 }
 
 function installWorkspaceAssetRule(markdown: MarkdownIt): void {

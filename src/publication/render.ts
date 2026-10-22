@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { mergeConfig, scanFormalDocuments, shouldExcludeScanPath, formatPageHeading, formatPageReference, stripIgnoredMarkdown, toPosix, sortManuscriptPages, normalizeWorkMetadata, metadataDoi, projectMetadata } from '@math-workspace/core';
 import { resolvePublicationMetadata } from './metadata';
-import { resolvePublicationMatter } from './matter';
+import { resolvePublicationMatter, hasPublicationContinuedManuscript } from './matter';
 import { PublicationStore, safePath, relativeInput, publicationId, canonical, sha256, atomicJson } from './store';
 import type { PublicationProfile, PublicationPlan, PublicationPage, PublicationInput, PublicationTools, PublicationTool, PublicationServiceOptions, PublicationDoiBinding, PublicationBuild, PublicationBuildOptions, PublicationManifest, PublicationResolvedMatter } from './types';
 
@@ -23,11 +23,12 @@ export function normalizeDoi(value: unknown): string | undefined {
 }
 export function normalizeProfile(input: PublicationProfile): PublicationProfile {
     if (!input || typeof input !== 'object') throw new Error('A publication profile is required.');
+    const automatic = input.matter?.automatic === true;
     const matter = (items: any, role: string) => list(items, role, 100).map(item => {
         if (!item || typeof item !== 'object') throw new Error(`Invalid ${role} entry.`);
         const value = { title: optionalText(item.title, `${role} title`, 1000), file: item.file === undefined ? undefined : relativeInput(item.file), content: optionalText(item.content, `${role} content`, 1000000), includeInToc: item.includeInToc === true };
         if (value.file && !/\.md$/i.test(value.file)) throw new Error('Publication matter files must be Markdown files.');
-        if (!value.file && !value.content && !value.title) throw new Error(`An empty ${role} entry cannot be published.`);
+        if (!automatic && !value.file && !value.content && !value.title) throw new Error(`An empty ${role} entry cannot be published.`);
         return value;
     });
     const metadata = normalizeWorkMetadata(input);
@@ -56,7 +57,7 @@ export function normalizeProfile(input: PublicationProfile): PublicationProfile 
     const continuedFile = input.continued?.file ? relativeInput(input.continued.file) : undefined;
     if (continuedFile && !/\.md$/i.test(continuedFile)) throw new Error('Publication continued notice files must be Markdown files.');
     const frontMatter = matter(input.frontMatter, 'front matter'), backMatter = matter(input.backMatter, 'back matter');
-    const matterFiles = [...frontMatter, ...backMatter, ...(input.continued?.enabled === false || !continuedFile ? [] : [{ file: continuedFile }])].map(entry => entry.file).filter(Boolean);
+    const matterFiles = [...(automatic ? [] : [...frontMatter, ...backMatter]), ...(input.continued?.enabled === false || !continuedFile ? [] : [{ file: continuedFile }])].map(entry => entry.file).filter(Boolean);
     if (new Set(matterFiles).size !== matterFiles.length) throw new Error('A publication file can only fill one matter role.');
     return JSON.parse(canonical({
         ...metadata, id: publicationId(input.id), workId: publicationId(input.workId), version, chapters, scope,
@@ -168,7 +169,7 @@ export async function makePublicationPlan(root: string, input: PublicationProfil
     for (const entry of profile.frontMatter) frontMatter.push(await resolveMatter(entry, 'front-matter'));
     for (const entry of profile.backMatter) backMatter.push(await resolveMatter(entry, 'back-matter'));
     const continuedFile = profile.continued.file && profile.continued.enabled !== false
-        ? await resolveMatter({ file: profile.continued.file, title: profile.continued.title }, 'continued') : undefined;
+        ? await resolveMatter({ file: profile.continued.file }, 'continued') : undefined;
     const selected = snapshot.pages.filter(page => selectedPaths.has(page.path));
     if (!selected.length) throw new Error('Select at least one chapter or page outside the referenced front matter, back matter, and continued notice.');
     const selectedBooks = new Set(selected.map(page => page.book).filter(Boolean));
@@ -247,7 +248,7 @@ export async function makePublicationPlan(root: string, input: PublicationProfil
     }
     if (profile.cover.image) await addInput(profile.cover.image, 'asset');
     const english = (profile.language || snapshot.config.language).startsWith('en');
-    const continuedNotice = { enabled: profile.continued.enabled ?? (!!continuedFile || omitted.length > 0), file: continuedFile?.file, title: profile.continued.title || continuedFile?.title || (english ? 'To be continued' : '未完待续'), text: continuedFile?.content ?? (profile.continued.text || (english ? 'This is a partial edition of a continuing work. Further chapters and revisions will appear in later versions of the same work.' : '本版为持续更新作品的部分内容。后续章节与修订将在同一作品的后续版本中继续发布。')) };
+    const continuedNotice = { enabled: !hasPublicationContinuedManuscript(profile, snapshot.pages) && (profile.continued.enabled ?? (!!continuedFile || omitted.length > 0)), file: continuedFile?.file, title: continuedFile?.title || profile.continued.title || (english ? 'To be continued' : '未完待续'), text: continuedFile?.content ?? (profile.continued.text || (english ? 'This is a partial edition of a continuing work. Further chapters and revisions will appear in later versions of the same work.' : '本版为持续更新作品的部分内容。后续章节与修订将在同一作品的后续版本中继续发布。')) };
     const warnings = externalReferences.length ? [`${externalReferences.length} reference(s) point outside this edition; omitted pages are not added automatically.`] : [];
     const tools = await publicationTools(profile, options);
     const content = { schema: 'math-workspace.publication-plan/v1' as const, profile, profileOverrides, projectMetadata: projectMetadata(snapshot.config), selected, omitted, externalReferences, partial: omitted.length > 0, frontMatter, backMatter, continuedNotice, doi, inputs: snapshot.inputs.sort((a, b) => a.path.localeCompare(b.path)), tools, warnings };
@@ -332,7 +333,7 @@ export async function renderPublication(store: PublicationStore, plan: Publicati
             }
             if (plan.continuedNotice.enabled) {
                 const notice = plan.continuedNotice;
-                const content = notice.file ? await matterContent({ file: notice.file, title: profile.continued.title, includeInToc: false }, 'continued', notice.title)
+                const content = notice.file ? await matterContent({ file: notice.file, includeInToc: false }, 'continued', notice.title)
                     : `# ${notice.title} {.unnumbered .unlisted}\n\n${notice.text}`;
                 markdown += `\n\n\\clearpage\n\\markboth{}{}\n\n${content}\n`;
             }

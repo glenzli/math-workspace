@@ -35,6 +35,7 @@ import { SymbolAuditService } from './symbol-audit-service';
 import type { SymbolAuditScope, SymbolAuditSettings } from './symbol-audit';
 import { registerReaderInstance, unregisterReaderInstance } from './location-bridge';
 import { handleReaderCreatePageRoute, ReaderCreatePageError } from './reader-create-api';
+import { readReaderGitChanges } from './git-changes';
 
 const http = require('node:http');
 const { URL } = require('node:url');
@@ -802,6 +803,19 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                 return;
             }
 
+            if (url.pathname === '/api/page-changes') {
+                if (!requireRequestToken(request, response, requestToken)) return;
+                const boundRoot = rootPath;
+                if (request.headers?.['x-math-workspace-project'] !== createHash('sha256').update(boundRoot).digest('hex')) {
+                    sendText(response, 409, 'The page project changed. Refresh the Reader.'); return;
+                }
+                const filePath = url.searchParams.get('path') || '', content = snapshot.documents.get(filePath);
+                if (content === undefined) { sendText(response, 404, 'Markdown page not found in the bound project.'); return; }
+                const changes = await readReaderGitChanges(boundRoot, filePath, content);
+                if (rootPath !== boundRoot || projectChanging) { sendText(response, 409, 'The page project changed. Refresh the Reader.'); return; }
+                sendJson(response, 200, changes); return;
+            }
+
             if (url.pathname === '/api/page') {
                 const filePath = toPosix(url.searchParams.get('path') || '').replace(/^\/+/, '');
                 const content = snapshot.documents.get(filePath);
@@ -816,6 +830,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                     filePath,
                     page: rawPage ? decoratePage(rawPage, snapshot.state.config, snapshot.state.documentState?.lifecycles?.[filePath]) : undefined,
                     content,
+                    sourceHash: createHash('sha256').update(content).digest('hex'),
                     labels: labelsForContent(snapshot, [content, ...symbols.map(symbol => symbol.meaning)].join('\n')),
                     dependencyMarkers: projectReaderDependencyMarkers(snapshot.state.dependencyGraph, filePath, snapshot.state.leanIndex),
                     symbols

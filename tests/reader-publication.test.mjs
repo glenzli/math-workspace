@@ -77,10 +77,12 @@ async function harness(language = 'en') {
         uploadPlan: { profileId: 'edition', buildId: hash('b'), draftId: '123', remoteRevision: 4, pdfSha256: hash('a'), fingerprint: hash('c'),
             files: [{ name: 'notes.txt', checksum: 'md5:retained', owned: false }], add: ['publication.pdf'], replace: [], remove: [], blocked: ['notes.txt'] } };
     const currentPlan = (value = profile()) => {
+        value = matterModule.resolvePublicationMatter(value, model.pages);
         const resolved = entries => (entries || []).map(entry => ({ ...entry, ...(entry.file ? model.sources[entry.file] : {}) }));
         const assigned = new Set([...(value.frontMatter || []), ...(value.backMatter || []), ...(value.continued?.enabled === false ? [] : [value.continued || {}])].map(entry => entry.file).filter(Boolean));
         const notice = value.continued?.file && value.continued.enabled !== false ? { enabled: true, file: value.continued.file,
-            title: model.sources[value.continued.file]?.title || 'To be continued', text: model.sources[value.continued.file]?.content || '' } : plan(value).continuedNotice;
+            title: model.sources[value.continued.file]?.title || 'To be continued', text: model.sources[value.continued.file]?.content || '' }
+            : { enabled: !matterModule.hasPublicationContinuedManuscript(value, model.pages) && (value.continued?.enabled ?? model.partial), title: value.continued?.title || 'To be continued', text: value.continued?.text || 'More chapters will follow.' };
         return { ...plan(value), selected: model.pages.filter(page => value.chapters.includes(page.path) && !assigned.has(page.path)),
             omitted: model.pages.filter(page => !value.chapters.includes(page.path) && !assigned.has(page.path)), partial: model.partial,
             frontMatter: resolved(value.frontMatter), backMatter: resolved(value.backMatter), continuedNotice: notice, warnings: model.warnings };
@@ -168,16 +170,20 @@ export async function testPublicationUi() {
     await action(conflict, 'Reload and discard unsaved project metadata').emit('click'); await drain();
     assert.equal(action(conflict, 'Save project metadata').disabled, false); conflict.reader.close();
     const automatic = await harness(); automatic.model.profiles[0].profile.matter = { automatic: true };
+    automatic.model.profiles[0].profile.frontMatter = []; automatic.model.profiles[0].profile.backMatter = [];
     const extra = [
         { ...page('book/front-matter/01.md', 'Automatic preface'), kind: 'front-matter', volume: undefined },
         { ...page('book/front-matter/02.md', 'Another preface'), kind: 'front-matter', volume: undefined },
         { ...page('book/back-matter/01.md', 'Automatic ending'), kind: 'back-matter', volume: undefined },
         { ...page('book/appendix-a.md', 'Appendix A'), kind: 'appendix', volume: undefined }
     ]; automatic.model.pages.push(...extra); await automatic.reader.open();
-    assert.match(automatic.document.body.textContent, /Automatically identified pages/);
+    await step(automatic, 1);
+    const sourceChoice = h => h.document.body.querySelector('[data-publication-matter-source]');
+    assert.equal(sourceChoice(automatic).value, 'repository');
+    assert(!automatic.document.body.querySelectorAll('button').some(button => button.getAttribute('aria-label') === 'Add Front matter'), 'Repository matter and manual addition must never be shown together.');
     const ending = automatic.document.body.querySelectorAll('input').find(input => input.type === 'checkbox' && !input.disabled && input.parent.textContent === 'Automatic ending');
     assert.equal(ending.checked, true); ending.checked = false; await ending.emit('change');
-    await step(automatic, 1); await action(automatic, 'Customize inclusion and order').emit('click'); await drain();
+    sourceChoice(automatic).value = 'manual'; await sourceChoice(automatic).emit('change'); await drain();
     await action(automatic, 'Save publication plan').emit('click'); await drain();
     const savedAutomatic = () => automatic.requests.filter(request => request.body?.action === 'save').at(-1).body.profile;
     assert.deepEqual(savedAutomatic().frontMatter.map(item => item.file).filter(Boolean), extra.slice(0, 2).map(item => item.path));
@@ -186,6 +192,104 @@ export async function testPublicationUi() {
     assert.deepEqual(savedAutomatic().frontMatter.map(item => item.file).filter(Boolean), extra.slice(0, 2).map(item => item.path).reverse());
     assert(!savedAutomatic().backMatter.some(item => item.file === extra[2].path));
     assert(savedAutomatic().chapters.includes(extra[3].path)); automatic.reader.close();
+    for (const language of ['en', 'zh']) {
+        const sources = await harness(language); sources.model.profiles[0].profile.matter = { automatic: true };
+        sources.model.pages.push(...extra);
+        await sources.reader.open(); await step(sources, 1);
+        const front = () => sources.document.body.querySelector('[data-publication-matter="frontMatter"]');
+        assert.match(front().textContent, /Automatic preface/);
+        assert.equal(front().querySelectorAll('textarea').length, 0, 'Dormant hand-written content is not an editor in repository mode.');
+        assert(!front().textContent.includes('Why this book.'));
+        sourceChoice(sources).value = 'manual'; sourceChoice(sources).focus(); await sourceChoice(sources).emit('change'); await drain();
+        assert.equal(sources.document.activeElement, sourceChoice(sources), 'Source switching keeps focus on its replacement control.');
+        assert.ok(front().querySelectorAll('textarea').some(control => control.value === 'Why this book.'), 'Switching restores an existing authored manual draft.');
+        const draft = front().querySelectorAll('textarea')[0]; draft.value = 'Retained manual revision'; await draft.emit('input');
+        sourceChoice(sources).value = 'repository'; await sourceChoice(sources).emit('change'); await drain();
+        assert.equal(front().querySelectorAll('textarea').length, 0);
+        assert.match(front().textContent, /Automatic preface/);
+        await action(sources, language === 'en' ? 'Save publication plan' : '保存出版计划').emit('click'); await drain();
+        const stored = sources.requests.filter(request => request.body?.action === 'save').at(-1).body.profile;
+        assert.equal(stored.matter.automatic, true); assert.equal(stored.frontMatter[0].content, 'Retained manual revision', 'Inactive manual content survives save and source changes.');
+        const choice = sourceChoice(sources); choice.focus(); sources.context.language = language === 'en' ? 'zh' : 'en'; sources.reader.contextChanged();
+        assert.equal(sources.document.activeElement, choice); assert.equal(choice.value, 'repository');
+        assert.equal(choice.getAttribute('aria-label'), sources.context.language === 'zh' ? '前后文来源' : 'Front and back matter source');
+        sourceChoice(sources).value = 'manual'; await sourceChoice(sources).emit('change'); await drain();
+        assert.ok(front().querySelectorAll('textarea').some(control => control.value === 'Retained manual revision'));
+        sources.reader.close();
+    }
+    for (const locale of ['zh', 'en']) {
+        const continued = await harness(locale), original = continued.model.profiles[0].profile;
+        original.matter = { automatic: true }; original.continued = { title: 'Manual outlook', text: 'RETAINED_MANUAL_OUTLOOK' };
+        const manuscripts = [
+            { path: 'book/to-be-continued.md', title: 'Book outlook', kind: 'continued', book: 'book' },
+            { path: 'book/vol-1/to-be-continued.md', title: 'Volume outlook', kind: 'continued', book: 'book', volume: 'vol-1' },
+            { path: 'book/vol-2/to-be-continued.md', title: 'Other volume outlook', kind: 'continued', book: 'book', volume: 'vol-2' }
+        ];
+        continued.model.pages.push(...manuscripts);
+        for (const manuscript of manuscripts) continued.model.sources[manuscript.path] = { title: manuscript.title, content: `# ${manuscript.title}\n\nREPOSITORY_${manuscript.title}` };
+        await continued.reader.open(); await step(continued, 1);
+        const back = () => continued.document.body.querySelector('[data-publication-matter="backMatter"]');
+        const row = title => back().querySelectorAll('input').find(input => input.parent.textContent === title);
+        assert.ok(row('Book outlook').checked); assert.ok(row('Volume outlook').checked); assert.equal(row('Other volume outlook'), undefined);
+        assert.equal(back().querySelectorAll('textarea').length, 0);
+        assert.equal(continued.document.body.querySelector('[data-publication-continued]'), null, 'Matching continued manuscripts have no separate declaration section.');
+        row('Book outlook').checked = false; await row('Book outlook').emit('change');
+        row('Volume outlook').checked = false; await row('Volume outlook').emit('change');
+        await step(continued, 2); await action(continued, locale === 'zh' ? '保存并审阅本版' : 'Save and review this edition').emit('click'); await drain();
+        assert.equal(continued.reader.plan.continuedNotice.enabled, false, 'Excluding repository back matter never activates a second declaration.');
+        assert.doesNotMatch(continued.document.body.textContent, /RETAINED_MANUAL_OUTLOOK|Manual outlook/);
+        await step(continued, 1); sourceChoice(continued).value = 'manual'; await sourceChoice(continued).emit('change');
+        const manual = () => back().querySelector('[data-publication-continued]');
+        assert.ok(manual().querySelectorAll('textarea').some(control => control.value === 'RETAINED_MANUAL_OUTLOOK'));
+        assert.ok(manual().querySelectorAll('input').some(control => control.value === 'Manual outlook'));
+        assert(!continued.reader.profile.chapters.some(file => file.includes('to-be-continued')));
+        const draft = manual().querySelector('textarea'); draft.value = 'REVISED_MANUAL_OUTLOOK'; await draft.emit('input');
+        sourceChoice(continued).value = 'repository'; await sourceChoice(continued).emit('change');
+        assert.equal(back().querySelectorAll('textarea').length, 0);
+        await action(continued, locale === 'zh' ? '保存出版计划' : 'Save publication plan').emit('click'); await drain();
+        assert.equal(continued.requests.filter(request => request.body?.action === 'save').at(-1).body.profile.continued.text, 'REVISED_MANUAL_OUTLOOK');
+        continued.reader.close();
+    }
+    const orderedMatter = await harness(); orderedMatter.model.profiles[0].profile.matter = { automatic: true };
+    orderedMatter.model.pages = [
+        { path: 'book/vol-1/01.md', title: 'First body', kind: 'chapter', book: 'book', volume: 'vol-1' },
+        { path: 'book/vol-1/back-matter/end.md', title: 'First ending', kind: 'back-matter', book: 'book', volume: 'vol-1' },
+        { path: 'book/vol-1/to-be-continued.md', title: 'First outlook', kind: 'continued', book: 'book', volume: 'vol-1' },
+        { path: 'book/vol-2/02.md', title: 'Second body', kind: 'chapter', book: 'book', volume: 'vol-2' },
+        { path: 'book/vol-2/back-matter/end.md', title: 'Second ending', kind: 'back-matter', book: 'book', volume: 'vol-2' },
+        { path: 'book/vol-2/to-be-continued.md', title: 'Second outlook', kind: 'continued', book: 'book', volume: 'vol-2' },
+        { path: 'book/back-matter/end.md', title: 'Book ending', kind: 'back-matter', book: 'book' },
+        { path: 'book/to-be-continued.md', title: 'Book outlook', kind: 'continued', book: 'book' }
+    ];
+    orderedMatter.model.profiles[0].profile.chapters = ['book/vol-1/01.md', 'book/vol-2/02.md'];
+    await orderedMatter.reader.open(); await step(orderedMatter, 1);
+    const orderedRows = orderedMatter.document.body.querySelector('[data-publication-matter="backMatter"]').querySelectorAll('.publication-repository-matter');
+    assert.deepEqual(orderedRows.map(row => row.querySelectorAll('small').at(-1).textContent), orderedMatter.model.pages.filter(page => ['back-matter', 'continued'].includes(page.kind)).map(page => page.path), 'The displayed back matter follows PDF order: volume endings first, book-wide outlook last.');
+    orderedMatter.reader.close();
+    const disabledNotice = await harness(); disabledNotice.model.profiles[0].profile.matter = { automatic: true };
+    disabledNotice.model.profiles[0].profile.continued = { enabled: false, text: 'Disabled draft' };
+    disabledNotice.model.pages.push({ path: 'book/to-be-continued.md', title: 'Book outlook', kind: 'continued', book: 'book' },
+        { path: 'book/vol-1/to-be-continued.md', title: 'Volume outlook', kind: 'continued', book: 'book', volume: 'vol-1' });
+    await disabledNotice.reader.open(); await step(disabledNotice, 1);
+    const noticeRow = title => disabledNotice.document.body.querySelectorAll('input').find(input => input.parent.textContent === title);
+    assert.equal(noticeRow('Book outlook').checked, false); assert.equal(noticeRow('Volume outlook').checked, false);
+    noticeRow('Book outlook').checked = true; await noticeRow('Book outlook').emit('change');
+    assert.equal(noticeRow('Book outlook').checked, true); assert.equal(noticeRow('Volume outlook').checked, false, 'Re-enabling one manuscript does not re-enable other legacy-disabled manuscripts.');
+    disabledNotice.reader.close();
+    const inlineLegacy = await harness(); inlineLegacy.model.profiles[0].profile.frontMatter = []; inlineLegacy.model.profiles[0].profile.backMatter = [];
+    inlineLegacy.model.profiles[0].profile.continued.text = 'Authored declaration';
+    inlineLegacy.model.pages.push({ path: 'book/to-be-continued.md', title: 'Book outlook', kind: 'continued', book: 'book' });
+    await inlineLegacy.reader.open(); await step(inlineLegacy, 1);
+    assert.equal(sourceChoice(inlineLegacy).value, 'manual', 'An authored legacy declaration must not be silently replaced with repository matter.'); inlineLegacy.reader.close();
+    const manualFile = await harness(); manualFile.model.pages.push({ path: 'book/to-be-continued.md', title: 'Assigned outlook', kind: 'continued', book: 'book' });
+    manualFile.model.profiles[0].profile.backMatter = [{ file: 'book/to-be-continued.md' }]; manualFile.model.profiles[0].profile.continued.text = 'DORMANT_ASSIGNED_OUTLOOK';
+    await manualFile.reader.open(); await step(manualFile, 1);
+    assert.equal(manualFile.document.body.querySelector('[data-publication-continued]'), null, 'A manually referenced back-matter manuscript also hides the duplicate inline declaration.');
+    manualFile.reader.close();
+    const blankLegacy = await harness(); blankLegacy.model.profiles[0].profile.frontMatter = []; blankLegacy.model.profiles[0].profile.backMatter = [];
+    blankLegacy.model.pages.push(...extra); await blankLegacy.reader.open(); await step(blankLegacy, 1);
+    assert.equal(sourceChoice(blankLegacy).value, 'repository', 'A blank legacy plan with repository matter displays the detected files without Add.');
+    assert.match(blankLegacy.document.body.textContent, /Automatic preface/); blankLegacy.reader.close();
     const scopes = await harness(); scopes.model.profiles[0].profile.matter = { automatic: true };
     scopes.model.pages[2].volume = 'vol-2';
     scopes.model.pages.push({ ...page('book/vol-2/back-matter/ending.md', 'Second volume ending', 'Later volume'), volume: 'vol-2', kind: 'back-matter' });
@@ -335,6 +439,7 @@ export async function testPublicationUi() {
         await action(source, locale === 'zh' ? '添加 后文' : 'Add Back matter').emit('click');
         assert.equal(picker('backMatter-2').value, ''); picker('backMatter-2').value = files[3].path; await picker('backMatter-2').emit('change');
         picker('continued').value = files[4].path; await picker('continued').emit('change');
+        assert.equal(source.document.body.querySelector('[data-publication-continued]').querySelectorAll('textarea').length, 0, 'A referenced declaration and inline editor are mutually exclusive.');
         await action(source, locale === 'zh' ? '保存出版计划' : 'Save publication plan').emit('click'); await drain();
         const saved = source.requests.find(request => request.body?.action === 'save').body.profile;
         assert.equal(saved.frontMatter[0].file, files[0].path); assert.equal(saved.frontMatter[0].content, 'Retained inline backup'); assert.equal(saved.frontMatter[0].title, 'Preface');

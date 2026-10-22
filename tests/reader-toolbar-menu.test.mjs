@@ -166,8 +166,10 @@ export async function readerToolbarHarness(options = {}) {
         './reader-ui-labels': readerUiLabels,
         './reader-preferences': { readerPreferences: preferences },
         lucide: require('lucide'),
-        './reader-route': { isReaderEmbedded: () => true, readerFetch: (route, options) => { createRequests.push({ route, options }); return requestHandler(route, options); } },
-        './reader-host': { expandReader() { primaryActions.push('expand'); }, readerHistory(mode, state, url) { historyEvents.push({ mode, state, url }); },
+        './reader-route': { isReaderEmbedded: () => options.embedded !== false, readerFetch: (route, options) => { createRequests.push({ route, options }); return requestHandler(route, options); } },
+        './reader-host': { expandReader() { primaryActions.push('expand'); if (options.expansionError) return Promise.reject(new Error('Host unavailable')); },
+            readerExpansionTarget: () => options.expansionTarget || 'fullscreen', subscribeReaderHostContext: () => () => {},
+            readerSearch: () => options.search || '', isReaderPageRestored: () => false, readerHistory(mode, state, url) { historyEvents.push({ mode, state, url }); },
             canReferenceReaderInConversation: () => canAssist, referenceReaderInConversation: async content => { handoffs.push(content); } },
         './reader-clipboard': { copyReaderText: async text => { copies.push(text); return copyResult; } },
         './reader-embed': { readerViewStateChanged() {} },
@@ -193,12 +195,14 @@ export async function readerToolbarHarness(options = {}) {
         const exports = {};
         vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText + expose,
             { exports, require: name => modules[name] || {}, document, window, Element, HTMLElement: Element, HTMLInputElement: Element, Node: Element, URLSearchParams, console, AbortController, Reflect,
+                crypto: options.withoutWebCrypto ? undefined : globalThis.crypto, TextEncoder, setTimeout: window.setTimeout, clearTimeout: window.clearTimeout,
                 localStorage: { setItem() {} }, requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
         modules[name] = exports; return exports;
     }
     const icons = await load('reader-icons.ts', './reader-icons');
     await load('reader-popover.ts', './reader-popover');
     await load('reader-toolbar-menu.ts', './reader-toolbar-menu');
+    await load('reader-uncommitted.ts', './reader-uncommitted');
     await load('reader-toolbar-panel.ts', './reader-toolbar-panel');
     await load('reader-create-page.ts', './reader-create-page');
     if (options.publication) {
@@ -494,6 +498,28 @@ async function titleNavigationContract() {
     } finally { app.toolbarPanel.dispose(); app.toolbarMenu.dispose(); h.restore(); }
 }
 
+async function readerExpansionUiContract() {
+    const sidebar = await harness({ expansionTarget: 'browser', expansionError: true });
+    try {
+        assert.equal(sidebar.find('#reader-expand').getAttribute('aria-label'), '在浏览器阅读');
+        sidebar.click(sidebar.find('#reader-expand'));
+        assert.equal(sidebar.find('#reader-expand').disabled, true);
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+        assert.equal(sidebar.find('#reader-expand').disabled, false);
+        assert.match(sidebar.find('#reader-live').textContent, /未能打开/);
+        sidebar.preferences.setLanguage('en'); sidebar.app.updateToolbarLabels();
+        assert.equal(sidebar.find('#reader-expand').getAttribute('aria-label'), 'Read in browser');
+    } finally { sidebar.app.uncommitted.dispose(); sidebar.app.toolbarMenu.dispose(); sidebar.app.toolbarPanel.dispose(); sidebar.restore(); }
+    const browser = await harness({ embedded: false, search: '?path=book%2F01.md&readerScroll=432' });
+    try {
+        browser.app.state.pages = [{ filePath: 'book/01.md', documentMode: 'formal' }];
+        browser.app.openPage = async () => { browser.app.main.scrollTop = 0; };
+        await browser.app.openInitialPage();
+        assert.equal(browser.app.main.scrollTop, 432, 'A standalone browser Reader restores the supplied sidebar scroll position.');
+        assert.equal(browser.find('#reader-expand'), null, 'The browser Reader has no redundant host fullscreen entry.');
+    } finally { browser.app.uncommitted.dispose(); browser.app.toolbarMenu.dispose(); browser.app.toolbarPanel.dispose(); browser.restore(); }
+}
+
 export async function testReaderToolbarMenu() {
     const h = await harness(), { app, document, find, click, key } = h;
     try {
@@ -517,8 +543,8 @@ export async function testReaderToolbarMenu() {
         assert.equal(trigger(category).getAttribute('aria-expanded'), 'false');
     }
     assert.equal(menu.hidden, true);
-    assert.deepEqual(menu.querySelectorAll('.reader-menu-heading').map(group => group.textContent), ['查阅', '审阅', '版本与出版', '显示']);
-    assert.equal(menu.querySelectorAll('button').length, 9, 'Every secondary action exists once, with no hidden duplicate action wiring.');
+    assert.deepEqual(menu.querySelectorAll('.reader-menu-heading').map(group => group.textContent), ['查阅', '审阅', '版本与出版', '设置']);
+    assert.equal(menu.querySelectorAll('button').length, 10, 'Every secondary action exists once, with no hidden duplicate action wiring.');
     for (const button of menu.querySelectorAll('.reader-menu-item')) { assert.ok(button.querySelector('svg')); assert.ok(button.querySelector('.reader-tool-name').textContent); }
     trigger('reference').focus(); key('Enter'); assertOpen('reference');
     assert.equal(document.activeElement.dataset.panel, 'definitions');
@@ -639,6 +665,7 @@ export async function testReaderToolbarMenu() {
     await documentStageUiContract();
     await matterPageNavigationContract();
     await titleNavigationContract();
+    await readerExpansionUiContract();
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await testReaderToolbarMenu();

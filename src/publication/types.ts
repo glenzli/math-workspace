@@ -24,9 +24,10 @@ export interface PublicationProfile extends WorkMetadata {
     cover?: { image?: string; showVersion?: boolean };
     frontMatter?: PublicationMatter[];
     backMatter?: PublicationMatter[];
-    /** New plans discover structural matter; existing plans keep their explicit scope until enabled. */
+    /** Repository mode includes continued pages as back matter; manual entries and notice text remain dormant. */
     matter?: { automatic?: boolean; exclude?: string[] };
     toc?: { enabled?: boolean; depth?: number; title?: string };
+    /** Manual declaration, or legacy switch for continued manuscripts/default declarations. */
     continued?: { enabled?: boolean; file?: string; title?: string; text?: string };
     pdf?: { engine?: string; paper?: string; margin?: string; documentClass?: string };
     doi?: { versionDoi?: string; conceptDoi?: string; provenance?: string };

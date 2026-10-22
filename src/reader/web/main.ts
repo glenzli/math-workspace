@@ -3,7 +3,7 @@ import { readerLabel, readerText, readerAttribute, refreshReaderLabels, readerWo
 import { revealExerciseTarget } from './reader-exercises';
 import './styles.css';
 import { readerFetch, readerEvents, isReaderEmbedded } from './reader-route';
-import { initializeReaderHost, isReaderPageRestored, expandReader, readerHistory, readerSearch, canReferenceReaderInConversation, referenceReaderInConversation, type ReaderEvents } from './reader-host';
+import { initializeReaderHost, isReaderPageRestored, expandReader, readerExpansionTarget, subscribeReaderHostContext, readerHistory, readerSearch, canReferenceReaderInConversation, referenceReaderInConversation, type ReaderEvents } from './reader-host';
 import { readerReference } from './reader-references';
 import { mountReaderAssets } from './reader-assets';
 import { mountReaderEmbeddedView, readerViewStateChanged } from './reader-embed';
@@ -35,6 +35,7 @@ import { leanAssistanceUpdatePaths, ReaderLeanReview } from './reader-lean-revie
 import { readerIcon, replaceReaderButtonIcon, type ReaderIconName } from './reader-icons';
 import { ReaderToolbarPanel } from './reader-toolbar-panel';
 import { ReaderToolbarMenu } from './reader-toolbar-menu';
+import { ReaderUncommittedChanges } from './reader-uncommitted';
 import { ReaderPropositionReview, type ReaderPropositionReviewItem } from './reader-proposition-review';
 import { ReaderTooltip } from './reader-tooltip';
 import {
@@ -73,6 +74,7 @@ interface ReaderPagePayload {
     filePath: string;
     page?: ReaderPage;
     content: string;
+    sourceHash?: string;
     labels: Record<string, ReaderLabel>;
     dependencyMarkers?: Record<string, ReaderDependencyMarker>;
     formulas?: ReaderFormula[];
@@ -96,7 +98,7 @@ const words = {
         toolsReference: '查阅',
         toolsReview: '审阅',
         toolsEdition: '版本与出版',
-        toolsDisplay: '显示',
+        toolsDisplay: '设置',
         interfaceLanguage: '界面语言',
         appearance: '外观',
         automatic: '自动',
@@ -108,6 +110,7 @@ const words = {
         versionHistory: '版本记录',
         pdfPublication: 'PDF 出版',
         sourceLineNumbers: '源码行号',
+        uncommittedChanges: '未提交修改',
         definitions: '定义',
         symbols: '符号',
         propositions: '命题审阅',
@@ -281,7 +284,7 @@ const words = {
         toolsReference: 'Reference',
         toolsReview: 'Review',
         toolsEdition: 'Versions & publication',
-        toolsDisplay: 'Display',
+        toolsDisplay: 'Settings',
         interfaceLanguage: 'Interface language',
         appearance: 'Appearance',
         automatic: 'Auto',
@@ -293,6 +296,7 @@ const words = {
         versionHistory: 'Version history',
         pdfPublication: 'PDF publication',
         sourceLineNumbers: 'Source line numbers',
+        uncommittedChanges: 'Uncommitted changes',
         definitions: 'Definitions',
         symbols: 'Symbols',
         propositions: 'Proposition review',
@@ -711,6 +715,7 @@ class ReaderApplication {
     private leanReview!: ReaderLeanReview;
     private toolbarPanel!: ReaderToolbarPanel;
     private toolbarMenu!: ReaderToolbarMenu;
+    private uncommitted!: ReaderUncommittedChanges;
     private tooltip!: ReaderTooltip;
     private propositionReview!: ReaderPropositionReview;
     private archive!: ReaderArchive;
@@ -742,10 +747,13 @@ class ReaderApplication {
 
     private async openInitialPage(): Promise<void> {
         const initialView = queryView();
+        const initialScroll = Number(new URLSearchParams(readerSearch()).get('readerScroll')) || 0;
+        const initialLocation = querySourceLocation();
         const requested = this.pageForPath(queryPath());
         const initialPath = requested && (!isReaderPageRestored() || requested.documentMode !== 'draft')
             ? requested.filePath : this.defaultPagePath();
         if (!initialPath) {
+            this.uncommitted?.bind();
             this.formulaLayout?.dispose();
             this.page = undefined;
             this.currentPath = '';
@@ -755,7 +763,8 @@ class ReaderApplication {
         }
         this.selectedPagePaths = [initialPath];
         this.selectionAnchorPath = initialPath;
-        await this.openPage(initialPath, 'replace', '', false, querySourceLocation());
+        await this.openPage(initialPath, 'replace', '', false, initialLocation);
+        if (!isReaderEmbedded() && requested?.filePath === initialPath && !initialLocation && Number.isFinite(initialScroll) && initialScroll > 0) this.main.scrollTop = initialScroll;
         if (initialView === 'symbol-audit-report') await this.openSymbolAuditReport('replace');
     }
 
@@ -780,7 +789,7 @@ class ReaderApplication {
             '<button id="reader-reference-tools" class="tool-button" type="button" data-tool-menu="reference" aria-label="Reference"></button>',
             '<button id="reader-review-tools" class="tool-button" type="button" data-tool-menu="review" aria-label="Review"></button>',
             '<button id="reader-edition-tools" class="tool-button" type="button" data-tool-menu="edition" aria-label="Versions and publication"></button>',
-            '<button id="reader-display-tools" class="tool-button" type="button" data-tool-menu="display" aria-label="Display"></button>',
+            '<button id="reader-display-tools" class="tool-button" type="button" data-tool-menu="display" aria-label="Settings"></button>',
             (isReaderEmbedded() ? '<button id="reader-expand" class="tool-button" type="button" aria-label="Full screen"></button>' : ''),
             '</div>',
             '<span id="reader-live" class="reader-live" aria-live="polite"></span>',
@@ -792,12 +801,23 @@ class ReaderApplication {
         this.pageTitle = this.root.querySelector('#reader-page-title') as HTMLElement;
         this.liveStatus = this.root.querySelector('#reader-live') as HTMLElement;
         this.toolbarMenu = new ReaderToolbarMenu(this.root, () => this.dictionary(), () => this.prepareToolbarView('menu'), readerPreferences);
+        this.uncommitted = new ReaderUncommittedChanges(this.article, this.root.querySelector('#reader-uncommitted')!, () => this.uiLanguage, readerFetch, () => this.queueSourceLineNumberAlignment());
         this.tooltip = new ReaderTooltip();
         this.tooltip.bind(this.root);
         window.addEventListener('pagehide', () => { this.formulaLayout?.dispose(); this.createPage?.close(false); });
         window.addEventListener('pageshow', event => { if (event.persisted && this.page && !this.symbolAuditReportOpen) this.mountArticleFormulaLayout(); });
+        window.addEventListener('pagehide', event => { if (event.persisted) this.uncommitted.pause(); else this.uncommitted.dispose(); });
+        window.addEventListener('pageshow', event => { if (event.persisted) this.uncommitted.resume(); });
         this.installToolbarIcons();
-        this.root.querySelector('#reader-expand')?.addEventListener('click', expandReader);
+        this.root.querySelector('#reader-expand')?.addEventListener('click', async () => {
+            const button = this.root.querySelector<HTMLButtonElement>('#reader-expand')!;
+            button.disabled = true;
+            try { await expandReader({ pagePath: this.currentPath, scrollTop: this.main.scrollTop }); }
+            catch { this.reportLive(this.uiLanguage === 'en' ? 'Could not open the reading view. Please try again.' : '未能打开阅读视图，请重试。'); }
+            finally { button.disabled = false; this.updateExpandReaderButton(); }
+        });
+        const stopHostContext = subscribeReaderHostContext(() => this.updateExpandReaderButton());
+        window.addEventListener('pagehide', event => { if (!event.persisted) stopHostContext(); });
         this.updateFontSize(this.fontSize, false);
         this.setSourceLineNumbers(this.sourceLineNumbersVisible, false);
         window.addEventListener('resize', () => this.queueSourceLineNumberAlignment());
@@ -980,6 +1000,7 @@ class ReaderApplication {
         this.publication?.contextChanged();
         this.leanReview?.contextChanged();
         this.formulaLayout?.setLanguage(this.uiLanguage);
+        this.uncommitted?.updateLanguage();
         if (this.symbolAuditReportOpen) { this.article.lang = this.uiLanguage; document.title = this.dictionary().symbolAuditOpenReport + ' — Math Workspace'; }
         refreshReaderLabels(document.body);
         this.toolbarPanel?.reposition();
@@ -1030,6 +1051,7 @@ class ReaderApplication {
 
     private applyState(state: ReaderState): void {
         const projectChanged = this.state?.projectId !== state.projectId;
+        if (projectChanged || this.state?.requestToken !== state.requestToken) this.uncommitted?.bind();
         const formulaContextChanged = projectChanged || this.state?.requestToken !== state.requestToken || this.state?.language !== state.language;
         if (this.toolbarPanel?.isActive('chapters')) this.toolbarPanel.close(this.titleNavigationHasFocus());
         if (projectChanged) this.toolbarMenu?.close();
@@ -1048,6 +1070,7 @@ class ReaderApplication {
     }
 
     private renderProjectLauncher(message: string | (() => string) = ''): void {
+        this.uncommitted?.bind();
         this.formulaLayout?.dispose();
         const shell = this.root.querySelector('.reader-shell') as HTMLElement;
         shell.classList.add('is-project-launcher');
@@ -1114,6 +1137,14 @@ class ReaderApplication {
         }
     }
 
+    private updateExpandReaderButton(): void {
+        const button = this.root.querySelector<HTMLElement>('#reader-expand');
+        if (!button) return;
+        const browser = readerExpansionTarget() === 'browser';
+        const label = this.uiLanguage === 'en' ? (browser ? 'Read in browser' : 'Full screen') : (browser ? '在浏览器阅读' : '全屏阅读');
+        replaceReaderButtonIcon(button, 'expand'); button.dataset.readerTooltip = label; button.setAttribute('aria-label', label);
+    }
+
     private updateToolbarLabels(): void {
         const dictionary = this.dictionary();
         this.toolbarMenu?.updateLabels();
@@ -1124,8 +1155,7 @@ class ReaderApplication {
         if (filterLabel) readerText(filterLabel, () => this.dictionary().search);
         this.createPage?.contextChanged();
         readerAttribute(this.root.querySelector('.reader-tools'), 'aria-label', () => this.dictionary().readerTools);
-        const expand = this.root.querySelector<HTMLElement>('#reader-expand');
-        if (expand) { const label = this.uiLanguage === 'en' ? 'Full screen' : '全屏阅读'; replaceReaderButtonIcon(expand, 'expand'); expand.dataset.readerTooltip = label; expand.setAttribute('aria-label', label); }
+        this.updateExpandReaderButton();
         const back = this.root.querySelector('#reader-back') as HTMLElement;
         const forward = this.root.querySelector('#reader-forward') as HTMLElement;
         back.dataset.tooltip = dictionary.back;
@@ -1266,14 +1296,14 @@ class ReaderApplication {
     }
 
     private queueSourceLineNumberAlignment(): void {
-        if (!this.sourceLineNumbersVisible) return;
+        if (!this.sourceLineNumbersVisible && !this.article.querySelector('.has-uncommitted-change, .has-uncommitted-deletion')) return;
         if (this.sourceLineNumberAlignmentFrame) cancelAnimationFrame(this.sourceLineNumberAlignmentFrame);
         this.sourceLineNumberAlignmentFrame = requestAnimationFrame(() => {
             this.sourceLineNumberAlignmentFrame = 0;
             const articleBounds = this.article.getBoundingClientRect();
             const articleStyles = getComputedStyle(this.article);
             const contentLeft = articleBounds.left + (Number.parseFloat(articleStyles.paddingLeft) || 0);
-            this.article.querySelectorAll<HTMLElement>('.reader-source-line-entry').forEach(element => {
+            this.article.querySelectorAll<HTMLElement>('.reader-source-line-entry, .has-uncommitted-change, .has-uncommitted-deletion').forEach(element => {
                 const indent = Math.max(0, element.getBoundingClientRect().left - contentLeft);
                 const elementLineHeight = Number.parseFloat(getComputedStyle(element).lineHeight) || 0;
                 const markerLineHeight = Number.parseFloat(getComputedStyle(element, '::before').lineHeight) || 0;
@@ -1281,6 +1311,7 @@ class ReaderApplication {
                 element.style.setProperty('--reader-source-line-indent', indent.toFixed(2) + 'px');
                 element.style.setProperty('--reader-source-line-top', firstLineTop.toFixed(2) + 'px');
             });
+            this.uncommitted?.alignMarkers();
         });
     }
 
@@ -1576,6 +1607,7 @@ class ReaderApplication {
             ? 'replace'
             : historyMode;
         const requestId = ++this.pageRequestId;
+        this.uncommitted?.bind();
         this.formulaLayout?.invalidate();
         this.clearSourceLocationHighlight?.();
         this.leanReview.navigationStarted(filePath);
@@ -1685,6 +1717,7 @@ class ReaderApplication {
         this.formulaLayout?.dispose();
         this.article.lang = this.state.language;
         this.article.innerHTML = rendered.html;
+        this.uncommitted.bind({ filePath: this.page.filePath, sourceHash: this.page.sourceHash, project: this.state.projectId || '', token: this.state.requestToken || '' });
         bindFormalInterfaceLabels(this.article, this.page.dependencyMarkers || {}, () => this.uiLanguage);
         this.disposeFigures = mountReaderFigures(this.article, () => this.uiLanguage);
         this.disposeAssets = mountReaderAssets(this.article);
@@ -2284,6 +2317,7 @@ class ReaderApplication {
         this.toolbarPanel.close();
         this.symbolAudit.dispose();
         this.symbolAuditReportOpen = true;
+        this.uncommitted?.bind();
         this.article.lang = this.uiLanguage;
         this.article.classList.add('is-symbol-audit-report');
         const title = this.dictionary().symbolAuditOpenReport;

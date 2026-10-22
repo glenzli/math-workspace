@@ -181,7 +181,7 @@ async function testReaderAppBridge() {
     const source = await fs.readFile(path.join(repoRoot, 'src/reader/web/reader-host.ts'), 'utf8');
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
     const context = vm.createContext({
-        exports, window, parent, crypto, URLSearchParams, Headers, Response, Uint8Array, atob, MessageEvent,
+        exports, window, parent, crypto, URL, URLSearchParams, Headers, Response, Uint8Array, atob, MessageEvent,
         history, location: { pathname: '/resource' }, setTimeout, clearTimeout, console,
         document: { documentElement: { hasAttribute: () => true, classList: { add() {} } } },
         addEventListener: (name, callback) => callbacks.set(name, callback)
@@ -235,8 +235,25 @@ async function testReaderAppBridge() {
     assert.equal(persisted.at(-1).projectRoot, '/another-project');
     assert.equal(sent.filter(message => message.method === 'ui/message').length, referenceCount, 'Saving reading position, navigating, or changing projects must not add a reference.');
     assert.equal(sent.some(message => message.method === 'ui/update-model-context'), false, 'Opening or navigating a page must not attach automatic conversation context.');
-    exports.expandReader();
-    const expand = sent.find(message => message.method === 'ui/request-display-mode'); assert.equal(expand.params.mode, 'fullscreen'); reply(expand, {});
+    const expanded = exports.expandReader();
+    const expand = sent.find(message => message.method === 'ui/request-display-mode'); assert.equal(expand.params.mode, 'fullscreen'); reply(expand, { mode: 'fullscreen' });
+    assert.equal(await expanded, 'fullscreen');
+    assert.equal(exports.readerExpansionTarget(), 'browser', 'The host side panel is already its fullscreen display mode.');
+    const browser = exports.expandReader({ pagePath: 'book/current page.md', scrollTop: 432 });
+    const contextRead = sent.at(-1); assert.equal(contextRead.params.arguments.route, '/api/plugin-context');
+    reply(contextRead, { structuredContent: { status: 200, headers: {}, body: Buffer.from(JSON.stringify({ projectRoot: '/another-project' })).toString('base64') } }); await flush();
+    const browserService = sent.at(-1); assert.equal(browserService.params.name, 'open');
+    assert.equal(browserService.params.arguments.projectRoot, '/another-project');
+    assert.equal(browserService.params.arguments.pagePath, 'book/current page.md');
+    reply(browserService, { structuredContent: { url: 'http://127.0.0.1:12345/?path=book%2Fcurrent%20page.md' } }); await flush();
+    const openLink = sent.at(-1); assert.equal(openLink.method, 'ui/open-link');
+    assert.equal(new URL(openLink.params.url).searchParams.get('path'), 'book/current page.md');
+    assert.equal(new URL(openLink.params.url).searchParams.get('readerScroll'), '432');
+    reply(openLink, {}); assert.equal(await browser, 'browser');
+    const blockedBrowser = exports.expandReader(); const rejected = assert.rejects(blockedBrowser, /Browser unavailable/);
+    reply(sent.at(-1), { structuredContent: { status: 200, headers: {}, body: Buffer.from('{"projectRoot":"/another-project"}').toString('base64') } }); await flush();
+    reply(sent.at(-1), { structuredContent: { url: 'http://127.0.0.1:12345/' } }); await flush();
+    receive({ jsonrpc: '2.0', id: sent.at(-1).id, error: { code: -32601, message: 'Browser unavailable' } }); await rejected;
     receive({ jsonrpc: '2.0', id: 99, method: 'ui/resource-teardown' });
     const close = sent.find(message => message.params?.name === 'close_reader_view'); assert.equal(close.params.arguments.viewKey, key);
     reply(close, { structuredContent: { closed: true } }); await flush();

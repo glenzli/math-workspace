@@ -3,6 +3,8 @@ import type { ReaderReferenceContent } from './reader-references';
 type HostWindow = Window & { openai?: {
     widgetState?: ReaderState; toolOutput?: { reader?: ReaderState & { launcher?: boolean } };
     setWidgetState?: (state: ReaderState) => void; requestDisplayMode?: (request: { mode: string }) => Promise<unknown>;
+    openExternal?: (request: { href: string }) => Promise<unknown>;
+    displayMode?: 'inline' | 'fullscreen' | 'pip';
     theme?: 'light' | 'dark'; locale?: string;
 } };
 const host = typeof window === 'undefined' ? undefined : window as HostWindow;
@@ -22,7 +24,7 @@ let initial: ReaderState & { launcher?: boolean } | undefined;
 let receiveSeed: (() => void) | undefined;
 const viewKey = embedded ? crypto.randomUUID().replaceAll('-', '') : '';
 
-export interface ReaderHostContext { theme?: 'light' | 'dark'; locale?: string; }
+export interface ReaderHostContext { theme?: 'light' | 'dark'; locale?: string; displayMode?: 'inline' | 'fullscreen' | 'pip'; availableDisplayModes?: string[]; }
 const hostContextListeners = new Set<(context: ReaderHostContext) => void>();
 const standardHostContext: ReaderHostContext = {};
 const legacyHostContext: ReaderHostContext = {};
@@ -32,8 +34,11 @@ function patchHostContext(target: ReaderHostContext, context: unknown): void {
     const previous = { ...legacyHostContext, ...standardHostContext };
     if (typeof patch.locale === 'string' && patch.locale.trim()) target.locale = patch.locale;
     if (patch.theme === 'light' || patch.theme === 'dark') target.theme = patch.theme;
+    if (patch.displayMode === 'inline' || patch.displayMode === 'fullscreen' || patch.displayMode === 'pip') target.displayMode = patch.displayMode;
+    if (Array.isArray(patch.availableDisplayModes) && patch.availableDisplayModes.every(mode => typeof mode === 'string')) target.availableDisplayModes = [...patch.availableDisplayModes];
     const current = { ...legacyHostContext, ...standardHostContext };
-    if (current.locale !== previous.locale || current.theme !== previous.theme) {
+    if (current.locale !== previous.locale || current.theme !== previous.theme || current.displayMode !== previous.displayMode
+        || JSON.stringify(current.availableDisplayModes) !== JSON.stringify(previous.availableDisplayModes)) {
         hostContextListeners.forEach(listener => listener({ ...current }));
     }
 }
@@ -190,10 +195,35 @@ export function persistReaderState(value: ReaderState): void {
     host?.openai?.setWidgetState?.(saved);
 }
 
-export function expandReader(): void {
-    void Promise.resolve(host?.openai?.requestDisplayMode
-        ? host?.openai.requestDisplayMode({ mode: 'fullscreen' })
-        : request('ui/request-display-mode', { mode: 'fullscreen' })).catch(() => {});
+export function readerExpansionTarget(): 'fullscreen' | 'browser' {
+    const context = { ...legacyHostContext, ...standardHostContext };
+    // Desktop's fullscreen MCP mode is the side panel itself, not a larger window.
+    return context.displayMode === 'fullscreen' || context.availableDisplayModes && !context.availableDisplayModes.includes('fullscreen') ? 'browser' : 'fullscreen';
+}
+
+export async function expandReader(position: { pagePath?: string; scrollTop?: number } = {}): Promise<'fullscreen' | 'browser'> {
+    if (readerExpansionTarget() === 'fullscreen') {
+        const result = host?.openai?.requestDisplayMode
+            ? await host.openai.requestDisplayMode({ mode: 'fullscreen' })
+            : await request('ui/request-display-mode', { mode: 'fullscreen' });
+        if ((result as { mode?: string })?.mode === 'fullscreen') {
+            patchHostContext(standardHostContext, { displayMode: 'fullscreen' });
+            return 'fullscreen';
+        }
+    }
+    const response = await readerHostFetch('/api/plugin-context');
+    if (!response.ok) throw new Error('Reader context is unavailable.');
+    const context = await response.json();
+    // Use the independent browser service: closing the embedded view must not close it.
+    const launch = await call('open', { ...(context.projectRoot ? { projectRoot: context.projectRoot } : {}),
+        ...(position.pagePath || saved.pagePath ? { pagePath: position.pagePath || saved.pagePath } : {}) });
+    const url = new URL(launch.url);
+    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password) throw new Error('Invalid local Reader URL.');
+    const scroll = position.scrollTop ?? saved.scrollTop;
+    if (scroll && scroll > 0) url.searchParams.set('readerScroll', String(scroll));
+    if (host?.openai?.openExternal) await host.openai.openExternal({ href: url.href });
+    else await request('ui/open-link', { url: url.href });
+    return 'browser';
 }
 
 export async function referenceReaderInConversation(content: ReaderReferenceContent[]): Promise<void> {

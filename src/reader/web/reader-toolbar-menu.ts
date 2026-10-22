@@ -14,6 +14,7 @@ export interface ReaderToolbarMenuLabels {
     versionHistory: string;
     pdfPublication: string;
     sourceLineNumbers: string;
+    uncommittedChanges: string;
     fontSize: string;
     decreaseFont: string;
     increaseFont: string;
@@ -147,6 +148,11 @@ export class ReaderToolbarMenu {
         const check = document.createElement('span');
         check.className = 'reader-tool-check'; check.setAttribute('aria-hidden', 'true'); check.textContent = '✓';
         lines.append(check);
+        const changes = this.item('uncommittedChanges', 'compare', { keepMenuOpen: 'true' }, 'reader-uncommitted');
+        changes.setAttribute('role', 'menuitemcheckbox'); changes.removeAttribute('aria-haspopup'); changes.setAttribute('aria-checked', 'false');
+        const changesStatus = document.createElement('span'); changesStatus.id = 'reader-uncommitted-status'; changesStatus.className = 'reader-tool-status';
+        changesStatus.hidden = true; changesStatus.setAttribute('role', 'status'); changesStatus.setAttribute('aria-live', 'polite'); changes.append(changesStatus);
+        const changesCheck = document.createElement('span'); changesCheck.className = 'reader-tool-check'; changesCheck.setAttribute('aria-hidden', 'true'); changesCheck.textContent = '✓'; changes.append(changesCheck);
         const size = document.createElement('div'); size.className = 'reader-menu-font-size';
         const label = document.createElement('span'); label.className = 'reader-menu-font-label';
         this.names.set('fontSize', label);
@@ -155,7 +161,7 @@ export class ReaderToolbarMenu {
         const decrease = this.fontButton('-1', 'A−'), increase = this.fontButton('1', 'A+');
         const value = document.createElement('output'); value.id = 'reader-font-size'; value.setAttribute('aria-live', 'polite');
         controls.append(decrease, value, increase); size.append(label, controls);
-        this.group('display', [lines, size,
+        this.group('display', [lines, changes, size,
             this.preference('reader-interface-language', 'interfaceLanguage', [['auto', 'automatic'], ['zh', 'chinese'], ['en', 'english']],
                 value => this.preferences.setLanguage(value as LanguagePreference)),
             this.preference('reader-appearance', 'appearance', [['auto', 'automatic'], ['light', 'light'], ['dark', 'dark']],

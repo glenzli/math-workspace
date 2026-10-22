@@ -3,7 +3,7 @@ import { readerFetch } from './reader-route';
 import { readerIcon, type ReaderIconName } from './reader-icons';
 import { ReaderPublicationPdf } from './reader-publication-pdf';
 import { mergeWorkMetadata, type WorkMetadata, type WorkAuthor } from '../../../packages/core/src/project-metadata';
-import { discoverPublicationMatter, resolvePublicationMatter } from '../../publication/matter';
+import { discoverPublicationMatter, resolvePublicationMatter, hasPublicationContinuedManuscript } from '../../publication/matter';
 import type {
     PublicationArtifact, PublicationBuild, PublicationInspection, PublicationPlan,
     PublicationProfile, PublicationProfileRecord, PublicationStatus, PublicationManifest, PublicationUploadPlan, PublicationPage
@@ -22,7 +22,11 @@ const copy = {
         commonPrefix: '项目', saveCommon: '保存项目公共信息', savingCommon: '正在保存项目公共信息…', commonSaved: '项目公共信息已保存。请重新审阅本版。', reloadCommon: '重新载入并放弃未保存的公共信息', commonConflict: '项目公共信息已在其他地方更新。未保存的内容仍保留；重新载入后再编辑和保存。',
         override: '本版单独设置', inherited: '沿用项目公共信息', website: '作品网站', repository: '源码仓库', licenseUrl: '许可链接', keywords: '关键词（每行一个）', preferredCitation: '推荐引用',
         authorName: '作者姓名', authorNative: '本名', authorAliases: '别名（每行一个）', affiliation: '所属机构', addAuthor: '添加作者', removeAuthor: '移除作者',
-        autoMatter: '自动收录所选书卷的序言、后记、附录等内容', autoMatterHint: '依据稿件的结构角色识别，保留原标题和附录编号。可以逐项取消收录；已有方案需主动开启。', autoIncluded: '自动识别的内容', customMatter: '手动调整收录与顺序', moveUp: '上移', moveDown: '下移',
+        matterSource: '前后文来源', repositoryMatter: '使用仓库稿件', manualMatter: '手动编排',
+        repositoryMatterHint: '直接收录所选书卷的稿件，可逐项取消；“未完待续”列入后文。正文在原稿中维护，卷内文章保留在对应卷内，附录保留原有编号。',
+        manualMatterHint: '按下面的条目编排前后文，仓库中的其他前后文不会另外加入。切换来源时保留已有的手动条目。',
+        emptyRepositoryMatter: '所选书卷中尚无相应稿件。可在仓库中创建，或切换为手动编排。', volumeMatterPlacement: '保留在所属卷内',
+        sourceInDetails: '可在“版面与信息”中查看前后文并切换来源。', moveUp: '上移', moveDown: '下移',
         title: 'PDF 出版', close: '关闭', refresh: '刷新出版状态', loading: '正在读取出版计划…',
         intro: '选择这次出版的章节，审阅范围与版面，再生成可留存的 PDF。每一版都保留独立的文件与标识。',
         steps: ['章节', '版面与信息', '审阅范围', 'PDF 与 DOI'], plan: '出版计划', newPlan: '新建计划',
@@ -39,8 +43,9 @@ const copy = {
         usedAs: '已用于', sourceFile: '引用稿件', sourceInline: '方案内手填内容', manuscriptPreview: '稿件内容预览',
         toc: '目录', tocEnabled: '自动生成目录', inToc: '纳入目录', tocTitle: '目录标题', tocDepth: '目录层级',
         continued: '未完待续', continuedEnabled: '附上“未完待续”声明（也可用于已收录全部章节的版本）',
-        continuedTitle: '声明标题（留空沿用稿件标题或默认标题）',
+        continuedTitle: '声明标题（留空使用默认标题）',
         continuedAuto: '当前沿用自动规则：选择稿件时启用，否则仅在部分发布时附上。操作开关可明确指定。',
+        continuedDefault: '没有对应的“未完待续”稿件时，部分发布默认附上声明。可用开关指定是否附上；手填内容在“手动编排”中设置。',
         continuedText: '声明正文（留空使用默认文字）', review: '保存并审阅本版',
         reviewHint: '生成前确认本版的确切范围。修改计划后，需要重新审阅。', selected: '本版收录', omitted: '本版未收录',
         external: '指向本版范围以外的引用', noExternal: '未发现指向未收录章节的引用。',
@@ -89,7 +94,11 @@ const copy = {
         commonPrefix: 'Project', saveCommon: 'Save project metadata', savingCommon: 'Saving project metadata…', commonSaved: 'Project metadata saved. Review this edition again.', reloadCommon: 'Reload and discard unsaved project metadata', commonConflict: 'Project metadata changed elsewhere. Your unsaved draft is retained; reload before editing and saving again.',
         override: 'Override for this edition', inherited: 'Use project metadata', website: 'Work website', repository: 'Source repository', licenseUrl: 'License URL', keywords: 'Keywords (one per line)', preferredCitation: 'Preferred citation',
         authorName: 'Author name', authorNative: 'Native name', authorAliases: 'Aliases (one per line)', affiliation: 'Affiliation', addAuthor: 'Add author', removeAuthor: 'Remove author',
-        autoMatter: 'Automatically include prefaces, endings and appendices for the selected books and volumes', autoMatterHint: 'Uses manuscript roles, preserving titles and appendix numbering. Exclude individual pages as needed; existing plans require enabling this option.', autoIncluded: 'Automatically identified pages', customMatter: 'Customize inclusion and order', moveUp: 'Move up', moveDown: 'Move down',
+        matterSource: 'Front and back matter source', repositoryMatter: 'Use repository manuscripts', manualMatter: 'Arrange manually',
+        repositoryMatterHint: 'Include manuscripts for the selected books and volumes; uncheck pages as needed. Continued pages are back matter. Edit the original manuscripts; volume matter keeps its position and appendices keep their numbering.',
+        manualMatterHint: 'Use the entries below. Other repository front and back matter is not added. Existing manual entries are retained when switching sources.',
+        emptyRepositoryMatter: 'No matching manuscripts in the selected books and volumes. Create them in the repository or switch to manual arrangement.', volumeMatterPlacement: 'Kept within its volume',
+        sourceInDetails: 'View front and back matter and switch sources in Layout & details.', moveUp: 'Move up', moveDown: 'Move down',
         title: 'PDF publication', close: 'Close', refresh: 'Refresh publication status', loading: 'Loading publication plans…',
         intro: 'Select this edition’s chapters, review its scope and layout, then create a PDF to keep. Each edition retains its own files and identity.',
         steps: ['Chapters', 'Layout & details', 'Review scope', 'PDF & DOI'], plan: 'Publication plan', newPlan: 'New plan',
@@ -106,8 +115,9 @@ const copy = {
         usedAs: 'Used as', sourceFile: 'Source manuscript', sourceInline: 'Inline content in this plan', manuscriptPreview: 'Manuscript content preview',
         toc: 'Contents', tocEnabled: 'Generate table of contents', inToc: 'Include in contents', tocTitle: 'Contents heading', tocDepth: 'Contents depth',
         continued: 'To be continued', continuedEnabled: 'Add a “To be continued” declaration (also for a complete chapter selection)',
-        continuedTitle: 'Declaration heading (blank uses the manuscript or default heading)',
+        continuedTitle: 'Declaration heading (leave blank for the default)',
         continuedAuto: 'Using the automatic rule: enable a referenced manuscript, otherwise add the declaration only to partial editions. Change the switch to choose explicitly.',
+        continuedDefault: 'Without a matching continued manuscript, partial editions include a default declaration. Use the switch to choose explicitly; edit inline content in manual arrangement.',
         continuedText: 'Declaration text (leave blank for the default)', review: 'Save and review this edition',
         reviewHint: 'Check the exact scope before building. Editing the plan requires a fresh review.', selected: 'Included in this edition', omitted: 'Omitted from this edition',
         external: 'References outside this edition', noExternal: 'No references to omitted chapters were found.',
@@ -310,12 +320,16 @@ export class ReaderPublication {
         this.profile = record ? clone(record.profile) : this.inspection?.defaultProfile ? clone(this.inspection.defaultProfile) : {
             id: 'publication', workId: 'publication', title: '', version: '1.0', authors: [],
             language: this.context().manuscriptLanguage || this.context().language, license: 'CC-BY-4.0', chapters: [],
-            cover: { showVersion: true }, frontMatter: [{ title: w.front, content: '', includeInToc: true }],
-            backMatter: [{ title: w.back, content: '', includeInToc: true }], toc: { enabled: true, depth: 2, title: w.toc },
+            cover: { showVersion: true }, frontMatter: [], backMatter: [], matter: { automatic: true }, toc: { enabled: true, depth: 2, title: w.toc },
             continued: { enabled: true }, zenodo: { environment: 'sandbox' }
         };
+        const p = this.profile;
+        const found = discoverPublicationMatter({ ...p, matter: { ...p.matter, automatic: true } }, this.inspection?.pages || []);
+        const detected = p.matter?.automatic === undefined && !p.frontMatter?.length && !p.backMatter?.length && !p.continued?.file && !p.continued?.title && !p.continued?.text
+            && !!(found.frontMatter.length || found.backMatter.length || found.volumeMatter.length);
+        if (detected) p.matter = { ...p.matter, automatic: true };
         this.revision = record?.revision ?? null; this.status = undefined; this.plan = undefined; this.build = undefined; this.manifest = undefined; this.uploadPlan = undefined;
-        this.dirty = !record; this.scopeConfirmed = false; this.publishConfirmed = false; this.versionConfirmed = false;
+        this.dirty = !record || detected; this.scopeConfirmed = false; this.publishConfirmed = false; this.versionConfirmed = false;
     }
     private async readStatus(generation = this.generation): Promise<void> {
         if (!this.profile || this.revision === null) return;
@@ -388,19 +402,7 @@ export class ReaderPublication {
             }).catch(error => { if (this.current(generation) && view === this.viewRequest) this.report(String(error), true); });
         }); label.append(select); plans.append(label, readerLabel(icon(w.refresh, 'reload', () => void this.refresh()), () => this.words().refresh)); parent.append(plans);
         parent.append(readerLabel(node('p', w.selectHint, 'publication-hint'), () => this.words().selectHint));
-        readerLabel(this.check(parent, w.autoMatter, profile.matter?.automatic === true, automatic => { profile.matter = { ...profile.matter, automatic }; this.changed(); this.render(); }), () => this.words().autoMatter);
-        parent.append(readerLabel(node('p', w.autoMatterHint, 'publication-hint'), () => this.words().autoMatterHint));
-        if (profile.matter?.automatic) {
-            const allCandidates = discoverPublicationMatter({ ...profile, matter: { ...profile.matter, exclude: [] } }, this.inspection!.pages);
-            const found = [...allCandidates.frontMatter, ...allCandidates.volumeMatter, ...allCandidates.appendices, ...allCandidates.backMatter, ...(allCandidates.continued.length === 1 ? allCandidates.continued : [])];
-            if (found.length) {
-                const section = readerLabel(this.section(parent, w.autoIncluded), () => this.words().autoIncluded);
-                for (const page of found) this.check(section, pageTitle(page), !profile.matter.exclude?.includes(page.path), checked => {
-                    const exclude = new Set(profile.matter?.exclude || []); checked ? exclude.delete(page.path) : exclude.add(page.path);
-                    profile.matter = { ...profile.matter, exclude: [...exclude] }; profile.chapters = profile.chapters.filter(name => name !== page.path); this.changed(); this.render();
-                });
-            }
-        }
+        parent.append(readerText(node('p', '', 'publication-hint'), () => `${w.matterSource}: ${profile.matter?.automatic ? w.repositoryMatter : w.manualMatter}. ${w.sourceInDetails}`));
         const actions = node('div', '', 'publication-actions');
         const assigned = this.matterFiles(), available = this.inspection!.pages.filter(page => !assigned.has(page.path));
         const choose = (paths: string[]) => {
@@ -520,6 +522,19 @@ export class ReaderPublication {
         });
         field.append(select, readerLabel(node('small', w.filePriority), () => this.words().filePriority)); parent.append(field);
     }
+    private changeMatterSource(automatic: boolean): void {
+        const p = this.profile!;
+        if (!automatic && p.matter?.automatic) {
+            const current = resolvePublicationMatter(p, this.inspection?.pages || []);
+            // Restore an authored manual draft; seed from repository files only when empty.
+            if (!p.frontMatter?.length) p.frontMatter = current.frontMatter;
+            const continued = new Set((this.inspection?.pages || []).filter(page => page.kind === 'continued').map(page => page.path));
+            if (!p.backMatter?.length) p.backMatter = current.backMatter?.filter(entry => !continued.has(entry.file));
+            p.chapters = current.chapters.filter(file => !continued.has(file));
+        }
+        p.matter = { ...p.matter, automatic };
+        this.changed(); this.render();
+    }
     private renderDetails(parent: HTMLElement): void {
         const w = this.words(), p = this.profile!, grid = node('div', '', 'publication-fields');
         this.renderMetadata(parent);
@@ -563,15 +578,49 @@ export class ReaderPublication {
         const cover = readerLabel(this.section(parent, w.cover), () => this.words().cover); cover.append(readerLabel(node('p', w.coverHint, 'publication-hint'), () => this.words().coverHint));
         readerLabel(this.input(cover, w.coverImage, p.cover?.image || '', value => { p.cover = { ...p.cover, image: value || undefined }; }), () => this.words().coverImage);
         readerLabel(this.check(cover, w.coverVersion, p.cover?.showVersion !== false, value => { p.cover = { ...p.cover, showVersion: value }; this.changed(); }), () => this.words().coverVersion);
-        if (p.matter?.automatic) {
-            parent.append(readerLabel(node('p', w.autoMatterHint, 'publication-hint'), () => this.words().autoMatterHint), readerLabel(icon(w.customMatter, 'list-plus', () => {
-                const resolved = resolvePublicationMatter(p, this.inspection?.pages || []);
-                p.frontMatter = resolved.frontMatter; p.backMatter = resolved.backMatter; p.chapters = resolved.chapters; p.continued = resolved.continued; p.matter = { ...p.matter, automatic: false }; this.changed(); this.render();
-            }), () => this.words().customMatter));
+        const source = readerLabel(this.section(parent, w.matterSource), () => this.words().matterSource);
+        source.classList.toggle('publication-matter-source', true);
+        const sourceField = node('label', '', 'publication-field'), sourceChoice = node('select');
+        readerAttribute(sourceChoice, 'aria-label', () => w.matterSource); sourceChoice.dataset.publicationMatterSource = '';
+        for (const [value, title] of [['repository', () => w.repositoryMatter], ['manual', () => w.manualMatter]] as const) {
+            const option = readerText(node('option'), title); option.value = value; sourceChoice.append(option);
         }
+        sourceChoice.value = p.matter?.automatic ? 'repository' : 'manual';
+        sourceChoice.addEventListener('change', () => {
+            const focused = document.activeElement === sourceChoice;
+            this.changeMatterSource(sourceChoice.value === 'repository');
+            if (focused) this.content?.querySelector<HTMLSelectElement>('[data-publication-matter-source]')?.focus();
+        });
+        sourceField.append(sourceChoice); source.append(sourceField, readerText(node('p', '', 'publication-hint'), () => p.matter?.automatic ? w.repositoryMatterHint : w.manualMatterHint));
+        const detected = discoverPublicationMatter({ ...p, matter: { ...p.matter, automatic: true, exclude: [] } }, this.inspection?.pages || []);
         for (const [key, title] of [['frontMatter', w.front], ['backMatter', w.back]] as const) {
             const section = readerLabel(this.section(parent, title), () => this.words()[key === 'frontMatter' ? 'front' : 'back']);
             const role = key === 'frontMatter' ? 'front-matter' : 'back-matter';
+            section.dataset.publicationMatter = key;
+            if (p.matter?.automatic) {
+                const kinds = key === 'frontMatter' ? ['front-matter', 'intro'] : ['back-matter', 'summary', 'continued'];
+                const paths = new Set([...detected[key], ...detected.volumeMatter.filter(page => kinds.includes(page.kind))].map(page => page.path));
+                // The catalog already follows the exact manuscript/PDF order, across book and volume scopes.
+                const pages = (this.inspection?.pages || []).filter(page => paths.has(page.path));
+                if (!pages.length) section.append(readerText(node('p', '', 'publication-hint'), () => p.chapters.length ? w.emptyRepositoryMatter : w.noSelection));
+                for (const page of pages) {
+                    const row = node('div', '', 'publication-repository-matter');
+                    this.check(row, pageTitle(page), !p.matter.exclude?.includes(page.path) && (page.kind !== 'continued' || p.continued?.enabled !== false), checked => {
+                        const exclude = new Set(p.matter?.exclude || []);
+                        if (page.kind === 'continued' && p.continued?.enabled === false && checked) {
+                            for (const candidate of detected.continued) exclude.add(candidate.path);
+                            p.continued = { ...p.continued, enabled: true };
+                        }
+                        checked ? exclude.delete(page.path) : exclude.add(page.path);
+                        p.matter = { ...p.matter, exclude: [...exclude] }; p.chapters = p.chapters.filter(file => file !== page.path); this.changed(); this.render();
+                    });
+                    const scope = [page.bookTitle || page.book, page.volumeTitle || page.volume].filter(Boolean).join(' · ');
+                    if (scope) row.append(readerText(node('small'), () => scope + (page.volume ? ` · ${w.volumeMatterPlacement}` : '')));
+                    row.append(node('small', page.path)); section.append(row);
+                }
+                if (key === 'backMatter' && !detected.continued.length) this.renderContinued(section, true);
+                continue;
+            }
             (p[key] || []).forEach((matter, index) => {
                 const entry = node('div', '', 'publication-matter');
                 this.manuscriptPicker(entry, role, matter.file, value => { matter.file = value; }, `${key}-${index + 1}`);
@@ -589,19 +638,31 @@ export class ReaderPublication {
             section.append(readerLabel(icon(`${w.addMatter} ${title}`, 'plus', () => {
                 (p[key] ||= []).push({ includeInToc: true }); this.changed(); this.render();
             }), () => `${this.words().addMatter} ${this.words()[key === 'frontMatter' ? 'front' : 'back']}`));
+            if (key === 'backMatter') this.renderContinued(section);
         }
         const toc = readerLabel(this.section(parent, w.toc), () => this.words().toc);
         readerLabel(this.check(toc, w.tocEnabled, p.toc?.enabled !== false, value => { p.toc = { ...p.toc, enabled: value }; this.changed(); }), () => this.words().tocEnabled);
         readerLabel(this.input(toc, w.tocTitle, p.toc?.title || copy[this.context().manuscriptLanguage || this.context().language].toc, value => { p.toc = { ...p.toc, title: value }; }), () => this.words().tocTitle);
         const depth = readerLabel(this.input(toc, w.tocDepth, String(p.toc?.depth || 2), value => { p.toc = { ...p.toc, depth: Number(value) }; }), () => this.words().tocDepth);
         if (depth instanceof HTMLInputElement) { depth.type = 'number'; depth.min = '1'; depth.max = '6'; }
-        const continued = readerLabel(this.section(parent, w.continued), () => this.words().continued);
-        const continuedEnabled = readerLabel(this.check(continued, w.continuedEnabled, p.continued?.enabled ?? !!p.continued?.file, value => { p.continued = { ...p.continued, enabled: value }; this.changed(); this.render(); }), () => this.words().continuedEnabled);
-        if (p.continued?.enabled === undefined) { continuedEnabled.indeterminate = !p.continued?.file; continued.append(readerLabel(node('p', w.continuedAuto, 'publication-hint'), () => this.words().continuedAuto)); }
-        this.manuscriptPicker(continued, 'continued', p.continued?.file, value => { p.continued = { ...p.continued, file: value }; }, 'continued');
-        readerLabel(this.input(continued, w.continuedTitle, p.continued?.title || '', value => { p.continued = { ...p.continued, title: value || undefined }; }), () => this.words().continuedTitle);
-        readerLabel(this.input(continued, w.continuedText, p.continued?.text || '', value => { p.continued = { ...p.continued, text: value || undefined }; }, true), () => this.words().continuedText);
         const actions = node('div', '', 'publication-actions'); actions.append(readerLabel(icon(w.save, 'save', () => void this.save()), () => this.words().save)); parent.append(actions); this.renderNext(parent);
+    }
+    private renderContinued(parent: HTMLElement, defaultOnly = false): void {
+        const w = this.words(), p = this.profile!;
+        if (!defaultOnly && hasPublicationContinuedManuscript(p, this.inspection?.pages || [])) return;
+        const continued = node('div', '', 'publication-matter');
+        continued.dataset.publicationContinued = '';
+        continued.append(readerText(node('h4'), () => w.continued)); parent.append(continued);
+        const file = defaultOnly ? undefined : p.continued?.file;
+        const enabled = this.check(continued, () => w.continuedEnabled, p.continued?.enabled ?? !!file, value => { p.continued = { ...p.continued, enabled: value }; this.changed(); this.render(); });
+        if (p.continued?.enabled === undefined) enabled.indeterminate = !file;
+        if (defaultOnly || p.continued?.enabled === undefined) continued.append(readerText(node('p', '', 'publication-hint'), () => defaultOnly ? w.continuedDefault : w.continuedAuto));
+        if (defaultOnly) return;
+        this.manuscriptPicker(continued, 'continued', file, value => { p.continued = { ...p.continued, file: value }; }, 'continued');
+        if (!file) {
+            this.input(continued, () => w.continuedTitle, p.continued?.title || '', value => { p.continued = { ...p.continued, title: value || undefined }; });
+            this.input(continued, () => w.continuedText, p.continued?.text || '', value => { p.continued = { ...p.continued, text: value || undefined }; }, true);
+        }
     }
     private section(parent: HTMLElement, title: string): HTMLElement {
         const section = node('section', '', 'publication-section'); section.append(node('h3', title)); parent.append(section); return section;

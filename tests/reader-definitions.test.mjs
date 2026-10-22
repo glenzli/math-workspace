@@ -41,7 +41,7 @@ export async function testReaderDefinitions() {
         assert.match(mathTitle, /<p[^>]*>后续说明。<\/p>/);
         assert.equal((mathTitle.match(/data-reader-definition=/g) || []).length, 1);
         const quoted = render('> 定义（子空间）：正文。');
-        assert.match(quoted, /<blockquote>[^]*data-reader-definition/);
+        assert.match(quoted, /<blockquote\b[^>]*>[^]*data-reader-definition/);
         for (const source of [
             '这里提到定义（距离）：并未定义新对象。',
             '**普通术语**：说明。',

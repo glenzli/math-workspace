@@ -286,7 +286,7 @@ math-workspace create-page --kind back-matter --container book --title "AI 退�
 
 The title must be nonempty and fit on one line. Optional `--slug` controls only the filename stem; `continued` has a fixed filename and does not accept `--slug`. The helper allocates the path, order, and stable page ID, then creates an empty Markdown file with a heading without overwriting source. The author or AI writes the body. Existing files are preserved, and a book/volume cannot acquire a duplicate continued page; check whether the existing manuscript should be continued. Refresh outdated plans with another read-only plan; if project, kind, title, container, and destination are unchanged, continue with the new token. Review changed destinations or reuse existing manuscripts first. Let the helper supply chapter numbers and hashes, and do not create a duplicate to bypass a collision.
 
-Write the body at the returned `filePath`, keep its page ID, and run `finish` on that file. Creation does not add it to a publication profile. For publication, explicitly reference this manuscript through `frontMatter[].file`, `backMatter[].file`, or `continued.file`, so everyday reading and the PDF use the same content.
+Write the body at the returned `filePath`, keep its page ID, and run `finish` on that file. Creation does not rewrite a saved publication profile. Repository mode discovers front and back matter for the selected books and volumes when planning again. Manual mode can reference the manuscript through `frontMatter[].file`, `backMatter[].file`, or `continued.file`, so everyday reading and the PDF use the same content.
 
 The Reader's “＋” offers the same creation workflow: enter a title, choose the kind and current book/volume, review a read-only plan, then add the request to the Codex input. The request includes the actual command entry and working directory and is not sent automatically. Without conversation-host support, copy the request. The Reader does not write source manuscripts or automatically select new pages for publication.
 
@@ -317,13 +317,15 @@ The command prints a URL bound only to `127.0.0.1`. Open it in Codex's local bro
 - optional source-block starting line numbers remembered in the local browser;
 - live refresh after source changes.
 
-The upper-right toolbar keeps frequent Lean comparison and Contents actions directly available as compact icon buttons with hover text. Related tools have separate menus: Reference contains Definitions and Symbols, Review contains Proposition review and Symbol audit, Versions & publication contains Version history and PDF publication, and Display contains interface language, appearance, source line numbers, and text size. Embedded panels also keep Full screen available in the toolbar. Only one menu opens at a time. Menus support arrow keys, Home and End. Escape closes the menu and returns focus to its category button.
+The upper-right toolbar keeps frequent Lean comparison and Contents actions directly available as compact icon buttons with hover text. Related tools have separate menus: Reference contains Definitions and Symbols, Review contains Proposition review and Symbol audit, Versions & publication contains Version history and PDF publication, and Settings contains interface language, appearance, source line numbers, uncommitted changes, and text size. Full screen moves an inline Reader to the host side panel. Within the side panel, Read in browser opens an independent local reading page and preserves the page and scroll position; closing the side panel does not close the browser Reader. Only one menu opens at a time. Menus support arrow keys, Home and End. Escape closes the menu and returns focus to its category button.
 
-**Display → Language** offers **Auto**, **中文**, and **English**; **Display → Appearance** offers **Auto**, **Light**, and **Dark**. Automatic language selection uses the first supported Chinese or English locale from Codex or another MCP host, then the browser, and falls back to English. Automatic appearance follows the host when available, then the system. Manual choices take precedence and can be saved for later use; if the environment cannot save them, they remain effective for the current session.
+**Settings → Language** offers **Auto**, **中文**, and **English**; **Settings → Appearance** offers **Auto**, **Light**, and **Dark**. Automatic language selection uses the first supported Chinese or English locale from Codex or another MCP host, then the browser, and falls back to English. Automatic appearance follows the host when available, then the system. Manual choices take precedence and can be saved for later use; if the environment cannot save them, they remain effective for the current session.
 
 Interface and manuscript languages are independent. The `language` field in `.math-workspace/config.json` controls manuscript labels and displayed numbering and supplies the default PDF language; publication profiles or explicit PDF options can override that default. Changing interface language or appearance does not rewrite manuscript sources or project configuration, or change these publication settings. Light and dark modes retain the semantic colors for Lean associations, warnings, errors, and dependencies.
 
-In Display, Source line numbers shows each locatable source block's starting line in the article gutter. It helps map rendered content back to Markdown without pretending that visual wraps are source lines or changing article layout. The view is off by default and its preference stays in the current browser.
+In Settings, Source line numbers shows each locatable source block's starting line in the article gutter. It helps map rendered content back to Markdown without pretending that visual wraps are source lines or changing article layout. The view is off by default and its preference stays in the current browser.
+
+**Settings → Uncommitted changes** is off by default. Enabling it reads the current manuscript's Git status and marks additions and edits since the latest commit, including staged edits, with a thin amber marker in the article gutter, separate from source line numbers, without changing indentation or paragraph backgrounds. New files mark all visible content. Paragraphs, list items, formulas, tables and code blocks use their source ranges; visual wraps are not source lines. Pure deletions receive a short dashed marker nearby in the same gutter column without restoring deleted prose. Hover for source line ranges. Source refreshes update the markers, and committing clears them automatically. The toggle shows progress, the marker count or No changes, and explains unavailable Git, read failures or an outdated running Reader. Normal reading remains available. This switch affects the current Reader view only; it does not change manuscripts, the Git index or PDFs.
 
 Dependency markers read only explicit `@h-...` relationships. A short line above the dot means the statement or proof explicitly references formal items such as a section, definition, theorem-like object, or proof-backed hash remark. A vertical line below means a later dependency node depends on it; a fork means multiple direct downstream nodes. Mainline theorem-like nodes use the ordinary impact colors: muted is a terminal node, blue is directly cited, and green is both explicitly grounded and cited later. Hash remarks use a muted supplemental color and label; plain `注（...）` / `Remark (...)` entries have no graph node or marker. Hover for reference and transitive-impact counts. These are structural signals, not measures of mathematical importance.
 
@@ -777,13 +779,15 @@ book/
   to-be-continued.md
 ```
 
-The `front-matter/` and `back-matter/` directories can contain several pieces with any headings the author chooses. Numeric filename prefixes such as `01-` and `02-` control their order without becoming chapter numbers. For example, `ai-retirement-note.md` can be titled “An AI's retirement letter”; it does not have to become a conclusion. `to-be-continued.md` is a separate final page. Existing `intro.md`, `introduction.md` and `summary.md` files remain supported. Front matter and back matter within a volume stay at that volume's beginning and end. Keep stable page identifiers under the manuscript's normal rules. File references and relative images use the same compilation rules as the body.
+The `front-matter/` and `back-matter/` directories can contain several pieces with any headings the author chooses. Numeric filename prefixes such as `01-` and `02-` control their order without becoming chapter numbers. For example, `ai-retirement-note.md` can be titled “An AI's retirement letter”; it does not have to become a conclusion. `to-be-continued.md` is back matter at the end of its owning book or volume. Existing `intro.md`, `introduction.md` and `summary.md` files remain supported. Front matter and back matter within a volume stay at that volume's beginning and end. Keep stable page identifiers under the manuscript's normal rules. File references and relative images use the same compilation rules as the body.
 
-New Reader plans automatically include structurally identified prefaces, endings and appendices for the selected books and volumes. CLI profiles opt in with `"matter": { "automatic": true }`. Book-wide matter goes into its corresponding front/back position, volume-level matter stays around that volume, and appendices remain numbered body pages. Roles come from manuscript structure rather than arbitrary prose headings. Other books and unselected volumes are not imported. A uniquely matching continuing-work page may be reused; choose an explicit page when several match.
+Layout & details offers two exclusive front and back matter sources. New Reader plans default to **Use repository manuscripts**: the Front matter and Back matter sections list the selected books' and volumes' manuscripts directly, with individual inclusion checkboxes and no manual Add controls. CLI profiles opt in with `"matter": { "automatic": true }`. Book-wide matter keeps its corresponding front/back position, volume matter stays around its volume, and appendices remain numbered body pages. Roles come from manuscript structure, not arbitrary prose headings. Other books and unselected volumes are not imported. Continued manuscripts appear directly under Back matter with individual checkboxes and no separate declaration editor; inline headings and text are inactive. Excluding those manuscripts never creates a replacement declaration. Without a matching manuscript, partial editions still include the default declaration, which can be disabled with its switch.
 
-Exclude individual automatic pages with the Reader controls or `matter.exclude` paths. **Customize inclusion and order** converts the current result into manual selections; front/back entries can then be moved up, moved down or removed. Existing plans retain their scope until automatic inclusion is explicitly enabled. Creating a manuscript does not rewrite a saved plan; automatic plans rediscover matching pages when planned again.
+**Arrange manually** uses only the manual entries, with move, remove and Add controls; repository front and back matter is not appended. Inline continued declarations are also edited within Back matter. Switching to repository mode retains manual entries and declaration drafts as dormant data. Switching back restores them, or seeds empty front/back lists from ordinary repository matter without importing continued pages. CLI exclusions use `matter.exclude` paths. Existing authored manual plans retain their contents. For an old plan with no explicit source or authored front/back matter or declaration, detected manuscripts select repository mode in the Reader's unsaved draft. Neither source manuscripts nor saved profiles change passively.
 
-A file assigned to front matter, back matter or a declaration is not printed again in the body. Resolve duplicate roles before building. The review shows actual source paths and content; source, resource or metadata changes require another review.
+A file assigned to front matter, back matter or a declaration is not printed again in the body. Resolve duplicate roles before building. A manual plan that already includes a continued manuscript as back matter or a body page does not append an inline or default declaration. The review shows actual source paths and content; source, resource or metadata changes require another review.
+
+The repository matter lists follow PDF manuscript order: each volume's ending stays at that volume's end, book-wide back matter follows the volumes and appendices, and the book-wide continued page appears last.
 
 #### Shared Work Metadata and Edition Overrides
 
@@ -889,9 +893,10 @@ Optional configuration follows. Paths are relative to the project root and refer
 | --- | --- |
 | `scope.books`, `scope.volumes`, `scope.paths` | Define the work's scope with book/volume identities from `inspect` or directory paths. Their union determines which pages remain omitted. When unspecified, use the selected chapters' books, or the project scope when those pages have no book. |
 | `cover.image`, `cover.showVersion` | Optional cover image and version display. |
-| `frontMatter`, `backMatter` | Arrays of front matter and back matter. Each entry can reference project Markdown through `file`. Its first H1 supplies the default heading; `title` can override that heading, and `includeInToc` controls the contents entry. Without `file`, the existing inline `content` field remains available. |
+| `matter.automatic`, `matter.exclude` | Choose repository sources and optionally exclude relative paths, including continued manuscripts. Manual front/back entries and declaration drafts are inactive in this mode; disabling it uses manual arrangement. |
+| `frontMatter`, `backMatter` | Manual front/back entries. Each entry can reference project Markdown through `file`. Its first H1 supplies the default heading; `title` can override it, and `includeInToc` controls the contents entry. Without `file`, the existing inline `content` remains available. Repository mode retains these entries without printing them. |
 | `toc.enabled`, `toc.depth`, `toc.title` | Contents switch, depth and heading. |
-| `continued.enabled`, `continued.file`, `continued.title`, `continued.text` | Declaration switch and manuscript reference. `file` supplies the content when present, and `title` can override its heading. Without a file, use inline `text`, then the default declaration. A referenced file is enabled when the switch is unspecified. Existing plans with neither a file nor an explicit switch enable the declaration only for partial editions. An explicitly enabled declaration is also included when all chapters are selected. |
+| `continued.enabled`, `continued.file`, `continued.title`, `continued.text` | Manual declaration settings. `file` supplies both heading and content; inline `title` and `text` are dormant. Without a file, use inline content, then the default declaration. A referenced file is enabled when the switch is unspecified; otherwise the default is partial editions only. Explicitly enabled declarations also work with complete chapter selections. Repository mode includes continued manuscripts as back matter and retains `file`, `title`, and `text` only as a backup. Legacy `enabled: false` still disables continued manuscripts and default declarations. |
 | `pdf.engine`, `pdf.paper`, `pdf.margin`, `pdf.documentClass` | Local PDF engine and layout. |
 
 Existing inline front matter, back matter and declarations continue to work and are not automatically converted into manuscript files. Selecting a file retains any existing `content` or `text` as a fallback; it does not append that text to the file's content. Clear the file selection to return to inline or default text. This preserves existing plans while allowing normal reading and PDF publication to share one manuscript source. Referenced files must be project Markdown that is not excluded from scanning. Paths cannot traverse directories or follow symbolic links.
@@ -1347,7 +1352,7 @@ math-workspace create-page --kind back-matter --container book --title "AI 退�
 
 标题须为非空的单行文字。`--slug` 可选，只决定文件名词干；`continued` 使用固定文件名，不能加 `--slug`。helper 分配文件路径、顺序和稳定页 ID，以不覆盖方式写入一个带标题的空白 Markdown；正文由作者或 AI 续写。已有文件不会覆盖，同一书卷已有的未完待续页也不重复创建；先检查是否应继续原稿。计划过期时先重新只读规划，项目、类型、标题、容器与目标路径均未变即可用新 token 继续；目标变化或已存在时先核对差异或复用原稿。不手写章号或 hash，也不通过另造副本绕过冲突。
 
-创建后沿返回的 `filePath` 写正文，保留页 ID，然后对该文件运行 `finish`。创建不会自动加入出版方案；出版时显式以 `frontMatter[].file`、`backMatter[].file` 或 `continued.file` 引用这份原稿，日常阅读与 PDF 共同使用同一内容。
+创建后沿返回的 `filePath` 写正文，保留页 ID，然后对该文件运行 `finish`。创建不会改写保存的出版方案；“使用仓库稿件”模式在下一次规划时识别所选书卷的前后文。手动模式可显式以 `frontMatter[].file`、`backMatter[].file` 或 `continued.file` 引用原稿，日常阅读与 PDF 共同使用同一内容。
 
 Reader 的“＋”提供同一创建入口：填写标题、选择类型和当前书/卷，查看只读计划后将请求加入 Codex 输入框。请求附带实际命令入口和工作目录，不自动发送；无会话宿主支持时可以复制请求。Reader 本身不写源稿，也不自动将新稿选入出版。
 
@@ -1377,13 +1382,15 @@ math-workspace serve
 - 可切换并在本机记忆的源码块起始行号；
 - 源文件改动后的实时刷新。
 
-右上角直接提供“Lean 对照”和“目录”，以及“查阅”“审阅”“版本与出版”“显示”四个分类图标；插件内嵌阅读器还可直接全屏。“查阅”提供定义和符号，“审阅”提供命题审阅和符号审计，“版本与出版”提供版本记录和 PDF 出版，“显示”提供界面语言、外观、源码行号和字号调整。分类图标通过悬停提示和无障碍名称说明用途，菜单内显示功能名称。菜单支持方向键切换、Home / End 跳到首尾，以及 Escape 关闭并返回对应分类入口。
+右上角直接提供“Lean 对照”和“目录”，以及“查阅”“审阅”“版本与出版”“设置”四个分类图标。“查阅”提供定义和符号，“审阅”提供命题审阅和符号审计，“版本与出版”提供版本记录和 PDF 出版，“设置”提供界面语言、外观、源码行号、未提交修改和字号调整。会话内嵌阅读器可用“全屏阅读”移到宿主侧栏；侧栏中提供“在浏览器阅读”，打开独立的本地阅读页并保留当前页和滚动位置，关闭侧栏不影响浏览器阅读。分类图标通过悬停提示和无障碍名称说明用途，菜单内显示功能名称。菜单支持方向键切换、Home / End 跳到首尾，以及 Escape 关闭并返回对应分类入口。
 
-“显示 → 语言”提供“自动”“中文”“English”，“显示 → 外观”提供“自动”“浅色”“深色”。自动语言依次采用 Codex 或其他 MCP 宿主、浏览器提供的中文或英文，均不匹配时使用英文；自动外观优先跟随宿主，未提供时跟随系统。手动选择优先于自动检测，保存后可供下次使用；环境不支持保存时，选择仍在当前会话中生效。
+“设置 → 语言”提供“自动”“中文”“English”，“设置 → 外观”提供“自动”“浅色”“深色”。自动语言依次采用 Codex 或其他 MCP 宿主、浏览器提供的中文或英文，均不匹配时使用英文；自动外观优先跟随宿主，未提供时跟随系统。手动选择优先于自动检测，保存后可供下次使用；环境不支持保存时，选择仍在当前会话中生效。
 
 界面语言与书稿语言独立。`.math-workspace/config.json` 中的 `language` 控制书稿的正式标签与编号展示，并提供 PDF 的默认语言；出版方案或显式 PDF 选项可覆盖该默认值。切换界面语言与外观不改写原稿或项目配置，也不改变这些出版设置。浅色与深色模式保留 Lean 关联、警告、错误和依赖关系的语义颜色。
 
-在“显示”切换源码行号，可在正文左侧显示每个可定位源码块的起始行。它用于从渲染结果回到 Markdown 位置，不把视觉换行伪装成源码行，也不改变正文排版；默认关闭，选择只保存在当前浏览器。
+在“设置”切换源码行号，可在正文左侧显示每个可定位源码块的起始行。它用于从渲染结果回到 Markdown 位置，不把视觉换行伪装成源码行，也不改变正文排版；默认关闭，选择只保存在当前浏览器。
+
+“设置 → 未提交修改”默认关闭，开启后才读取当前稿件的 Git 状态。相对最近一次提交，已暂存和未暂存的新增、修改内容都在正文左侧用琥珀色细条标记，与源码行号分列，不增加缩进或改变整段底色；新文件标记全部可见内容。渲染后的段落、列表项、公式、表格或代码块按对应源码范围标记，不把排版换行当作源码行。纯删除在同一标记列的邻近位置用短虚线提示，不插回删除的正文；悬停可查看源码行范围。改稿后随页面刷新更新，提交后自动清除。开关旁显示检查状态、标记数量或“无修改”；非 Git 项目、读取失败及仍运行旧服务时也给出对应提示，正常阅读不受影响。开关只控制当前 Reader 的阅读显示，不改变原稿、Git 暂存区或 PDF。
 
 依赖标记只读取显式 `@h-...` 关系。圆点上方的短线表示该陈述或证明显式引用了 formal 对象（可为小节、定义或命题）；下方纵线表示后续依赖对象依赖它，分叉表示多个直接下游。主线命题使用常规颜色；带 hash 的、可证明的补充注释使用低强调度的注释颜色。灰色是没有下游对象的终点，蓝色表示被直接引用，绿色分叉表示既有显式前提也被后续对象引用。悬停可查看引用数与传递影响范围；这些是结构信号，不等同于数学重要性。权威依赖图包含命题/引理/定理/推论之间的边，也包含带 hash 补充注释的入边、出边；普通 `注（...）` 不进入图，也没有标记。
 
@@ -1843,13 +1850,15 @@ book/
   to-be-continued.md
 ```
 
-`front-matter/` 与 `back-matter/` 可容纳多篇任意标题的文章，文件名前的 `01-`、`02-` 等数字只控制先后，不作为章号；例如 `ai-retirement-note.md` 的标题可以是“AI 退休寄语”，不必改写成“结语”。`to-be-continued.md` 是独立尾页。已有 `intro.md`、`introduction.md` 与 `summary.md` 继续兼容；卷内的前后文仍在该卷两端。各页按书稿规则保留稳定页标识，文件引用与相对图片沿用正文的编译规则。
+`front-matter/` 与 `back-matter/` 可容纳多篇任意标题的文章，文件名前的 `01-`、`02-` 等数字只控制先后，不作为章号；例如 `ai-retirement-note.md` 的标题可以是“AI 退休寄语”，不必改写成“结语”。`to-be-continued.md` 属于后文，排在所属书或卷的末尾。已有 `intro.md`、`introduction.md` 与 `summary.md` 继续兼容；卷内的前后文仍在该卷两端。各页按书稿规则保留稳定页标识，文件引用与相对图片沿用正文的编译规则。
 
-Reader 新方案默认开启“自动收录所选书卷的序言、后记、附录等内容”；CLI 方案设 `"matter": { "automatic": true }`。工具复用稿件扫描识别的结构角色：全书前后文进入对应位置，卷内前后文仍在对应卷的两端，附录作为正文保留原有附录号与对象编号；不会仅凭任意正文标题猜测角色，也不会把别的书或未选择卷的前后文加入本版。唯一匹配的“未完待续”稿件可沿用；存在多个候选时需明确选择声明稿件。
+Reader 的“版面与信息”提供互斥的两种前后文来源。新方案默认“使用仓库稿件”，在“前文”“后文”区直接列出所选书卷的文章，不显示手动添加入口；可逐项取消收录。CLI 对应 `"matter": { "automatic": true }`。全书前后文进入对应位置，卷内前后文仍在对应卷的两端，附录作为正文保留原有编号；不会仅凭任意正文标题猜测角色，也不会加入其他书或未选择卷的前后文。“未完待续”稿件同样直接列在“后文”中，可逐篇勾选，不再显示独立的声明编辑区，也不使用手填标题或正文。取消收录这些稿件后不会补出另一份声明；没有对应稿件时，部分发布仍默认附上系统声明，可用开关关闭。
 
-可以逐项取消自动收录，CLI 用 `matter.exclude` 保存相对路径；“手动调整收录与顺序”把当前结果转成手动选择，前后文条目可以上移、下移和移除。已有方案保持原有选择，需主动开启自动收录再审阅变化。创建稿件不会改写保存的方案；自动方案在下一次规划时重新识别实际稿件。
+“手动编排”只使用手动条目，可上移、下移、移除或添加，不再自动追加仓库前后文；手填“未完待续”声明也在“后文”内设置。切换到仓库模式后，已有手动条目和声明草稿保留备用但不参与排版；切回手动模式时恢复它们，没有手动前后文条目时才以当前普通前后文稿件作为起点，不另行导入“未完待续”。CLI 用 `matter.exclude` 保存自动模式的排除路径。已有手动方案保留其内容；未选择来源且前后文和声明均无自定义内容的旧方案，Reader 检测到对应稿件时会在待保存草稿中展示仓库来源。原稿和已保存方案不会被被动改写。
 
-同一文件被前文、后文或声明中的一个条目引用后，不会在正文重复输出；同一文件重复用于多个条目或角色时，需要先在方案中消除歧义。审阅页列出实际文件路径及内容，原稿、资源或元信息变化后需重新审阅。
+同一文件被前文、后文或声明中的一个条目引用后，不会在正文重复输出；同一文件重复用于多个条目或角色时，需要先在方案中消除歧义。手动方案已在后文或正文收录“未完待续”稿件时，也不会另附手填或默认声明。审阅页列出实际文件路径及内容，原稿、资源或元信息变化后需重新审阅。
+
+仓库稿件列表沿用 PDF 的稿件顺序：各卷后文在对应卷末，全书后文在各卷和附录之后，全书的“未完待续”最后显示。
 
 ### 公共元信息与本版覆盖
 
@@ -1935,9 +1944,10 @@ math-workspace publication status book
 | --- | --- |
 | `scope.books`、`scope.volumes`、`scope.paths` | 用 `inspect` 中的 book/volume 标识或目录路径明确作品范围，三者取并集，用于判断尚未收录的页面；不指定时采用所选章节所属 book，无归属 book 时采用项目范围。 |
 | `cover.image`、`cover.showVersion` | 可选封面图片及版本显示。 |
-| `frontMatter`、`backMatter` | 前后文数组，每项优先用 `file` 引用项目内 Markdown；默认沿用稿件首个一级标题，`title` 可覆盖该标题，`includeInToc` 控制目录项。无 `file` 时沿用旧的 `content` 手填入口。 |
+| `matter.automatic`、`matter.exclude` | 选择仓库来源，并可排除指定相对路径，包括“未完待续”。此模式不使用手动前后文条目或声明草稿；关闭后只使用手动编排。 |
+| `frontMatter`、`backMatter` | 手动模式的前后文数组，每项优先用 `file` 引用项目内 Markdown；默认沿用稿件首个一级标题，`title` 可覆盖该标题，`includeInToc` 控制目录项。无 `file` 时沿用旧的 `content` 手填入口；仓库模式中保留这些条目但不排版。 |
 | `toc.enabled`、`toc.depth`、`toc.title` | 目录开关、深度与标题。 |
-| `continued.enabled`、`continued.file`、`continued.title`、`continued.text` | 声明开关和稿件引用。`file` 优先提供正文，`title` 可覆盖稿件标题；无文件时沿用手填 `text`，再回退到默认声明。文件已指定而未填写开关时启用；旧方案未指定文件或开关时，仅在部分发布时自动启用。显式启用的声明也会用于已收录全部章节的版本。 |
+| `continued.enabled`、`continued.file`、`continued.title`、`continued.text` | 手动模式的声明设置：`file` 同时提供标题和正文，与手填 `title`、`text` 互斥；无文件时使用手填内容，再回退到默认声明。指定文件而未填写开关时启用，否则默认仅在部分发布时附上；显式启用也可用于完整版本。仓库模式的稿件按后文收录，`file`、`title`、`text` 只保留为备用；旧的 `enabled: false` 继续关闭“未完待续”稿件和默认声明。 |
 | `pdf.engine`、`pdf.paper`、`pdf.margin`、`pdf.documentClass` | 本地 PDF 引擎与版式。 |
 
 旧方案的手填前后文与声明仍可直接使用，不会自动转换成稿件文件。选择文件后，已有 `content` 或 `text` 会保留为备用，不会附加到文件内容；清空文件选择后恢复手填或默认文字。这样既能保留旧方案，也能让日常阅读与 PDF 只维护一份稿件。引用文件须是未被扫描排除的项目内 Markdown，路径不能穿越目录或跟随符号链接。

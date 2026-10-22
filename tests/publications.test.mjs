@@ -212,6 +212,43 @@ export async function testPublications() {
         const excluded = await f.service.plan({ ...f.profile, matter: { automatic: true, exclude: ['book1/back-matter/afterword.md', 'book1/appendix-a-details.md'] } });
         assert.equal(excluded.backMatter.length, 0); assert(!excluded.selected.some(page => page.kind === 'appendix'));
     });
+    await check('repository and manual front/back matter are exclusive without losing stored drafts', async f => {
+        await f.put('book1/front-matter/preface.md', '# #h-5555555555555555 Repository preface\n\nREPOSITORY_FRONT');
+        await f.put('book1/back-matter/afterword.md', '# #h-6666666666666666 Repository ending\n\nREPOSITORY_BACK');
+        f.profile.frontMatter = [{ title: 'Manual preface', content: 'DORMANT_MANUAL_FRONT' }];
+        f.profile.backMatter = [{ title: 'Manual ending', content: 'DORMANT_MANUAL_BACK' }];
+        f.profile.matter = { automatic: true };
+        const saved = await f.service.save(f.profile, null), plan = await f.service.plan(saved.profile);
+        assert.deepEqual(plan.frontMatter.map(item => item.file), ['book1/front-matter/preface.md']);
+        assert.deepEqual(plan.backMatter.map(item => item.file), ['book1/back-matter/afterword.md']);
+        assert.equal(plan.profileOverrides.frontMatter[0].content, 'DORMANT_MANUAL_FRONT');
+        const built = await f.service.build(saved.profile, plan.fingerprint);
+        const compiled = (await f.service.readArtifact('book', built.id, 'compiled.md')).bytes.toString();
+        assert.match(f.rendered.at(-1).front, /REPOSITORY_FRONT/); assert.doesNotMatch(f.rendered.at(-1).front, /DORMANT_MANUAL_FRONT/);
+        assert.match(compiled, /REPOSITORY_BACK/); assert.doesNotMatch(compiled, /DORMANT_MANUAL_BACK/);
+        const manual = await f.service.plan({ ...saved.profile, matter: { automatic: false } });
+        assert.equal(manual.frontMatter[0].content, 'DORMANT_MANUAL_FRONT'); assert.equal(manual.backMatter[0].content, 'DORMANT_MANUAL_BACK');
+        assert(!manual.frontMatter.some(item => item.file)); assert(!manual.backMatter.some(item => item.file));
+    });
+    await check('repository exclusions do not fall back to manual content or manual file assignments', async f => {
+        const front = 'book1/front-matter/preface.md', back = 'book1/back-matter/afterword.md';
+        await f.put(front, '# #h-5555555555555555 Repository preface\n\nAuthor-owned source.');
+        await f.put(back, '# #h-6666666666666666 Repository ending\n\nAuthor-owned ending.');
+        f.profile.frontMatter = [{ file: front, title: 'Dormant heading override', content: 'DORMANT' }];
+        f.profile.backMatter = [{ file: back, content: 'DORMANT_BACK' }]; f.profile.matter = { automatic: true };
+        const active = await f.service.plan(f.profile);
+        assert.equal(active.frontMatter[0].title, 'Repository preface', 'A dormant manual override must not suppress or rename the detected manuscript.');
+        assert.equal(active.backMatter[0].title, 'Repository ending');
+        const excluded = await f.service.plan({ ...f.profile, matter: { automatic: true, exclude: [front, back] } });
+        assert.equal(excluded.frontMatter.length, 0); assert.equal(excluded.backMatter.length, 0);
+    });
+    await check('empty inactive manual entries can be retained but cannot be published in manual mode', async f => {
+        f.profile.frontMatter = [{ includeInToc: true }]; f.profile.backMatter = [];
+        f.profile.matter = { automatic: true };
+        const saved = await f.service.save(f.profile, null), plan = await f.service.plan(saved.profile);
+        assert.equal(saved.profile.frontMatter.length, 1); assert.equal(plan.frontMatter.length, 0);
+        await assert.rejects(f.service.plan({ ...saved.profile, matter: { automatic: false } }), /empty front matter/);
+    });
     await check('automatic volume matter stays around the selected volume without importing another volume', async f => {
         await f.put('book1/vol-i/01-main.md', '# #h-5555555555555555 Volume one main\n\nVolume one body.');
         await f.put('book1/vol-i/front-matter/preface.md', '# #h-6666666666666666 Volume one preface\n\nFirst volume only.');
@@ -223,6 +260,69 @@ export async function testPublications() {
         assert.deepEqual(plan.selected.map(page => page.path), ['book1/vol-i/front-matter/preface.md', 'book1/vol-i/01-main.md', 'book1/vol-i/back-matter/ending.md']);
         assert.equal(plan.frontMatter.length, 0); assert.equal(plan.backMatter.length, 0);
         assert.equal(plan.selected.some(page => page.path.includes('vol-ii')), false);
+    });
+    await check('repository continued manuscripts are back matter once in their owning book or volume', async f => {
+        const manuscripts = {
+            'book1/vol-i/04-main.md': '# #h-e100000000000001 First volume\n\nVOLUME_ONE_BODY',
+            'book1/vol-i/to-be-continued.md': '# #h-e100000000000002 First volume outlook\n\nVOLUME_ONE_OUTLOOK',
+            'book1/vol-ii/05-main.md': '# #h-e100000000000003 Second volume\n\nVOLUME_TWO_BODY',
+            'book1/vol-ii/to-be-continued.md': '# #h-e100000000000004 Second volume outlook\n\nVOLUME_TWO_OUTLOOK',
+            'book1/back-matter/ending.md': '# #h-e100000000000005 Author afterword\n\nBOOK_AFTERWORD',
+            'book1/to-be-continued.md': '# #h-e100000000000006 Next edition\n\nBOOK_OUTLOOK',
+            'book2/to-be-continued.md': '# Other book outlook\n\nOTHER_BOOK_OUTLOOK'
+        };
+        for (const [name, content] of Object.entries(manuscripts)) await f.put(name, content);
+        f.profile.chapters = ['book1/vol-i/04-main.md', 'book1/vol-ii/05-main.md'];
+        f.profile.matter = { automatic: true }; f.profile.frontMatter = []; f.profile.backMatter = [];
+        f.profile.continued = { enabled: true, title: 'Manual outlook', text: 'DORMANT_MANUAL_OUTLOOK' };
+        const saved = await f.service.save(f.profile, null), plan = await f.service.plan(saved.profile);
+        assert.deepEqual(plan.backMatter.map(entry => entry.file), ['book1/back-matter/ending.md', 'book1/to-be-continued.md']);
+        assert.deepEqual(plan.selected.map(page => page.path), ['book1/vol-i/04-main.md', 'book1/vol-i/to-be-continued.md', 'book1/vol-ii/05-main.md', 'book1/vol-ii/to-be-continued.md']);
+        assert.equal(plan.continuedNotice.enabled, false); assert.equal(plan.profileOverrides.continued.text, 'DORMANT_MANUAL_OUTLOOK');
+        const resolvedAgain = await f.service.plan(plan.profile);
+        assert.deepEqual(resolvedAgain.backMatter, plan.backMatter); assert.deepEqual(resolvedAgain.selected, plan.selected);
+        assert.equal(resolvedAgain.continuedNotice.enabled, false, 'Resolving an already resolved profile retains its continued manuscripts.');
+        const built = await f.service.build(saved.profile, plan.fingerprint), compiled = (await f.service.readArtifact('book', built.id, 'compiled.md')).bytes.toString();
+        for (const marker of ['VOLUME_ONE_OUTLOOK', 'VOLUME_TWO_OUTLOOK', 'BOOK_OUTLOOK']) assert.equal(compiled.split(marker).length - 1, 1, `${marker} is printed once.`);
+        assert(compiled.indexOf('VOLUME_ONE_OUTLOOK') < compiled.indexOf('VOLUME_TWO_BODY'));
+        assert(compiled.indexOf('BOOK_AFTERWORD') < compiled.indexOf('BOOK_OUTLOOK'));
+        assert.doesNotMatch(compiled, /DORMANT_MANUAL_OUTLOOK|Manual outlook|OTHER_BOOK_OUTLOOK|This is a partial edition/);
+        const manual = await f.service.plan({ ...saved.profile, matter: { automatic: false } });
+        assert.equal(manual.continuedNotice.text, 'DORMANT_MANUAL_OUTLOOK'); assert.equal(manual.continuedNotice.title, 'Manual outlook');
+        assert.equal(manual.selected.some(page => page.kind === 'continued'), false);
+    });
+    await check('continued exclusions never restore inline drafts or a generated second declaration', async f => {
+        const file = 'book1/to-be-continued.md'; await f.put(file, '# #h-9999999999999999 Repository outlook\n\nREPOSITORY_OUTLOOK');
+        f.profile.matter = { automatic: true, exclude: [file] }; f.profile.chapters.push(file);
+        f.profile.continued = { file, title: 'Dormant override', text: 'DORMANT_OUTLOOK' };
+        let plan = await f.service.plan(f.profile);
+        assert.equal(plan.backMatter.some(entry => entry.file === file), false); assert.equal(plan.selected.some(page => page.path === file), false);
+        assert.equal(plan.continuedNotice.enabled, false);
+        f.profile.matter.exclude = []; plan = await f.service.plan(f.profile);
+        assert.equal(plan.backMatter.find(entry => entry.file === file).title, 'Repository outlook');
+        assert.equal(plan.continuedNotice.enabled, false); assert.equal(plan.profileOverrides.continued.file, file);
+        f.profile.continued.enabled = false; plan = await f.service.plan(f.profile);
+        assert.equal(plan.backMatter.some(entry => entry.file === file), false); assert.equal(plan.continuedNotice.enabled, false);
+    });
+    await check('repository mode without a continued manuscript uses only the default declaration', async f => {
+        f.profile.matter = { automatic: true };
+        f.profile.continued = { file: 'unavailable-dormant.md', title: 'Dormant title', text: 'DORMANT_OUTLOOK' };
+        const plan = await f.service.plan(f.profile);
+        assert.equal(plan.continuedNotice.enabled, true); assert.equal(plan.continuedNotice.file, undefined);
+        assert.equal(plan.continuedNotice.title, 'To be continued'); assert.doesNotMatch(plan.continuedNotice.text, /DORMANT_OUTLOOK/);
+        assert.equal(plan.profileOverrides.continued.file, 'unavailable-dormant.md');
+        f.profile.continued.enabled = false; assert.equal((await f.service.plan(f.profile)).continuedNotice.enabled, false);
+    });
+    await check('manually assigned continued manuscripts suppress an inline or default duplicate', async f => {
+        const file = 'book1/to-be-continued.md'; await f.put(file, '# #h-9999999999999999 Repository outlook\n\nMANUAL_FILE_OUTLOOK');
+        f.profile.continued = { enabled: true, title: 'Dormant title', text: 'DORMANT_OUTLOOK' };
+        for (const placement of ['back', 'body']) {
+            const profile = { ...f.profile, backMatter: placement === 'back' ? [{ file }] : [], chapters: [...f.profile.chapters, ...(placement === 'body' ? [file] : [])] };
+            const plan = await f.service.plan(profile); assert.equal(plan.continuedNotice.enabled, false);
+            assert.equal(plan.profileOverrides.continued.text, 'DORMANT_OUTLOOK');
+            const built = await f.service.build(profile, plan.fingerprint), compiled = (await f.service.readArtifact('book', built.id, 'compiled.md')).bytes.toString();
+            assert.equal(compiled.split('MANUAL_FILE_OUTLOOK').length - 1, 1); assert.doesNotMatch(compiled, /DORMANT_OUTLOOK|Dormant title/);
+        }
     });
     await check('CAS keeps work identity and concurrent edits bounded', async f => {
         const one = await f.service.save(f.profile, null); await assert.rejects(f.service.save(f.profile, null), /changed/); await assert.rejects(f.service.save({ ...f.profile, workId: 'different' }, one.revision), /stable work/); const two = await f.service.save({ ...f.profile, version: '0.2.0' }, one.revision); assert.equal(two.revision, 2);
@@ -400,12 +500,13 @@ export async function testPublications() {
         assert.equal((await f.service.status(f.profile.id)).profile.revision, saved.revision, 'Ambiguous roles cannot overwrite the saved profile.');
         assert.equal(await fs.readFile(path.join(f.root, file), 'utf8'), '# #h-9999999999999999 A source note\n\nContent.\n');
     });
-    await check('enabled full-edition file notice and title overrides retain source and old inline fallback', async f => {
+    await check('enabled full-edition file notice keeps author heading and dormant inline draft', async f => {
         const file = 'book1/to-be-continued.md'; await f.put(file, '# #h-9999999999999999 Original ending\n\nFILE_BODY\n');
         f.profile.chapters = ['book1/01-one.md', 'book1/02-two.md', 'book1/03-three.md'];
         f.profile.continued = { enabled: true, file, title: 'Override ending', text: 'INLINE_BACKUP' };
         let plan = await f.service.plan(f.profile); assert.equal(plan.partial, false); assert.equal(plan.continuedNotice.enabled, true);
-        await f.service.build(f.profile, plan.fingerprint); assert.match(f.rendered[0].markdown, /^# Override ending /m); assert.doesNotMatch(f.rendered[0].markdown, /Original ending|INLINE_BACKUP/);
+        assert.equal(plan.continuedNotice.title, 'Original ending');
+        await f.service.build(f.profile, plan.fingerprint); assert.match(f.rendered[0].markdown, /^# Original ending /m); assert.doesNotMatch(f.rendered[0].markdown, /Override ending|INLINE_BACKUP/);
         f.profile.continued = { enabled: true, title: 'Inline ending', text: 'INLINE_BACKUP' };
         plan = await f.service.plan(f.profile); assert.equal(plan.continuedNotice.text, 'INLINE_BACKUP'); await f.service.build(f.profile, plan.fingerprint); assert.match(f.rendered[1].markdown, /INLINE_BACKUP/);
         f.profile.continued = { enabled: false, file: 'missing.md', text: 'DISABLED' }; plan = await f.service.plan(f.profile); assert.equal(plan.continuedNotice.enabled, false);

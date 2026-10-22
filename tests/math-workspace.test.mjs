@@ -1,4 +1,5 @@
 import { testReaderApps } from './reader-app.test.mjs';
+import { testReaderUncommitted } from './reader-uncommitted.test.mjs';
 import { testReaderDefinitions } from './reader-definitions.test.mjs';
 import { testReaderIconClarity } from './reader-icon-clarity.test.mjs';
 import { testReaderToolbarMenu } from './reader-toolbar-menu.test.mjs';
@@ -1820,8 +1821,17 @@ async function testReaderServer() {
         assert.equal(state.pages[0].filePath, 'book1/01-foundations.md');
         assert.equal('labels' in state, false);
 
+        const changeRoute = reader.url + '/api/page-changes?path=book1%2F01-foundations.md';
+        assert.equal((await fetch(changeRoute)).status, 403);
+        const changeHeaders = { 'x-math-workspace-token': state.requestToken, 'x-math-workspace-project': state.projectId };
+        assert.equal((await fetch(changeRoute, { headers: { ...changeHeaders, 'x-math-workspace-project': 'other' } })).status, 409);
+        const changes = await (await fetch(changeRoute, { headers: changeHeaders })).json();
+        assert.equal(changes.status, 'not-git'); assert.deepEqual(changes.ranges, []);
+        assert.equal((await fetch(reader.url + '/api/page-changes?path=../outside.md', { headers: changeHeaders })).status, 404);
+
         const page = await (await fetch(reader.url + '/api/page?path=book1%2F01-foundations.md')).json();
         assert.match(page.content, /Finite cover/);
+        assert.equal(page.sourceHash, changes.sourceHash, 'Page and Git positions bind to the same immutable source snapshot.');
         assert.equal(page.page.displayHeading, '第 1 章 Foundations');
         assert.equal(page.labels['h-3333333333333333'].content, undefined);
         const theoremMarker = page.dependencyMarkers['h-3333333333333333'];
@@ -2991,6 +3001,7 @@ const tests = [
     ['Reader definition titles and navigation targets', testReaderDefinitions],
     ['Reader icon clarity and action tooltips', testReaderIconClarity],
     ['Reader category menus and keyboard navigation', testReaderToolbarMenu],
+    ['Reader opt-in uncommitted manuscript markers', testReaderUncommitted],
     ['Reader automatic and manual UI preferences', testReaderPreferences],
     ['Reader host language/theme context and local persistence', testReaderHostPreferences],
     ['Reader preference documentation and bilingual README', testReaderPreferenceDocs],
