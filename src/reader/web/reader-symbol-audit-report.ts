@@ -25,7 +25,7 @@ const reportWords = {
         eyebrow: 'Math Workspace · 本机审计',
         cachedNotice: '这是由本机缓存即时生成的虚拟报告，不属于项目正文，也不会写入 Git。',
         current: '与当前源文件一致',
-        stale: '报告已过期：源文件或模型设置已变化',
+        stale: '报告已过期：源文件、设置或审查规则已变化',
         close: '返回正文',
         createdAt: '生成时间',
         model: '模型',
@@ -46,13 +46,16 @@ const reportWords = {
         legacyIntro: '这份旧报告在语义归并之前直接按 bindingKey 差异计数，不能视为冲突结论。重新运行审计会复用逐章提取缓存，只执行集中归并。',
         noHard: '语义归并后未发现高置信冲突。',
         reviewSection: '待人工核对',
-        reviewIntro: '这些候选的现有证据不足，或虽可兼容复用但仍有阅读混淆风险；这里不把它们直接判为错误。',
+        reviewIntro: '这些候选需要补充证据、澄清阅读歧义，或权衡记号复用带来的简化收益；复用建议不作为冲突结论，需回到原文核对。',
         noReview: '未留下需要人工核对的候选。',
         reconciledSection: (count: number) => `查看已归并的 ${count} 项`,
-        reconciledIntro: '这些同形写法已识别为同一绑定、明确特化或低风险兼容复用，不计入冲突。',
+        reconciledIntro: '这些候选已识别为同一绑定、明确特化、低风险兼容复用或需要保留的数学区分，不计入冲突。',
         sameBinding: '同一绑定',
         specialization: '特化',
         compatibleReuse: '兼容复用',
+        notationReuse: '复用建议',
+        notationChoice: '记号选择',
+        distinctBindings: '保留区分',
         uncertain: '证据不足',
         conflict: '冲突',
         deterministicReason: '旧版报告仅因 bindingKey 不同而判定；请重新运行审计完成语义归并。',
@@ -73,7 +76,7 @@ const reportWords = {
         eyebrow: 'Math Workspace · Local audit',
         cachedNotice: 'This virtual report is generated from the local cache. It is not project prose and is never written to Git.',
         current: 'Current with the source files',
-        stale: 'Stale: source files or model settings have changed',
+        stale: 'Stale: source files, settings, or review rules have changed',
         close: 'Back to source',
         createdAt: 'Generated',
         model: 'Model',
@@ -94,13 +97,16 @@ const reportWords = {
         legacyIntro: 'This legacy report counted binding-key differences before semantic reconciliation, so its entries are not conflict conclusions. Re-running the audit reuses per-file extraction caches and performs only the reconciliation pass.',
         noHard: 'No high-confidence conflict remains after semantic reconciliation.',
         reviewSection: 'Needs manual review',
-        reviewIntro: 'The evidence is insufficient, or compatible reuse still presents a reading risk. These candidates are not classified as errors.',
+        reviewIntro: 'These candidates need more evidence, clearer notation, or a tradeoff between reuse and reading effort. Reuse suggestions are not conflict conclusions; check the source before adopting them.',
         noReview: 'No candidate remains for manual review.',
         reconciledSection: (count: number) => `View ${count} reconciled candidate${count === 1 ? '' : 's'}`,
-        reconciledIntro: 'These same-surface forms were identified as the same binding, an explicit specialization, or low-risk compatible reuse and are not counted as conflicts.',
+        reconciledIntro: 'These candidates were identified as the same binding, an explicit specialization, low-risk compatible reuse, or mathematical distinctions worth retaining. They are not counted as conflicts.',
         sameBinding: 'Same binding',
         specialization: 'Specialization',
         compatibleReuse: 'Compatible reuse',
+        notationReuse: 'Reuse suggestion',
+        notationChoice: 'Notation choice',
+        distinctBindings: 'Retain distinction',
         uncertain: 'Insufficient evidence',
         conflict: 'Conflict',
         deterministicReason: 'This legacy report classified different binding keys directly. Re-run the audit to perform semantic reconciliation.',
@@ -173,7 +179,7 @@ function bindingView(binding: ReaderSymbolAuditBinding, host: ReaderSymbolAuditR
     readerText(kind, () => binding.kind === 'special' ? reportWords[host.uiLanguage?.() || host.language].special : reportWords[host.uiLanguage?.() || host.language].temporary);
     const key = document.createElement('code');
     key.textContent = binding.bindingKey;
-    header.append(kind, key);
+    header.append(formula(binding.expression), kind, key);
     const meaning = paragraph(binding.meaning, 'reader-symbol-audit-report-meaning');
     const details = document.createElement('dl');
     details.className = 'reader-symbol-audit-report-binding-details';
@@ -229,8 +235,19 @@ function advisoryView(
     number.textContent = String(index + 1).padStart(2, '0');
     header.append(number, formula(advisory.expression));
     const bindingKeys = new Set(advisory.bindingKeys || []);
-    const candidate = report.candidates.find(item => item.expression === advisory.expression);
-    const candidateBindings = candidate?.bindings.filter(binding => !bindingKeys.size || bindingKeys.has(binding.bindingKey)) || [];
+    const candidate = report.candidates.find(item => advisory.candidateId ? item.id === advisory.candidateId : item.expression === advisory.expression);
+    const candidateBindings = candidate?.bindings.filter(binding => advisory.bindingIds
+        ? !!binding.id && advisory.bindingIds.includes(binding.id)
+        : !bindingKeys.size || bindingKeys.has(binding.bindingKey)) || [];
+    if (candidate?.kind === 'notation-choice') {
+        const relation = document.createElement('span');
+        relation.className = 'reader-symbol-audit-report-relation';
+        const assessment = report.reconciliations?.find(item => item.candidateId === candidate.id);
+        readerText(relation, () => assessment?.relation === 'notation-reuse'
+            ? reportWords[host.uiLanguage?.() || host.language].notationReuse
+            : reportWords[host.uiLanguage?.() || host.language].notationChoice);
+        header.append(relation);
+    }
     article.append(header, paragraph(advisory.reason, 'reader-symbol-audit-report-reason'));
     if (candidateBindings.length) {
         const bindings = document.createElement('div');
@@ -252,6 +269,8 @@ function reconciliationView(
         'same-binding': words.sameBinding,
         specialization: words.specialization,
         'compatible-reuse': words.compatibleReuse,
+        'notation-reuse': words.notationReuse,
+        'distinct-bindings': words.distinctBindings,
         conflict: words.conflict,
         uncertain: words.uncertain
     }[reconciliation.relation];
@@ -266,7 +285,7 @@ function reconciliationView(
     relation.textContent = relationLabel;
     header.append(number, formula(reconciliation.expression), relation);
     article.append(header, paragraph(reconciliation.reason, 'reader-symbol-audit-report-reason'));
-    const candidate = report.candidates.find(item => item.expression === reconciliation.expression);
+    const candidate = report.candidates.find(item => reconciliation.candidateId ? item.id === reconciliation.candidateId : item.expression === reconciliation.expression);
     if (candidate?.bindings.length) {
         const bindings = document.createElement('div');
         bindings.className = 'reader-symbol-audit-report-bindings';
@@ -287,6 +306,7 @@ export class ReaderSymbolAuditReportView {
         const resolved = reconciliations.filter(item => (
             item.relation === 'same-binding'
             || item.relation === 'specialization'
+            || item.relation === 'distinct-bindings'
             || (item.relation === 'compatible-reuse' && !item.readerRisk)
         ));
         container.replaceChildren();

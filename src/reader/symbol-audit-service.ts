@@ -257,7 +257,7 @@ export class SymbolAuditService {
         };
         this.active = job;
         this.lastJob = job;
-        void this.run(job, sources, externalSpecialBindings, project.extractions, force);
+        void this.run(job, sources, externalSpecialBindings, project.extractions, force, allSources);
         return this.publicJob(job);
     }
 
@@ -278,7 +278,8 @@ export class SymbolAuditService {
         sources: SymbolAuditSource[],
         externalSpecialBindings: SymbolAuditBinding[],
         cachedExtractions: Record<string, SymbolAuditExtraction>,
-        force: boolean
+        force: boolean,
+        contextSources: SymbolAuditSource[]
     ): Promise<void> {
         try {
             const noteActivity = (activity: SymbolAuditJobStatus['activity']) => {
@@ -325,7 +326,7 @@ export class SymbolAuditService {
                     noteActivity('reviewing-candidates');
                     job.modelCalls++;
                 }
-                const reconciliationResult = await this.runner.reconcileCandidates(job.rootPath, preliminary.candidates, job.settings, noteActivity);
+                const reconciliationResult = await this.runner.reconcileCandidates(job.rootPath, preliminary.candidates, job.settings, noteActivity, contextSources);
                 if (reconciliationResult.tokenUsage) {
                     job.tokenUsage = addTokenUsage(job.tokenUsage, reconciliationResult.tokenUsage);
                     job.tokenUsageReportedCalls++;

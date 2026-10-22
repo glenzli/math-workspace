@@ -1,4 +1,5 @@
 import { testReaderApps } from './reader-app.test.mjs';
+import { testSymbolAuditNotation } from './symbol-audit.test.mjs';
 import { testReaderUncommitted } from './reader-uncommitted.test.mjs';
 import { testReaderDocumentState } from './reader-document-state.test.mjs';
 import { testReaderSearch } from './reader-search.test.mjs';
@@ -2212,11 +2213,14 @@ const receive = message => {
     fs.appendFileSync(${JSON.stringify(counterPath)}, 'turn\\n');
     const prompt = message.params.input?.[0]?.text || '';
     const shouldFail = prompt.includes('TRIGGER_SYMBOL_AUDIT_FAILURE');
-    const result = prompt.includes('Candidate groups')
-      ? { reconciliations: [
-          { expression: 'C', relation: 'conflict', confidence: 'high', readerRisk: true, reason: 'C has incompatible overlapping meanings.', bindingKeys: ['local-bound-constant', 'cyclic-operator-network'] },
-          { expression: 'S', relation: 'same-binding', confidence: 'high', readerRisk: false, reason: 'Both occurrences describe the same summary symbol.', bindingKeys: ['summary-symbol', 'summary-notation'] }
-        ] }
+    const candidateGroups = prompt.includes('Candidate groups:') ? JSON.parse(prompt.split('Candidate groups:')[1].trim()) : undefined;
+    const result = candidateGroups
+      ? { reconciliations: candidateGroups.map(group => ({
+          candidateId: group.candidateId, expression: group.expression,
+          relation: group.expression === 'C' ? 'conflict' : 'same-binding', confidence: 'high', readerRisk: group.expression === 'C',
+          reason: group.expression === 'C' ? 'C has incompatible overlapping meanings.' : 'Both occurrences describe the same summary symbol.',
+          bindingKeys: group.bindings.map(binding => binding.bindingKey), bindingIds: group.bindings.map(binding => binding.id)
+        })) }
       : prompt.includes('01-local.md')
         ? { bindings: [
             { expression: 'C', startLine: 3, endLine: 3, structure: { base: 'C', modifiers: [] }, kind: 'temporary', scope: 'local', bindingKey: 'local-bound-constant', semanticType: 'constant', meaning: '局部推导中的临时有界常数', evidence: 'let C be a temporary bound constant', confidence: 'high' },
@@ -3006,6 +3010,7 @@ async function testAuditReport() {
 }
 
 const tests = [
+    ['Symbol audit notation reuse, evidence and scoped distinctions', testSymbolAuditNotation],
     ['Lean review evidence, persistence and freshness', testLeanReviewBackend],
     ['Lean human review Reader', testReaderLeanReview],
     ['Lean live source language service', testLeanLanguageBackend],

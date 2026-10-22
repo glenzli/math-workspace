@@ -317,7 +317,8 @@ export class WorkspaceQueries {
             };
         }
         const boundedLimit = Math.max(1, Math.min(100, Number.isInteger(limit) ? limit : 40));
-        const candidates = new Map(report.candidates.map(candidate => [candidate.expression, candidate]));
+        const candidatesById = new Map(report.candidates.map(candidate => [candidate.id, candidate]));
+        const candidatesByExpression = new Map(report.candidates.map(candidate => [candidate.expression, candidate]));
         const findings = [
             ...report.hardConflicts.map(conflict => ({
                 expression: conflict.expression,
@@ -327,9 +328,13 @@ export class WorkspaceQueries {
             })),
             ...report.advisories.map(advisory => {
                 const bindingKeys = new Set(advisory.bindingKeys || []);
-                const bindings = (candidates.get(advisory.expression)?.bindings || [])
-                    .filter(binding => !bindingKeys.size || bindingKeys.has(binding.bindingKey));
+                const candidate = advisory.candidateId ? candidatesById.get(advisory.candidateId) : candidatesByExpression.get(advisory.expression);
+                const bindings = (candidate?.bindings || []).filter(binding => advisory.bindingIds
+                    ? advisory.bindingIds.includes(binding.id)
+                    : !bindingKeys.size || bindingKeys.has(binding.bindingKey));
                 return {
+                    candidateId: advisory.candidateId,
+                    kind: candidate?.kind || 'collision',
                     expression: advisory.expression,
                     severity: advisory.severity,
                     reason: advisory.reason,

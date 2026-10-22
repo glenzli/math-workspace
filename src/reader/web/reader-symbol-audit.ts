@@ -1,5 +1,6 @@
 import { readerLabel, readerText, readerWords } from './reader-ui-labels';
 export interface ReaderSymbolAuditBinding {
+    id?: string;
     filePath: string;
     startLine: number;
     endLine?: number;
@@ -22,16 +23,18 @@ export interface ReaderSymbolAuditReport {
     scannedFiles: number;
     reusedFiles: number;
     hardConflicts: Array<{ expression: string; reason: string; bindings: ReaderSymbolAuditBinding[] }>;
-    candidates: Array<{ expression: string; bindings: ReaderSymbolAuditBinding[] }>;
+    candidates: Array<{ id?: string; kind?: 'collision' | 'notation-choice'; expression: string; bindings: ReaderSymbolAuditBinding[] }>;
     reconciliations?: Array<{
+        candidateId?: string;
         expression: string;
-        relation: 'same-binding' | 'specialization' | 'compatible-reuse' | 'conflict' | 'uncertain';
+        relation: 'same-binding' | 'specialization' | 'compatible-reuse' | 'conflict' | 'notation-reuse' | 'distinct-bindings' | 'uncertain';
         confidence: 'high' | 'medium' | 'low';
         readerRisk: boolean;
         reason: string;
         bindingKeys: string[];
+        bindingIds?: string[];
     }>;
-    advisories: Array<{ expression: string; severity: 'notice' | 'review'; reason: string; bindingKeys: string[] }>;
+    advisories: Array<{ candidateId?: string; expression: string; severity: 'notice' | 'review'; reason: string; bindingKeys: string[]; bindingIds?: string[] }>;
 }
 
 export interface ReaderSymbolAuditStatus {

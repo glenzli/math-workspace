@@ -7,7 +7,7 @@ import { mathWorkspaceStatePath } from './local-state';
 const nodeFs = require('node:fs');
 
 export const SYMBOL_AUDIT_PROMPT_VERSION = 'symbol-audit-v2';
-export const SYMBOL_AUDIT_REVIEW_VERSION = 'symbol-audit-reconciliation-v1';
+export const SYMBOL_AUDIT_REVIEW_VERSION = 'symbol-audit-reconciliation-v2';
 const MAX_EXTRACTION_CACHE_ENTRIES = 640;
 const MAX_REPORT_CACHE_ENTRIES = 160;
 
@@ -78,28 +78,35 @@ export interface SymbolAuditConflict {
     bindings: SymbolAuditBinding[];
 }
 
-export type SymbolAuditRelation = 'same-binding' | 'specialization' | 'compatible-reuse' | 'conflict' | 'uncertain';
+export type SymbolAuditRelation = 'same-binding' | 'specialization' | 'compatible-reuse' | 'conflict' | 'notation-reuse' | 'distinct-bindings' | 'uncertain';
 
-/** Model-assisted reconciliation of one mechanically discovered surface collision. */
+/** Model-assisted assessment of a candidate, never a source-edit instruction. */
 export interface SymbolAuditReconciliation {
+    /** Absent only in legacy reports. */
+    candidateId?: string;
     expression: string;
     relation: SymbolAuditRelation;
     confidence: 'high' | 'medium' | 'low';
     readerRisk: boolean;
     reason: string;
     bindingKeys: string[];
+    bindingIds?: string[];
 }
 
 export interface SymbolAuditCandidate {
+    id: string;
+    kind: 'collision' | 'notation-choice';
     expression: string;
     bindings: SymbolAuditBinding[];
 }
 
 export interface SymbolAuditAdvisory {
+    candidateId?: string;
     expression: string;
     severity: 'notice' | 'review';
     reason: string;
     bindingKeys: string[];
+    bindingIds?: string[];
 }
 
 export interface SymbolAuditReport {
@@ -272,10 +279,11 @@ function bindingSummary(binding: SymbolAuditBinding): string {
 
 /**
  * Deterministic discovery only. A binding key is an extraction hint generated
- * independently per file, not a canonical semantic identity. Distinct keys
- * therefore create reconciliation candidates and never prove a conflict.
+ * independently per file, not a canonical semantic identity. Matching meaning,
+ * key or base hints likewise only nominate a notation choice for contextual review.
  */
 export function analyzeSymbolAuditBindings(bindings: SymbolAuditBinding[]): SymbolAuditAnalysis {
+    const meaningHint = (binding: SymbolAuditBinding) => binding.meaning.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
     const byExpression = new Map<string, SymbolAuditBinding[]>();
     bindings.forEach(binding => {
         const group = byExpression.get(binding.normalizedExpression) || [];
@@ -284,21 +292,41 @@ export function analyzeSymbolAuditBindings(bindings: SymbolAuditBinding[]): Symb
     });
 
     const candidates: SymbolAuditCandidate[] = [];
+    const seen = new Set<string>();
+    const addCandidate = (kind: SymbolAuditCandidate['kind'], group: SymbolAuditBinding[]) => {
+        const unique = uniqueBindings(group).sort((left, right) => left.id.localeCompare(right.id));
+        const expressions = Array.from(new Map(unique.map(binding => [binding.normalizedExpression, binding.expression])).values()).sort();
+        if (kind === 'notation-choice' && expressions.length < 2) return;
+        const id = 'mwsymcand_' + sha256(JSON.stringify([kind, unique.map(binding => binding.id)])).slice(0, 20);
+        if (seen.has(id)) return;
+        seen.add(id);
+        candidates.push({
+            id,
+            kind,
+            expression: kind === 'collision' ? unique[0].expression : expressions.slice(0, 3).join(' \\; / \\; ') + (expressions.length > 3 ? ' \\; / \\; \\dots' : ''),
+            bindings: unique
+        });
+    };
     byExpression.forEach(group => {
         const unique = uniqueBindings(group);
-        const byBindingKey = new Map<string, SymbolAuditBinding[]>();
-        unique.forEach(binding => {
-            const sameMeaning = byBindingKey.get(binding.bindingKey) || [];
-            sameMeaning.push(binding);
-            byBindingKey.set(binding.bindingKey, sameMeaning);
-        });
-        if (byBindingKey.size < 2) return;
-        const expression = unique[0].expression;
-        candidates.push({ expression, bindings: unique });
+        const semanticHints = new Set(unique.map(binding => JSON.stringify([binding.bindingKey, binding.semanticType, meaningHint(binding)])));
+        if (semanticHints.size < 2) return;
+        addCandidate('collision', unique);
     });
 
-    const order = <T extends { expression: string }>(items: T[]): T[] => items.sort((left, right) => left.expression.localeCompare(right.expression));
-    return { candidates: order(candidates) };
+    const byHint = new Map<string, SymbolAuditBinding[]>();
+    for (const binding of uniqueBindings(bindings)) {
+        const meaning = meaningHint(binding);
+        const base = normalizeLatexSymbol(binding.structure?.base || '');
+        const hints = [`key:${binding.bindingKey}`, ...(meaning ? [`meaning:${meaning}`] : []), ...(base ? [`base:${base}`] : [])];
+        for (const hint of hints) {
+            const group = byHint.get(hint) || [];
+            group.push(binding);
+            byHint.set(hint, group);
+        }
+    }
+    byHint.forEach(group => addCandidate('notation-choice', group));
+    return { candidates: candidates.sort((left, right) => left.expression.localeCompare(right.expression) || left.id.localeCompare(right.id)) };
 }
 
 export function symbolAuditInputHash(extractions: SymbolAuditExtraction[], comparisonBindings: SymbolAuditBinding[] = []): string {
@@ -314,42 +342,66 @@ export function normalizeSymbolAuditReconciliations(
     candidates: SymbolAuditCandidate[]
 ): SymbolAuditReconciliation[] {
     const raw = Array.isArray(rawReconciliations) ? rawReconciliations : [];
-    const candidatesByExpression = new Map(candidates.map(candidate => [normalizeLatexSymbol(candidate.expression), candidate] as const));
+    const candidatesById = new Map(candidates.map(candidate => [candidate.id, candidate] as const));
+    const candidatesByExpression = new Map(candidates.filter(candidate => candidate.kind === 'collision')
+        .map(candidate => [normalizeLatexSymbol(candidate.expression), candidate] as const));
     const reconciled = new Map<string, SymbolAuditReconciliation>();
     raw.forEach(item => {
         if (!item || typeof item !== 'object') return;
         const value = item as Record<string, unknown>;
         const expression = stringValue(value.expression, 160).replace(/^\$+|\$+$/g, '');
-        const candidate = candidatesByExpression.get(normalizeLatexSymbol(expression));
-        if (!candidate || reconciled.has(candidate.expression)) return;
-        const relation = enumValue(value.relation, ['same-binding', 'specialization', 'compatible-reuse', 'conflict', 'uncertain'] as const, 'uncertain');
+        const candidateId = stringValue(value.candidateId, 80);
+        const candidate = candidateId ? candidatesById.get(candidateId) : candidatesByExpression.get(normalizeLatexSymbol(expression));
+        if (!candidate || reconciled.has(candidate.id)) return;
+        let relation: SymbolAuditRelation = candidate.kind === 'notation-choice'
+            ? enumValue(value.relation, ['notation-reuse', 'distinct-bindings', 'uncertain'] as const, 'uncertain')
+            : enumValue(value.relation, ['same-binding', 'specialization', 'compatible-reuse', 'conflict', 'uncertain'] as const, 'uncertain');
         const confidence = enumValue(value.confidence, ['high', 'medium', 'low'] as const, 'low');
-        const reason = stringValue(value.reason, 720) || 'The reconciliation pass did not explain this notation collision.';
+        if (candidate.kind === 'notation-choice' && confidence === 'low') relation = 'uncertain';
+        const reason = stringValue(value.reason, 720) || 'The review pass did not explain this notation candidate.';
         const allowedKeys = new Set(candidate.bindings.map(binding => binding.bindingKey));
         const bindingKeys = Array.isArray(value.bindingKeys)
             ? Array.from(new Set(value.bindingKeys.map(key => stringValue(key, 120)).filter(key => allowedKeys.has(key))))
             : [];
-        reconciled.set(candidate.expression, {
+        const allowedIds = new Set(candidate.bindings.map(binding => binding.id));
+        const requestedIds = Array.isArray(value.bindingIds)
+            ? new Set(value.bindingIds.map(id => stringValue(id, 80)).filter(id => allowedIds.has(id)))
+            : undefined;
+        let selected = candidate.bindings.filter(binding => requestedIds
+            ? requestedIds.has(binding.id)
+            : !bindingKeys.length || bindingKeys.includes(binding.bindingKey));
+        if (!selected.length) {
+            relation = 'uncertain';
+            selected = candidate.bindings;
+        }
+        if (relation === 'notation-reuse'
+            && (!requestedIds || new Set(selected.map(binding => binding.normalizedExpression)).size < 2)) relation = 'uncertain';
+        if (relation === 'conflict' && selected.length < 2) relation = 'uncertain';
+        reconciled.set(candidate.id, {
+            candidateId: candidate.id,
             expression: candidate.expression,
             relation,
             confidence,
             readerRisk: value.readerRisk === true,
             reason,
-            bindingKeys: bindingKeys.length ? bindingKeys : Array.from(allowedKeys)
+            bindingKeys: Array.from(new Set(selected.map(binding => binding.bindingKey))),
+            bindingIds: selected.map(binding => binding.id)
         });
     });
     candidates.forEach(candidate => {
-        if (reconciled.has(candidate.expression)) return;
-        reconciled.set(candidate.expression, {
+        if (reconciled.has(candidate.id)) return;
+        reconciled.set(candidate.id, {
+            candidateId: candidate.id,
             expression: candidate.expression,
             relation: 'uncertain',
             confidence: 'low',
             readerRisk: true,
-            reason: 'The reconciliation pass did not return an assessment for this notation collision.',
-            bindingKeys: Array.from(new Set(candidate.bindings.map(binding => binding.bindingKey)))
+            reason: 'The review pass did not return an assessment for this notation candidate.',
+            bindingKeys: Array.from(new Set(candidate.bindings.map(binding => binding.bindingKey))),
+            bindingIds: candidate.bindings.map(binding => binding.id)
         });
     });
-    return Array.from(reconciled.values()).sort((left, right) => left.expression.localeCompare(right.expression));
+    return Array.from(reconciled.values()).sort((left, right) => left.expression.localeCompare(right.expression) || String(left.candidateId).localeCompare(String(right.candidateId)));
 }
 
 function validSettings(value: unknown): SymbolAuditSettings {
@@ -531,38 +583,48 @@ export function createSymbolAuditReport(
     comparisonBindings: SymbolAuditBinding[] = []
 ): SymbolAuditReport {
     const bindings = extractions.flatMap(extraction => extraction.bindings);
+    const selectedIds = new Set(bindings.map(binding => binding.id));
     const analysis = analyzeSymbolAuditBindings([...bindings, ...comparisonBindings]);
-    const candidateByExpression = new Map(analysis.candidates.map(candidate => [candidate.expression, candidate] as const));
-    const hardConflicts = reconciliations.flatMap((reconciliation): SymbolAuditConflict[] => {
-        const candidate = candidateByExpression.get(reconciliation.expression);
+    analysis.candidates = analysis.candidates.filter(candidate => candidate.bindings.some(binding => selectedIds.has(binding.id)));
+    const candidateById = new Map(analysis.candidates.map(candidate => [candidate.id, candidate] as const));
+    const reviewed = normalizeSymbolAuditReconciliations(reconciliations, analysis.candidates);
+    const hardConflicts = reviewed.flatMap((reconciliation): SymbolAuditConflict[] => {
+        const candidate = candidateById.get(reconciliation.candidateId || '');
+        const assessed = candidate?.bindings.filter(binding => reconciliation.bindingIds?.includes(binding.id)) || [];
         if (!candidate
+            || candidate.kind !== 'collision'
             || reconciliation.relation !== 'conflict'
             || reconciliation.confidence !== 'high'
-            || !candidate.bindings.some(binding => binding.kind === 'special')) return [];
+            || !assessed.some(binding => selectedIds.has(binding.id))
+            || !assessed.some(binding => binding.kind === 'special')) return [];
         return [{
             expression: candidate.expression,
             severity: 'hard',
             reason: reconciliation.reason,
-            bindings: candidate.bindings
+            bindings: assessed
         }];
     });
-    const advisories = reconciliations.flatMap((reconciliation): SymbolAuditAdvisory[] => {
-        const candidate = candidateByExpression.get(reconciliation.expression);
+    const advisories = reviewed.flatMap((reconciliation): SymbolAuditAdvisory[] => {
+        const candidate = candidateById.get(reconciliation.candidateId || '');
         if (!candidate) return [];
+        const assessed = candidate.bindings.filter(binding => reconciliation.bindingIds?.includes(binding.id));
+        if (!assessed.some(binding => selectedIds.has(binding.id))) return [];
         const isHighSpecialConflict = reconciliation.relation === 'conflict'
             && reconciliation.confidence === 'high'
-            && candidate.bindings.some(binding => binding.kind === 'special');
+            && assessed.some(binding => binding.kind === 'special');
         if (isHighSpecialConflict) return [];
         const severity = reconciliation.relation === 'conflict' || reconciliation.relation === 'uncertain'
             ? 'review' as const
-            : reconciliation.relation === 'compatible-reuse' && reconciliation.readerRisk
+            : reconciliation.relation === 'notation-reuse' || (reconciliation.relation === 'compatible-reuse' && reconciliation.readerRisk)
                 ? 'notice' as const
                 : undefined;
         return severity ? [{
+            candidateId: candidate.id,
             expression: candidate.expression,
             severity,
             reason: reconciliation.reason,
-            bindingKeys: reconciliation.bindingKeys
+            bindingKeys: reconciliation.bindingKeys,
+            bindingIds: reconciliation.bindingIds
         }] : [];
     });
     return {
@@ -579,7 +641,7 @@ export function createSymbolAuditReport(
         reusedFiles,
         hardConflicts,
         candidates: analysis.candidates,
-        reconciliations,
+        reconciliations: reviewed,
         advisories
     };
 }
