@@ -1,16 +1,20 @@
-import type { ReaderGitChanges } from '../git-change-types';
+import type { ReaderGitChanges, ReaderGitFileChanges } from '../git-change-types';
 
 interface Page { filePath: string; sourceHash?: string; project: string; token: string }
+interface Project { project: string; token: string; revision: number }
 type Request = (route: string, options?: RequestInit) => Promise<Response>;
 const words = {
-    zh: { label: '未提交修改', hint: '在正文左侧标记相对最近一次 Git 提交的修改（含暂存内容）', changed: '未提交修改：源码行', deleted: '此处附近删除了源码行', 'not-git': '非 Git 项目', ignored: '稿件已忽略', unavailable: '读取失败', stale: '等待刷新', loading: '检查中…', outdated: '需重启服务', outdatedHint: 'Reader 服务版本较旧，请重启服务；在 Codex 中需重启客户端，再打开 Math Workspace', waiting: '请先打开稿件', clean: '无修改', invisible: '无可见修改', count: (count: number) => `${count} 处` },
-    en: { label: 'Uncommitted changes', hint: 'Mark changes in the article gutter since the latest Git commit, including staged edits', changed: 'Uncommitted changes: source lines', deleted: 'Source lines deleted near here', 'not-git': 'No Git repository', ignored: 'Manuscript ignored', unavailable: 'Read failed', stale: 'Awaiting refresh', loading: 'Checking…', outdated: 'Restart Reader', outdatedHint: 'The Reader service is outdated. Restart it; in Codex, restart the client and reopen Math Workspace', waiting: 'Open a manuscript first', clean: 'No changes', invisible: 'No visible changes', count: (count: number) => `${count} marked` }
+    zh: { label: '未提交修改', hint: '用淡底色和侧线标记正文修改，在目录与页眉显示文件标记（相对最近一次 Git 提交，含暂存内容）', modified: '未提交修改', added: '新增文件（未提交）', changed: '未提交修改：源码行', deleted: '此处附近删除了源码行', 'not-git': '非 Git 项目', ignored: '稿件已忽略', unavailable: '读取失败', stale: '等待刷新', loading: '检查中…', outdated: '需重启服务', outdatedHint: 'Reader 服务版本较旧，请重启服务；在 Codex 中需重启客户端，再打开 Math Workspace', waiting: '请先打开稿件', clean: '无修改', invisible: '无可见修改', count: (count: number) => `${count} 处` },
+    en: { label: 'Uncommitted changes', hint: 'Tint changed prose and mark files in navigation and the header since the latest Git commit, including staged edits', modified: 'Uncommitted changes', added: 'New file (uncommitted)', changed: 'Uncommitted changes: source lines', deleted: 'Source lines deleted near here', 'not-git': 'No Git repository', ignored: 'Manuscript ignored', unavailable: 'Read failed', stale: 'Awaiting refresh', loading: 'Checking…', outdated: 'Restart Reader', outdatedHint: 'The Reader service is outdated. Restart it; in Codex, restart the client and reopen Math Workspace', waiting: 'Open a manuscript first', clean: 'No changes', invisible: 'No visible changes', count: (count: number) => `${count} marked` }
 };
 
 /** Owns opt-in markers and their page-bound polling; never rewrites rendered content. */
 export class ReaderUncommittedChanges {
     private enabled = false;
     private page?: Page;
+    private project?: Project;
+    private latestFiles?: ReaderGitFileChanges;
+    private fileStatus?: 'unavailable' | 'outdated' | 'stale';
     private generation = 0;
     private timer?: ReturnType<typeof setTimeout>;
     private abort?: AbortController;
@@ -21,7 +25,7 @@ export class ReaderUncommittedChanges {
     private paused = false;
     private readonly onClick = () => this.setEnabled(!this.enabled);
     private readonly onVisibility = () => { if (document.visibilityState !== 'hidden') void this.refresh(); };
-    constructor(private article: HTMLElement, private button: HTMLElement, private language: () => 'zh' | 'en', private request: Request, private markersChanged: () => void = () => {}) {
+    constructor(private article: HTMLElement, private button: HTMLElement, private language: () => 'zh' | 'en', private request: Request, private markersChanged: () => void = () => {}, private filesChanged: () => void = () => {}) {
         button.addEventListener('click', this.onClick);
         document.addEventListener('visibilitychange', this.onVisibility);
         if (typeof ResizeObserver !== 'undefined') { this.resize = new ResizeObserver(() => this.markersChanged()); this.resize.observe(article); }
@@ -32,14 +36,43 @@ export class ReaderUncommittedChanges {
         this.updateLanguage();
         if (page && this.enabled) void this.refresh();
     }
+    bindProject(project?: Project): void {
+        if (this.project?.project === project?.project && this.project?.token === project?.token && this.project?.revision === project?.revision) return;
+        this.cancel(); this.clear(); this.latest = undefined; this.status = undefined;
+        this.project = project; this.fileStatus = undefined; this.setFiles(undefined);
+        if (this.enabled) void this.refresh();
+    }
+    fileLabel(filePath: string): string {
+        const kind = this.enabled && this.latestFiles?.status === 'ready' ? this.latestFiles.files[filePath] : undefined;
+        return kind ? words[this.language()][kind] : '';
+    }
+    fileBadge(filePath: string): HTMLElement | undefined {
+        const label = this.fileLabel(filePath);
+        if (!label) return;
+        const kind = this.latestFiles!.files[filePath];
+        const badge = document.createElement('span');
+        badge.className = 'reader-file-change is-' + kind;
+        badge.textContent = kind === 'added' ? '+' : '•';
+        badge.setAttribute('aria-hidden', 'true');
+        badge.setAttribute('data-reader-tooltip', label);
+        return badge;
+    }
+    targets(): HTMLElement[] {
+        return [...this.marked.keys()].sort((a, b) => Number(a.dataset.sourceStartLine || 0) - Number(b.dataset.sourceStartLine || 0));
+    }
+    hasChanges(): boolean { return this.enabled && this.latest?.status === 'ready' && !!(this.latest.ranges.length || this.latest.deletions.length); }
+    private setFiles(value: ReaderGitFileChanges | undefined): void {
+        if (JSON.stringify(this.latestFiles) === JSON.stringify(value)) return;
+        this.latestFiles = value; this.filesChanged();
+    }
     setEnabled(value: boolean): void {
-        this.enabled = value; this.cancel(); this.clear(); this.latest = undefined; this.status = undefined; this.updateLanguage();
+        this.enabled = value; this.cancel(); this.clear(); this.fileStatus = undefined; this.setFiles(undefined); this.latest = undefined; this.status = undefined; this.updateLanguage();
         if (value) void this.refresh();
     }
     pause(): void { this.paused = true; this.cancel(); }
     resume(): void { this.paused = false; void this.refresh(); }
     dispose(): void {
-        this.bind(); this.button.removeEventListener('click', this.onClick);
+        this.enabled = false; this.bind(); this.bindProject(); this.button.removeEventListener('click', this.onClick);
         document.removeEventListener('visibilitychange', this.onVisibility);
         this.resize?.disconnect();
     }
@@ -49,11 +82,13 @@ export class ReaderUncommittedChanges {
         this.button.classList.toggle('is-active', this.enabled);
         if (this.latest && this.enabled) this.apply(this.latest);
         const status = this.button.querySelector<HTMLElement>('#reader-uncommitted-status');
-        const label = !this.page ? w.waiting : this.status ? w[this.status] : this.latest?.status === 'ready'
+        const failure = this.status || this.fileStatus;
+        const label = !this.page ? w.waiting : failure ? w[failure] : this.latest?.status === 'ready'
             ? this.marked.size ? w.count(this.marked.size) : this.latest.ranges.length || this.latest.deletions.length ? w.invisible : w.clean
             : this.latest ? w[this.latest.status] : w.loading;
         if (status) { status.hidden = !this.enabled; status.textContent = this.enabled ? label : ''; }
-        this.button.setAttribute('data-reader-tooltip', !this.enabled ? w.hint : this.status === 'outdated' ? w.outdatedHint : `${w.hint} · ${label}`);
+        this.button.setAttribute('data-reader-tooltip', !this.enabled ? w.hint : failure === 'outdated' ? w.outdatedHint : `${w.hint} · ${label}`);
+        this.filesChanged();
     }
     private cancel(): void {
         ++this.generation; this.abort?.abort(); this.abort = undefined;
@@ -83,11 +118,14 @@ export class ReaderUncommittedChanges {
     private async refresh(): Promise<void> {
         this.cancel();
         const page = this.page, generation = this.generation;
-        if (!this.enabled || !page || this.paused || document.visibilityState === 'hidden') return;
+        const project = this.project;
+        if (!this.enabled || (!page && !project) || this.paused || document.visibilityState === 'hidden') return;
         const abort = this.abort = new AbortController();
         const current = () => generation === this.generation && this.enabled && this.page === page && !abort.signal.aborted;
+        const files = project ? this.refreshFiles(project, abort.signal, current) : Promise.resolve();
         if (!this.latest) { this.status = 'loading'; this.updateLanguage(); }
         try {
+            if (!page || project && (page.project !== project.project || page.token !== project.token)) return;
             const response = await this.request('/api/page-changes?path=' + encodeURIComponent(page.filePath), { signal: abort.signal, cache: 'no-store', headers: { 'x-math-workspace-token': page.token, 'x-math-workspace-project': page.project } });
             if (!current()) return;
             if (!response.ok) {
@@ -103,8 +141,19 @@ export class ReaderUncommittedChanges {
         } catch {
             if (current()) { this.latest = undefined; this.status = 'unavailable'; this.clear(); this.updateLanguage(); }
         } finally {
+            await files;
             if (current()) this.timer = setTimeout(() => void this.refresh(), 8000);
         }
+    }
+    private async refreshFiles(project: Project, signal: AbortSignal, current: () => boolean): Promise<void> {
+        try {
+            const response = await this.request('/api/file-changes', { signal, cache: 'no-store', headers: { 'x-math-workspace-token': project.token, 'x-math-workspace-project': project.project } });
+            const changes = response.ok ? await response.json() as ReaderGitFileChanges : undefined;
+            if (!current()) return;
+            this.fileStatus = !response.ok ? response.status === 404 ? 'outdated' : 'unavailable'
+                : changes?.revision !== project.revision ? 'stale' : changes.status === 'unavailable' ? 'unavailable' : undefined;
+            this.setFiles(changes?.revision === project.revision ? changes : undefined); this.updateLanguage();
+        } catch { if (current()) { this.fileStatus = 'unavailable'; this.setFiles(undefined); this.updateLanguage(); } }
     }
     private apply(changes: ReaderGitChanges): void {
         this.clear();

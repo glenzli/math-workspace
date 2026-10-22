@@ -125,6 +125,12 @@ function documentStageContract(h) {
             }
         }
         const unset = { documentMode: 'formal' }, unsetHeader = h.documentStatusBadge(unset, language, true);
+        const revised = { documentMode: 'formal', lifecycle: { stage: 'revising', changedSinceStable: true } };
+        const revisedHeader = h.documentStatusBadge(revised, language, true), revisedSidebar = h.documentStatusBadge(revised, language);
+        assert.equal(revisedHeader.querySelector('.reader-document-stage-label').textContent, words.documentStageRevising);
+        assert.equal(revisedHeader.querySelector('.reader-document-changed').textContent, '· ' + words.documentStageSinceStable);
+        assert.equal(h.documentStatusText(revised, language), words.documentStageRevising + ' · ' + words.documentStageSinceStable);
+        assert.equal(revisedHeader.classList.contains('is-changed'), true); assert.equal(revisedSidebar.classList.contains('is-changed'), true);
         assert.equal(h.documentStatusBadge(unset, language), undefined);
         assert.equal(unsetHeader.textContent, words.documentStageUnset); assert.equal(unsetHeader.querySelector('svg'), null, 'Unset stages do not acquire an initial-draft icon.');
         const checkpointOnly = { documentMode: 'formal', lifecycle: { checkpoint: { label: 'v1' }, changedSinceCheckpoint: true } };

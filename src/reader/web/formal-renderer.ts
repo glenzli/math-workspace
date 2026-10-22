@@ -47,6 +47,7 @@ export interface ReaderPage {
     lifecycle?: {
         mode: 'formal' | 'draft';
         stage?: 'draft' | 'revising' | 'stable';
+        changedSinceStable?: boolean;
         checkpoint?: { label: string; recordedAt: string; contentHash?: string };
         changedSinceCheckpoint: boolean;
     };

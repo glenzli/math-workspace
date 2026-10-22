@@ -1,5 +1,8 @@
 import { testReaderApps } from './reader-app.test.mjs';
 import { testReaderUncommitted } from './reader-uncommitted.test.mjs';
+import { testReaderDocumentState } from './reader-document-state.test.mjs';
+import { testReaderSearch } from './reader-search.test.mjs';
+import { testReaderChangeNavigation } from './reader-change-navigation.test.mjs';
 import { testReaderDefinitions } from './reader-definitions.test.mjs';
 import { testReaderIconClarity } from './reader-icon-clarity.test.mjs';
 import { testReaderToolbarMenu } from './reader-toolbar-menu.test.mjs';
@@ -1828,6 +1831,21 @@ async function testReaderServer() {
         const changes = await (await fetch(changeRoute, { headers: changeHeaders })).json();
         assert.equal(changes.status, 'not-git'); assert.deepEqual(changes.ranges, []);
         assert.equal((await fetch(reader.url + '/api/page-changes?path=../outside.md', { headers: changeHeaders })).status, 404);
+        const fileChangesRoute = reader.url + '/api/file-changes';
+        assert.equal((await fetch(fileChangesRoute)).status, 403);
+        assert.equal((await fetch(fileChangesRoute, { headers: { ...changeHeaders, 'x-math-workspace-project': 'other' } })).status, 409);
+        const fileChanges = await (await fetch(fileChangesRoute, { headers: changeHeaders })).json();
+        assert.equal(fileChanges.status, 'not-git'); assert.deepEqual(fileChanges.files, {}); assert.equal(fileChanges.revision, state.revision);
+        const searchRoute = reader.url + '/api/search?q=Finite%20cover';
+        assert.equal((await fetch(searchRoute)).status, 403);
+        assert.equal((await fetch(searchRoute, { headers: { ...changeHeaders, 'x-math-workspace-project': 'other' } })).status, 409);
+        const found = await (await fetch(searchRoute, { headers: changeHeaders })).json();
+        assert.equal(found.revision, state.revision); assert.ok(found.hits.some(hit => hit.filePath === 'book1/01-foundations.md'));
+        assert.equal((await fetch(reader.url + '/api/search?q=' + 'x'.repeat(241), { headers: changeHeaders })).status, 400);
+        const beforeRoute = reader.url + '/api/page-before?path=book1%2F01-foundations.md';
+        assert.equal((await fetch(beforeRoute)).status, 403);
+        const before = await (await fetch(beforeRoute, { headers: changeHeaders })).json();
+        assert.equal(before.status, 'not-git'); assert.equal(before.content, undefined);
 
         const page = await (await fetch(reader.url + '/api/page?path=book1%2F01-foundations.md')).json();
         assert.match(page.content, /Finite cover/);
@@ -3002,6 +3020,9 @@ const tests = [
     ['Reader icon clarity and action tooltips', testReaderIconClarity],
     ['Reader category menus and keyboard navigation', testReaderToolbarMenu],
     ['Reader opt-in uncommitted manuscript markers', testReaderUncommitted],
+    ['Reader stable content baseline and automatic revision stage', testReaderDocumentState],
+    ['Reader full-text and approximate formula search', testReaderSearch],
+    ['Reader floating change navigation and previous content preview', testReaderChangeNavigation],
     ['Reader automatic and manual UI preferences', testReaderPreferences],
     ['Reader host language/theme context and local persistence', testReaderHostPreferences],
     ['Reader preference documentation and bilingual README', testReaderPreferenceDocs],

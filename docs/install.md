@@ -93,7 +93,7 @@ If `draft/**` should stay outside the formal scan but remain visible in the Read
 }
 ```
 
-Draft collections are collapsible and do not produce formal hashes, dependency nodes, Lean anchors, or symbol-audit input. Formal documents default to Initial Draft; one or several selected documents can be changed to Revising or Stable Draft, and checkpoints such as `RC1` or `v1` record a content hash. State is kept in `.math-workspace/documents.json` and identifies files by project-relative path.
+Draft collections are collapsible and do not produce formal hashes, dependency nodes, Lean anchors, or symbol-audit input. Formal documents default to Initial Draft; one or several selected documents can be changed to Revising or Stable Draft, and checkpoints such as `RC1` or `v1` record a content hash. After a stable draft is confirmed, content changes automatically display Revising. Git commits do not confirm stability. Older stable records need one explicit reconfirmation to establish their content baseline. State is kept in `.math-workspace/documents.json` and identifies files by project-relative path.
 
 After saving the configuration, run `prepare` and `verify` again. The Reader navigation and adoption status should match the intended scan scope before stable anchors are migrated. See [usage.md](usage.md#configuration) for the complete configuration reference.
 
@@ -297,7 +297,7 @@ npx math-workspace open
 }
 ```
 
-探索稿集合可折叠，但不会产生 formal hash、依赖节点、Lean 锚点或符号审计输入。正式文档默认处于“初稿”，可以在目录中单篇或多选改为“修订中 / 稳定稿”，并记录 `RC1`、`v1` 等内容 hash 里程碑；这些记录保存在 `.math-workspace/documents.json`，按项目相对路径识别文件。
+探索稿集合可折叠，但不会产生 formal hash、依赖节点、Lean 锚点或符号审计输入。正式文档默认处于“初稿”，可以在目录中单篇或多选改为“修订中 / 稳定稿”，并记录 `RC1`、`v1` 等内容 hash 里程碑。确认稳定稿后，文件内容变化会自动显示为“修订中”；Git 提交不会自动确认稳定。旧稳定稿记录需重新确认一次以建立内容基准。这些记录保存在 `.math-workspace/documents.json`，按项目相对路径识别文件。
 
 保存配置后重新运行 `prepare` 和 `verify`。Reader 左侧目录与接管状态应和预期扫描范围一致，然后再迁移稳定锚点。完整配置见 [usage.md](usage.md#配置)。
 

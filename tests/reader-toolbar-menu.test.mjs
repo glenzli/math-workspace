@@ -138,6 +138,7 @@ export async function readerToolbarHarness(options = {}) {
     document.body = document.createElement('body'); document.body.parent = document; document.activeElement = document.body;
     const previousDocument = globalThis.document; globalThis.document = document;
     const window = new EventTarget(); window.innerWidth = 320; window.innerHeight = 700;
+    window.matchMedia = () => ({ matches: false });
     const timers = new Map(); let timerSequence = 0;
     window.setTimeout = (run, delay) => { const id = ++timerSequence; timers.set(id, { run, delay }); return id; };
     window.clearTimeout = id => timers.delete(id);
@@ -176,6 +177,7 @@ export async function readerToolbarHarness(options = {}) {
         './reader-figures': { mountReaderFigures: () => () => {} },
         './reader-formula-layout': { mountReaderFormulaLayout: () => ({ dispose() {}, invalidate() {}, setLanguage() {}, canAdapt: () => false, isAdapted: () => false, toggle: async () => {} }) },
         './reader-assets': { mountReaderAssets: () => () => {} },
+        './reader-exercises': { revealExerciseTarget: element => { element.revealed = true; } },
         './formal-renderer': { bindFormalInterfaceLabels() {}, renderFormalInline: (_renderer, source, options) => { inlineCalls.push({ source, filePath: options.currentFilePath }); return inlineRenderer(source, options); }, renderFormalDocument: () => ({ html: '', formulas: [] }), ...options.renderer },
         './reader-tooltip': { ReaderTooltip: Owner },
         './source-actions': { ReaderSourceActions: Owner },
@@ -203,6 +205,8 @@ export async function readerToolbarHarness(options = {}) {
     await load('reader-popover.ts', './reader-popover');
     await load('reader-toolbar-menu.ts', './reader-toolbar-menu');
     await load('reader-uncommitted.ts', './reader-uncommitted');
+    await load('reader-search.ts', './reader-search');
+    await load('reader-change-navigation.ts', './reader-change-navigation');
     await load('reader-toolbar-panel.ts', './reader-toolbar-panel');
     await load('reader-create-page.ts', './reader-create-page');
     if (options.publication) {
@@ -534,7 +538,7 @@ export async function testReaderToolbarMenu() {
             assert.equal(trigger(candidate).getAttribute('aria-expanded'), String(candidate === category));
         }
     };
-    assert.deepEqual(primary.querySelectorAll('button').map(button => button.id || button.dataset.panel), ['reader-lean-review', 'contents', 'reader-reference-tools', 'reader-review-tools', 'reader-edition-tools', 'reader-display-tools', 'reader-expand']);
+    assert.deepEqual(primary.querySelectorAll('button').map(button => button.id || button.dataset.panel), ['reader-search', 'reader-lean-review', 'contents', 'reader-reference-tools', 'reader-review-tools', 'reader-edition-tools', 'reader-display-tools', 'reader-expand']);
     assert.equal(find('#reader-more'), null, 'There is no global More action.');
     assert.equal(primary.querySelectorAll('[data-tool-menu]').length, 4);
     assert.equal(find('.reader-toolbar').contains(find('.reader-type-control')), false, 'Font controls no longer consume primary toolbar width.');
@@ -653,7 +657,7 @@ export async function testReaderToolbarMenu() {
     const previousRenderNavigation = app.renderNavigation; app.renderNavigation = () => {};
     app.applyState({ ...app.state, projectId: 'project-b' }); app.renderNavigation = previousRenderNavigation;
     assert.equal(menu.hidden, true, 'A project switch dismisses the previous project’s menu.');
-    app.toolbarMenu.dispose(); app.toolbarPanel.dispose();
+    app.toolbarMenu.dispose(); app.toolbarPanel.dispose(); app.fullSearch.dispose(); app.changeNavigation.dispose();
     assert.equal(find('#reader-category-menu'), null);
     for (const category of categories) {
         assert.equal((trigger(category).listeners.get('click') || []).length, 0); assert.equal((trigger(category).listeners.get('keydown') || []).length, 0);

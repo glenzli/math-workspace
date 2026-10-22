@@ -21,6 +21,7 @@ export interface DocumentCheckpoint {
 
 export interface DocumentStateRecord {
     stage?: DocumentStage;
+    stableContentHash?: string;
     checkpoint?: DocumentCheckpoint;
     updatedAt?: string;
 }
@@ -30,6 +31,7 @@ export interface DocumentLifecycle {
     collectionId?: string;
     collectionTitle?: string;
     stage?: DocumentStage;
+    changedSinceStable?: boolean;
     checkpoint?: DocumentCheckpoint;
     changedSinceCheckpoint: boolean;
 }
@@ -87,11 +89,14 @@ function normalizedRecord(value: unknown): DocumentStateRecord | undefined {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
     const raw = value as Record<string, unknown>;
     const stage = normalizedStage(raw.stage);
+    const stableContentHash = typeof raw.stableContentHash === 'string' && /^[a-f0-9]{64}$/i.test(raw.stableContentHash)
+        ? raw.stableContentHash.toLowerCase() : undefined;
     const checkpoint = normalizedCheckpoint(raw.checkpoint);
     const updatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.length <= 80 ? raw.updatedAt : undefined;
     if (!stage && !checkpoint) return undefined;
     return {
         ...(stage ? { stage } : {}),
+        ...(stage === 'stable' && stableContentHash ? { stableContentHash } : {}),
         ...(checkpoint ? { checkpoint } : {}),
         ...(updatedAt ? { updatedAt } : {})
     };
@@ -192,12 +197,14 @@ export async function readDocumentState(rootPath: string, config: any, documents
         const collection = documentCollectionForPath(filePath, config);
         const record = collection ? undefined : records[filePath];
         const checkpoint = record?.checkpoint;
+        const contentHash = sourceHash(content);
+        const changedSinceStable = record?.stage === 'stable' && !!record.stableContentHash && record.stableContentHash !== contentHash;
         state.lifecycles[filePath] = {
             mode: collection ? 'draft' : 'formal',
             ...(collection ? { collectionId: collection.id, collectionTitle: collection.title } : {}),
-            ...(collection ? {} : { stage: record?.stage || 'draft' }),
+            ...(collection ? {} : { stage: changedSinceStable ? 'revising' : record?.stage || 'draft', changedSinceStable }),
             ...(checkpoint ? { checkpoint } : {}),
-            changedSinceCheckpoint: !!checkpoint && checkpoint.contentHash !== sourceHash(content)
+            changedSinceCheckpoint: !!checkpoint && checkpoint.contentHash !== contentHash
         };
     });
     state.orphaned = Object.keys(records).filter(filePath => !documents.has(filePath)).sort();
@@ -234,6 +241,8 @@ export async function updateDocumentState(
         ...(stage ? { stage } : {}),
         updatedAt: new Date().toISOString()
     };
+    if (stage === 'stable') next.stableContentHash = sourceHash(content);
+    else if (stage) delete next.stableContentHash;
     if (checkpointLabel) {
         next.checkpoint = {
             label: checkpointLabel,

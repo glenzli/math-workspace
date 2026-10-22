@@ -8,6 +8,7 @@ import {
     formatPageHeading,
     formatPageReference,
     isPageLabelType,
+    scanFormalDocuments,
     toPosix,
     typeName,
     type LabelData,
@@ -35,7 +36,8 @@ import { SymbolAuditService } from './symbol-audit-service';
 import type { SymbolAuditScope, SymbolAuditSettings } from './symbol-audit';
 import { registerReaderInstance, unregisterReaderInstance } from './location-bridge';
 import { handleReaderCreatePageRoute, ReaderCreatePageError } from './reader-create-api';
-import { readReaderGitChanges } from './git-changes';
+import { readReaderGitChanges, readReaderGitFileChanges, readReaderGitPrevious } from './git-changes';
+import { searchReaderDocuments } from './search';
 
 const http = require('node:http');
 const { URL } = require('node:url');
@@ -803,16 +805,34 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                 return;
             }
 
-            if (url.pathname === '/api/page-changes') {
+            if (['/api/page-changes', '/api/file-changes', '/api/page-before', '/api/search'].includes(url.pathname)) {
                 if (!requireRequestToken(request, response, requestToken)) return;
                 const boundRoot = rootPath;
                 if (request.headers?.['x-math-workspace-project'] !== createHash('sha256').update(boundRoot).digest('hex')) {
                     sendText(response, 409, 'The page project changed. Refresh the Reader.'); return;
                 }
+                if (url.pathname === '/api/search') {
+                    const query = url.searchParams.get('q') || '', mode = url.searchParams.get('mode') || 'all';
+                    if (query.length > 240 || !['all', 'formula'].includes(mode)) { sendText(response, 400, 'Invalid search query.'); return; }
+                    const result = searchReaderDocuments(snapshot.documents, snapshot.state.pages || [], query, mode as 'all' | 'formula');
+                    sendJson(response, 200, { ...result, revision: snapshot.revision }); return;
+                }
+                if (url.pathname === '/api/file-changes') {
+                    const changes = await readReaderGitFileChanges(boundRoot, snapshot.documents);
+                    if (rootPath !== boundRoot || projectChanging) { sendText(response, 409, 'The page project changed. Refresh the Reader.'); return; }
+                    sendJson(response, 200, { ...changes, revision: snapshot.revision }); return;
+                }
                 const filePath = url.searchParams.get('path') || '', content = snapshot.documents.get(filePath);
                 if (content === undefined) { sendText(response, 404, 'Markdown page not found in the bound project.'); return; }
-                const changes = await readReaderGitChanges(boundRoot, filePath, content);
+                const changes = url.pathname === '/api/page-before' ? await readReaderGitPrevious(boundRoot, filePath, content) : await readReaderGitChanges(boundRoot, filePath, content);
                 if (rootPath !== boundRoot || projectChanging) { sendText(response, 409, 'The page project changed. Refresh the Reader.'); return; }
+                if (url.pathname === '/api/page-before' && changes.status === 'ready' && 'content' in changes && typeof changes.content === 'string') {
+                    const formalPaths = new Set((snapshot.state.pages || []).filter((page: any) => page.documentMode !== 'draft').map((page: any) => page.filePath));
+                    const sources = [...snapshot.documents].filter(([sourcePath]) => formalPaths.has(sourcePath)).map(([sourcePath, source]) => ({ filePath: sourcePath, content: sourcePath === filePath ? changes.content! : source }));
+                    const priorState = scanFormalDocuments(sources, snapshot.state.config, snapshot.state.symbols, snapshot.state.definitions);
+                    const prior = { ...snapshot, state: { ...snapshot.state, ...priorState } };
+                    sendJson(response, 200, { ...changes, labels: labelsForContent(prior, changes.content), pages: priorState.pages.map(page => decoratePage(page, snapshot.state.config)) }); return;
+                }
                 sendJson(response, 200, changes); return;
             }
 

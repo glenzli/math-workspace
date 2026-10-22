@@ -12,11 +12,14 @@ import { mountReaderFormulaLayout, type ReaderFormulaLayout } from './reader-for
 import { ReaderArchive } from './reader-archive';
 import { ReaderPublication } from './reader-publication';
 import { ReaderCreatePage } from './reader-create-page';
+import { ReaderSearch } from './reader-search';
+import { ReaderChangeNavigation } from './reader-change-navigation';
 import {
     createFormalRenderer,
     bindFormalInterfaceLabels,
     renderFormalDocument,
     renderFormalInline,
+    renderReaderFormula,
     renderFormalMarkdown,
     type ReaderDependencyMarker,
     type ReaderFormula,
@@ -256,6 +259,8 @@ const words = {
         documentStageRevising: '修订中',
         documentStageStable: '稳定稿',
         documentStageChanged: '有改动',
+        documentStageSinceStable: '稳定稿后有改动',
+        documentStageHint: '确认稳定稿会记住当前内容；后续修改自动显示为修订中，恢复确认时的内容则回到稳定稿。Git 提交不会自动确认稳定。',
         documentStageSaved: '已更新文档阶段',
         documentStageMilestone: '版本里程碑',
         documentStageMilestoneHint: '例如 RC1 或 v1',
@@ -442,6 +447,8 @@ const words = {
         documentStageRevising: 'Revising',
         documentStageStable: 'Stable draft',
         documentStageChanged: 'Changed',
+        documentStageSinceStable: 'Changed since stable draft',
+        documentStageHint: 'Confirming a stable draft remembers its content. Later edits show Revising; restoring the confirmed content restores Stable draft. Git commits do not confirm stability.',
         documentStageSaved: 'Document stage updated',
         documentStageMilestone: 'Version milestone',
         documentStageMilestoneHint: 'For example RC1 or v1',
@@ -590,7 +597,9 @@ function documentStageContent(stage: DocumentStage | undefined, language: Langua
 function documentStatusText(page: ReaderPage | undefined, language: Language): string {
     const stage = documentStageLabel(page, language);
     const checkpoint = page?.lifecycle?.checkpoint;
-    return [stage, checkpoint?.label, checkpoint && page?.lifecycle?.changedSinceCheckpoint ? words[language].documentStageChanged : ''].filter(Boolean).join(' · ');
+    const changed = page?.lifecycle?.changedSinceStable ? words[language].documentStageSinceStable
+        : checkpoint && page?.lifecycle?.changedSinceCheckpoint ? words[language].documentStageChanged : '';
+    return [stage, checkpoint?.label, changed].filter(Boolean).join(' · ');
 }
 
 function documentStatusBadge(page: ReaderPage | undefined, language: Language, interactive = false): HTMLElement | undefined {
@@ -599,7 +608,7 @@ function documentStatusBadge(page: ReaderPage | undefined, language: Language, i
     const hasState = !!lifecycle?.stage || !!lifecycle?.checkpoint;
     if (!interactive && !hasState) return undefined;
     const element = interactive ? document.createElement('button') : document.createElement('span');
-    element.className = 'reader-document-status' + (interactive ? ' is-interactive' : '') + (lifecycle?.checkpoint && lifecycle.changedSinceCheckpoint ? ' is-changed' : '');
+    element.className = 'reader-document-status' + (interactive ? ' is-interactive' : '') + (lifecycle?.changedSinceStable || lifecycle?.checkpoint && lifecycle.changedSinceCheckpoint ? ' is-changed' : '');
     const status = documentStatusText(page, language);
     const description = words[language].documentStage + (language === 'en' ? ': ' : '：') + status;
     const describe = () => { const locale = readerPreferences.snapshot().language;
@@ -614,10 +623,10 @@ function documentStatusBadge(page: ReaderPage | undefined, language: Language, i
         if (lifecycle?.checkpoint) {
             const checkpoint = document.createElement('span'); checkpoint.className = 'reader-document-checkpoint';
             checkpoint.textContent = '· ' + lifecycle.checkpoint.label; element.append(checkpoint);
-            if (lifecycle.changedSinceCheckpoint) {
-                const changed = document.createElement('span'); changed.className = 'reader-document-changed';
-                readerText(changed, () => '· ' + words[readerPreferences.snapshot().language].documentStageChanged); element.append(changed);
-            }
+        }
+        if (lifecycle?.changedSinceStable || lifecycle?.checkpoint && lifecycle.changedSinceCheckpoint) {
+            const changed = document.createElement('span'); changed.className = 'reader-document-changed';
+            readerText(changed, () => '· ' + words[readerPreferences.snapshot().language][lifecycle.changedSinceStable ? 'documentStageSinceStable' : 'documentStageChanged']); element.append(changed);
         }
     } else {
         element.classList.add('is-compact');
@@ -716,6 +725,8 @@ class ReaderApplication {
     private toolbarPanel!: ReaderToolbarPanel;
     private toolbarMenu!: ReaderToolbarMenu;
     private uncommitted!: ReaderUncommittedChanges;
+    private fullSearch!: ReaderSearch;
+    private changeNavigation!: ReaderChangeNavigation;
     private tooltip!: ReaderTooltip;
     private propositionReview!: ReaderPropositionReview;
     private archive!: ReaderArchive;
@@ -784,6 +795,7 @@ class ReaderApplication {
             '<div class="reader-history"><button id="reader-back" class="icon-button" aria-label="Back"></button><button id="reader-forward" class="icon-button" aria-label="Forward"></button></div>',
             '<div id="reader-page-title" class="reader-page-title"></div>',
             '<div class="reader-tools" role="group" aria-label="Reader tools">',
+            '<button id="reader-search" class="tool-button" type="button"></button>',
             '<button id="reader-lean-review" class="tool-button" type="button" aria-label="Lean comparison"></button>',
             '<button class="tool-button" type="button" data-panel="contents" aria-label="Contents"></button>',
             '<button id="reader-reference-tools" class="tool-button" type="button" data-tool-menu="reference" aria-label="Reference"></button>',
@@ -801,10 +813,24 @@ class ReaderApplication {
         this.pageTitle = this.root.querySelector('#reader-page-title') as HTMLElement;
         this.liveStatus = this.root.querySelector('#reader-live') as HTMLElement;
         this.toolbarMenu = new ReaderToolbarMenu(this.root, () => this.dictionary(), () => this.prepareToolbarView('menu'), readerPreferences);
-        this.uncommitted = new ReaderUncommittedChanges(this.article, this.root.querySelector('#reader-uncommitted')!, () => this.uiLanguage, readerFetch, () => this.queueSourceLineNumberAlignment());
+        this.uncommitted = new ReaderUncommittedChanges(this.article, this.root.querySelector('#reader-uncommitted')!, () => this.uiLanguage, readerFetch, () => { this.queueSourceLineNumberAlignment(); this.changeNavigation?.update(); }, () => { this.renderFileChangeBadges(); this.changeNavigation?.update(); });
+        this.changeNavigation = new ReaderChangeNavigation(this.main, {
+            context: () => this.page && !this.symbolAuditReportOpen ? { filePath: this.page.filePath, sourceHash: this.page.sourceHash, project: this.state?.projectId || '', token: this.state?.requestToken || '', language: this.uiLanguage } : undefined,
+            targets: () => this.uncommitted.targets(), hasChanges: () => this.uncommitted.hasChanges(), request: readerFetch,
+            reveal: target => revealExerciseTarget(target), currentContent: () => this.page?.content || '',
+            render: (source, previous) => renderFormalDocument(this.markdown, source, { currentFilePath: this.page?.filePath || '', labels: previous?.labels || this.page?.labels || {}, pages: previous?.pages || this.state?.pages || [], language: this.state?.language || 'zh' }).html,
+            beforeOpen: () => this.prepareToolbarView('change-preview')
+        });
+        const searchTrigger = this.root.querySelector<HTMLButtonElement>('#reader-search')!; replaceReaderButtonIcon(searchTrigger, 'search');
+        this.fullSearch = new ReaderSearch(searchTrigger, {
+            context: () => ({ projectId: this.state?.projectId, requestToken: this.state?.requestToken, revision: this.state?.revision, language: this.uiLanguage }),
+            request: readerFetch, beforeOpen: () => this.prepareToolbarView('search'),
+            openResult: hit => this.openPage(hit.filePath, 'push', '', false, { line: hit.startLine }),
+            renderFormula: latex => renderReaderFormula({ latex, display: true }), report: message => this.reportLive(message)
+        });
         this.tooltip = new ReaderTooltip();
         this.tooltip.bind(this.root);
-        window.addEventListener('pagehide', () => { this.formulaLayout?.dispose(); this.createPage?.close(false); });
+        window.addEventListener('pagehide', () => { this.formulaLayout?.dispose(); this.createPage?.close(false); this.fullSearch?.close(false); this.changeNavigation?.closePreview(false); });
         window.addEventListener('pageshow', event => { if (event.persisted && this.page && !this.symbolAuditReportOpen) this.mountArticleFormulaLayout(); });
         window.addEventListener('pagehide', event => { if (event.persisted) this.uncommitted.pause(); else this.uncommitted.dispose(); });
         window.addEventListener('pageshow', event => { if (event.persisted) this.uncommitted.resume(); });
@@ -1001,6 +1027,7 @@ class ReaderApplication {
         this.leanReview?.contextChanged();
         this.formulaLayout?.setLanguage(this.uiLanguage);
         this.uncommitted?.updateLanguage();
+        this.fullSearch?.contextChanged(); this.changeNavigation?.update();
         if (this.symbolAuditReportOpen) { this.article.lang = this.uiLanguage; document.title = this.dictionary().symbolAuditOpenReport + ' — Math Workspace'; }
         refreshReaderLabels(document.body);
         this.toolbarPanel?.reposition();
@@ -1057,11 +1084,14 @@ class ReaderApplication {
         if (projectChanged) this.toolbarMenu?.close();
         if (formulaContextChanged) this.formulaLayout?.dispose();
         this.state = state;
+        this.uncommitted?.bindProject(state.projectId ? { project: state.projectId, token: state.requestToken || '', revision: state.revision } : undefined);
+        this.changeNavigation?.update();
         if (formulaContextChanged && !projectChanged && this.page && !this.symbolAuditReportOpen) this.mountArticleFormulaLayout();
         this.archive?.contextChanged();
         this.publication?.contextChanged();
         this.leanReview?.contextChanged();
         this.createPage?.contextChanged();
+        this.fullSearch?.contextChanged();
         const dictionary = this.dictionary();
         readerAttribute((this.root.querySelector('#reader-page-filter') as HTMLInputElement), 'placeholder', () => this.dictionary().search);
         this.renderNavigation((this.root.querySelector('#reader-page-filter') as HTMLInputElement).value);
@@ -1584,11 +1614,26 @@ class ReaderApplication {
                 button.append(pageIntegrationGlyph(page, this.uiLanguage));
                 readerAttribute(button, 'aria-label', () => [title,
                     status && words[this.uiLanguage].documentStage + (this.uiLanguage === 'en' ? ': ' : '：') + documentStatusText(page, this.uiLanguage),
+                    this.uncommitted?.fileLabel(page.filePath),
                     pageIntegrationTooltip(page, this.uiLanguage)].filter(Boolean).join(' — '));
                 group.append(button);
             });
             navigation.append(group);
         });
+        this.renderFileChangeBadges();
+    }
+
+    private renderFileChangeBadges(): void {
+        if (!this.uncommitted) return;
+        const elements = [...this.root.querySelectorAll<HTMLElement>('.reader-nav-page, [data-file-status]'), ...document.body.querySelectorAll<HTMLElement>('.reader-chapter-entry')];
+        for (const element of elements) {
+            element.querySelectorAll('.reader-file-change').forEach(badge => badge.remove());
+            const filePath = element.dataset.pagePath || element.dataset.chapterPath || element.dataset.fileStatus || '';
+            const badge = this.uncommitted.fileBadge(filePath);
+            if (badge) element.append(badge);
+            refreshReaderLabels(element);
+        }
+        if (this.pageTitle) refreshReaderLabels(this.pageTitle);
     }
 
     private async openPage(
@@ -1695,6 +1740,8 @@ class ReaderApplication {
         }
         const titleParts: Node[] = [titleTrigger || titleLabel];
         if (documentStatus) titleParts.push(documentStatus);
+        const fileStatus = document.createElement('span'); fileStatus.className = 'reader-file-status'; fileStatus.dataset.fileStatus = this.page.filePath;
+        titleParts.push(fileStatus);
         titleParts.push(pageIntegrationGlyph(this.page.page, this.uiLanguage));
         this.pageTitle.replaceChildren(...titleParts);
         if (restoreTitleFocus) (titleTrigger || this.pageTitle.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
@@ -1702,7 +1749,8 @@ class ReaderApplication {
             ? (this.page.page?.documentCollectionTitle || 'Draft collection')
             : pageIntegrationTooltip(this.page.page, this.uiLanguage);
         readerAttribute(this.pageTitle, 'aria-label', () => title + ' — ' + (this.page?.page?.documentMode === 'draft'
-            ? (this.page.page.documentCollectionTitle || 'Draft collection') : pageIntegrationTooltip(this.page?.page, this.uiLanguage)));
+            ? (this.page.page.documentCollectionTitle || 'Draft collection') : pageIntegrationTooltip(this.page?.page, this.uiLanguage))
+            + (this.uncommitted.fileLabel(this.page?.filePath || '') ? ' — ' + this.uncommitted.fileLabel(this.page?.filePath || '') : ''));
         document.title = title + ' — Math Workspace';
         const rendered = renderFormalDocument(this.markdown, this.page.content, {
             currentFilePath: this.page.filePath,
@@ -1718,6 +1766,7 @@ class ReaderApplication {
         this.article.lang = this.state.language;
         this.article.innerHTML = rendered.html;
         this.uncommitted.bind({ filePath: this.page.filePath, sourceHash: this.page.sourceHash, project: this.state.projectId || '', token: this.state.requestToken || '' });
+        this.renderFileChangeBadges();
         bindFormalInterfaceLabels(this.article, this.page.dependencyMarkers || {}, () => this.uiLanguage);
         this.disposeFigures = mountReaderFigures(this.article, () => this.uiLanguage);
         this.disposeAssets = mountReaderAssets(this.article);
@@ -1887,7 +1936,9 @@ class ReaderApplication {
                 const title = page.displayHeading || page.title;
                 button.innerHTML = renderFormalInline(this.markdown, title, this.renderOptions(page.filePath, {}));
                 this.unwrapNavigationTitleLinks(button);
-                button.setAttribute('aria-label', title);
+                const badge = this.uncommitted?.fileBadge(page.filePath);
+                if (badge) button.append(badge);
+                readerAttribute(button, 'aria-label', () => [title, this.uncommitted?.fileLabel(page.filePath)].filter(Boolean).join(' — '));
                 if (page.filePath === this.page?.filePath) button.setAttribute('aria-current', 'page');
                 button.addEventListener('click', () => {
                     this.toolbarPanel.close();
@@ -1916,6 +1967,7 @@ class ReaderApplication {
                 buttons[next]?.focus();
             });
             container.append(list);
+            this.renderFileChangeBadges();
         });
         if (content) {
             content.parentElement!.id = 'reader-chapter-navigation';
@@ -1925,13 +1977,15 @@ class ReaderApplication {
         }
     }
 
-    private prepareToolbarView(view: 'menu' | 'panel' | 'lean' | 'archive' | 'publication' | 'create-page'): void {
+    private prepareToolbarView(view: 'menu' | 'panel' | 'lean' | 'archive' | 'publication' | 'create-page' | 'search' | 'change-preview'): void {
         if (view !== 'menu') this.toolbarMenu?.close();
         if (view !== 'panel') this.toolbarPanel?.close();
         if (view !== 'lean') this.leanReview?.close(false);
         if (view !== 'archive') this.archive?.close();
         if (view !== 'publication') this.publication?.close();
         if (view !== 'create-page') this.createPage?.close(false);
+        if (view !== 'search') this.fullSearch?.close(false);
+        if (view !== 'change-preview') this.changeNavigation?.closePreview(false);
     }
 
     private openDocumentStage(trigger: HTMLElement): void {
@@ -1944,6 +1998,8 @@ class ReaderApplication {
             const summary = document.createElement('p');
             summary.className = 'reader-document-stage-summary';
             readerText(summary, () => documentStatusText(page, this.uiLanguage));
+            const hint = document.createElement('p'); hint.className = 'reader-document-stage-hint';
+            readerText(hint, () => this.dictionary().documentStageHint);
             const stages = document.createElement('div');
             stages.className = 'reader-document-stage-actions';
             DOCUMENT_STAGE_OPTIONS.forEach(({ stage }) => {
@@ -1966,7 +2022,7 @@ class ReaderApplication {
             readerText(record, () => this.dictionary().documentStageRecord);
             record.addEventListener('click', () => void this.saveDocumentStage({ checkpointLabel: input.value }));
             checkpoint.append(input, record);
-            content.append(summary, stages, checkpoint);
+            content.append(summary, hint, stages, checkpoint);
             if (page.lifecycle?.checkpoint) {
                 const clear = document.createElement('button');
                 clear.type = 'button';
