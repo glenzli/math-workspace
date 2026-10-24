@@ -1,4 +1,6 @@
 import { testReaderApps } from './reader-app.test.mjs';
+import { testReaderProjects } from './reader-projects.test.mjs';
+import { testReaderStartup } from './reader-startup.test.mjs';
 import { testSymbolAuditNotation } from './symbol-audit.test.mjs';
 import { testReaderUncommitted } from './reader-uncommitted.test.mjs';
 import { testReaderDocumentState } from './reader-document-state.test.mjs';
@@ -1848,7 +1850,14 @@ async function testReaderServer() {
         const before = await (await fetch(beforeRoute, { headers: changeHeaders })).json();
         assert.equal(before.status, 'not-git'); assert.equal(before.content, undefined);
 
-        const page = await (await fetch(reader.url + '/api/page?path=book1%2F01-foundations.md')).json();
+        const foregroundPage = await (await fetch(reader.url + '/api/page?path=book1%2F01-foundations.md')).json();
+        assert.equal(foregroundPage.analysisPending, true, 'The first prose response does not wait for Lean indexing.');
+        assert.equal(foregroundPage.dependencyMarkers['h-3333333333333333'].leanDeclarationCount, undefined);
+        const analysis = await (await fetch(reader.url + '/api/page-analysis?path=book1%2F01-foundations.md', { headers: changeHeaders })).json();
+        assert.equal(analysis.analysisPending, false);
+        assert.equal(analysis.sourceHash, foregroundPage.sourceHash);
+        assert.equal(analysis.revision, foregroundPage.revision);
+        const page = { ...foregroundPage, dependencyMarkers: analysis.dependencyMarkers };
         assert.match(page.content, /Finite cover/);
         assert.equal(page.sourceHash, changes.sourceHash, 'Page and Git positions bind to the same immutable source snapshot.');
         assert.equal(page.page.displayHeading, '第 1 章 Foundations');
@@ -3025,6 +3034,7 @@ const tests = [
     ['Reader icon clarity and action tooltips', testReaderIconClarity],
     ['Reader category menus and keyboard navigation', testReaderToolbarMenu],
     ['Reader opt-in uncommitted manuscript markers', testReaderUncommitted],
+    ['Reader foreground prose and deferred page analysis', testReaderStartup],
     ['Reader stable content baseline and automatic revision stage', testReaderDocumentState],
     ['Reader full-text and approximate formula search', testReaderSearch],
     ['Reader floating change navigation and previous content preview', testReaderChangeNavigation],
@@ -3088,6 +3098,7 @@ const tests = [
     ['simplified CLI flow', testSimplifiedCliFlow],
     ['Reader mark retirement', testReaderMarkRetirement],
     ['local Reader launcher', testReaderLauncher],
+    ['Reader recent-project history removal', testReaderProjects],
     ['Codex file handler', testCodexFileHandler],
     ['page heading formatting', testPageHeadingFormatting],
     ['export-md compiles formal syntax', testExportMarkdownCompilesFormalSyntax],

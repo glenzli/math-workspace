@@ -221,6 +221,7 @@ function stateProjection(snapshot: WorkspaceSnapshot, rootPath: string): Record<
         issues: snapshot.state.issues || [],
         dependencySummary: snapshot.state.dependencyGraph?.summary || {},
         leanSummary: snapshot.state.leanIndex?.summary || {},
+        analysisPending: snapshot.state.analysisPending === true,
         documentState: { orphaned: snapshot.state.documentState?.orphaned || [] },
         projectAnalysis: snapshot.state.projectAnalysis || { schemaVersion: 1, sources: [], summary: {} }
     };
@@ -239,7 +240,6 @@ async function readerStateProjection(
             ...stateProjection(workspace.current(), rootPath)
         };
     }
-    const recentProjects = await projects.list();
     return {
         available: false,
         revision: 0,
@@ -252,12 +252,15 @@ async function readerStateProjection(
         dependencySummary: {},
         projectAnalysis: { schemaVersion: 1, sources: [], summary: {} },
         requestToken,
-        recentProjects: recentProjects.map((project, index) => ({
-            index,
-            rootName: project.rootName,
-            openedAt: project.openedAt
-        }))
+        recentProjects: await recentProjectsProjection(projects)
     };
+}
+
+async function recentProjectsProjection(projects: ReaderProjectRegistry) {
+    return (await projects.list()).map((project, index) => ({
+        id: createHash('sha256').update(project.rootPath).digest('hex'),
+        index, rootName: project.rootName, openedAt: project.openedAt
+    }));
 }
 
 async function readJsonRequest(request: any, maximumBytes = 4096): Promise<any> {
@@ -474,7 +477,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
             if (rootPath) await symbolAudit.cancel(rootPath);
             if (rootPath) await leanLanguage.closeProject(rootPath);
             const project = await projects.remember(inputPath);
-            const nextWorkspace = new ReaderWorkspace(project.rootPath);
+            const nextWorkspace = new ReaderWorkspace(project.rootPath, { deferLean: true });
             await nextWorkspace.start();
             const previousWorkspace = workspace;
             const previousUnsubscribe = unsubscribe;
@@ -495,7 +498,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
             const url = new URL(request.url || '/', 'http://127.0.0.1');
 
             if (url.pathname.startsWith('/api/lean-') || url.pathname === '/api/publication' || url.pathname.startsWith('/api/publication/') || url.pathname === '/api/formula-runtime'
-                || url.pathname === '/api/create-page' || url.pathname.startsWith('/api/create-page/')) {
+                || url.pathname === '/api/create-page' || url.pathname.startsWith('/api/create-page/') || url.pathname === '/api/projects/recent/remove') {
                 if (projectChanging) { sendText(response, 409, 'The Reader is changing its bound project. Retry after it finishes.'); return; }
                 const origin = request.headers?.origin;
                 if (request.headers?.host !== new URL(serverUrl).host || (origin !== undefined && origin !== serverUrl)
@@ -514,18 +517,33 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
             if (request.method === 'POST' && url.pathname === '/api/projects/recent') {
                 const body = await readJsonRequest(request);
                 const index = Number(body?.index);
-                if (!Number.isInteger(index) || index < 0) {
-                    sendText(response, 400, 'Recent project index must be a non-negative integer.');
+                const id = body?.id;
+                if (id !== undefined ? typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id) : !Number.isInteger(index) || index < 0) {
+                    sendText(response, 400, 'A recent project ID or non-negative integer index is required.');
                     return;
                 }
                 const recentProjects = await projects.list();
-                const selectedProject = recentProjects[index];
+                const selectedProject = id !== undefined ? recentProjects.find(project => createHash('sha256').update(project.rootPath).digest('hex') === id) : recentProjects[index];
                 if (!selectedProject) {
                     sendText(response, 404, 'Recent project not found.');
                     return;
                 }
                 await activateProject(selectedProject.rootPath);
                 sendJson(response, 200, await readerStateProjection(workspace, rootPath, projects, requestToken));
+                return;
+            }
+
+            if (url.pathname === '/api/projects/recent/remove') {
+                if (request.method !== 'POST') { sendText(response, 405, 'Recent project removal uses POST.'); return; }
+                if (!requireRequestToken(request, response, requestToken)) return;
+                const body = await readJsonRequest(request);
+                if (typeof body?.id !== 'string' || !/^[a-f0-9]{64}$/.test(body.id)) {
+                    sendText(response, 400, 'A recent project ID is required.'); return;
+                }
+                const selected = (await projects.list()).find(project => createHash('sha256').update(project.rootPath).digest('hex') === body.id);
+                if (!selected) { sendText(response, 404, 'Recent project not found.'); return; }
+                await projects.forget(selected.rootPath);
+                sendJson(response, 200, { recentProjects: await recentProjectsProjection(projects) });
                 return;
             }
 
@@ -805,6 +823,27 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                 return;
             }
 
+            if (url.pathname === '/api/page-analysis') {
+                if (!requireRequestToken(request, response, requestToken)) return;
+                const boundRoot = rootPath, boundWorkspace = workspace;
+                if (projectChanging || request.headers?.['x-math-workspace-project'] !== createHash('sha256').update(boundRoot).digest('hex')) {
+                    sendText(response, 409, 'The page project changed. Refresh the Reader.'); return;
+                }
+                const filePath = url.searchParams.get('path') || '';
+                if (!snapshot.documents.has(filePath)) { sendText(response, 404, 'Markdown page not found.'); return; }
+                const analyzed = await boundWorkspace.completeLeanAnalysis();
+                if (rootPath !== boundRoot || workspace !== boundWorkspace || projectChanging) {
+                    sendText(response, 409, 'The page project changed. Refresh the Reader.'); return;
+                }
+                const content = analyzed.documents.get(filePath);
+                if (content === undefined) { sendText(response, 409, 'The page changed during analysis.'); return; }
+                sendJson(response, 200, { revision: analyzed.revision, filePath,
+                    sourceHash: createHash('sha256').update(content).digest('hex'), analysisPending: analyzed.state.analysisPending,
+                    dependencyMarkers: projectReaderDependencyMarkers(analyzed.state.dependencyGraph, filePath, analyzed.state.leanIndex),
+                    leanSummary: analyzed.state.leanIndex?.summary || {}, issues: analyzed.state.issues });
+                return;
+            }
+
             if (['/api/page-changes', '/api/file-changes', '/api/page-before', '/api/search'].includes(url.pathname)) {
                 if (!requireRequestToken(request, response, requestToken)) return;
                 const boundRoot = rootPath;
@@ -851,6 +890,7 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
                     page: rawPage ? decoratePage(rawPage, snapshot.state.config, snapshot.state.documentState?.lifecycles?.[filePath]) : undefined,
                     content,
                     sourceHash: createHash('sha256').update(content).digest('hex'),
+                    analysisPending: snapshot.state.analysisPending === true,
                     labels: labelsForContent(snapshot, [content, ...symbols.map(symbol => symbol.meaning)].join('\n')),
                     dependencyMarkers: projectReaderDependencyMarkers(snapshot.state.dependencyGraph, filePath, snapshot.state.leanIndex),
                     symbols
@@ -904,7 +944,12 @@ export async function startReaderServer(options: FormalReaderServerOptions): Pro
 
             if (url.pathname === '/api/lean') {
                 const id = url.searchParams.get('id') || '';
-                const anchor = snapshot.state.leanIndex?.anchors?.[id];
+                const boundRoot = rootPath, boundWorkspace = workspace;
+                const analyzed = await boundWorkspace.completeLeanAnalysis();
+                if (rootPath !== boundRoot || workspace !== boundWorkspace || projectChanging) {
+                    sendText(response, 409, 'The Lean project changed. Refresh the Reader.'); return;
+                }
+                const anchor = analyzed.state.leanIndex?.anchors?.[id];
                 if (!anchor) {
                     sendText(response, 404, 'Lean anchor not found.');
                     return;

@@ -8,6 +8,7 @@ const os = require('node:os');
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const cache = new Map<string, ReaderGitChanges>();
+const blobComparisons = new Map<string, boolean>();
 const environment = () => ({ ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))), GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1' });
 function git(cwd: string, args: string[], input?: string): Promise<{ code: number; stdout: string }> {
     return new Promise(resolve => {
@@ -41,7 +42,7 @@ export async function readReaderGitFileChanges(root: string, documents: Map<stri
         }
         const trackedPaths = new Set(tracked.stdout.split('\0'));
         const files: ReaderGitFileChanges['files'] = {};
-        const comparisons: Array<{ filePath: string; content: string; blob: string }> = [];
+        const comparisons: Array<{ filePath: string; content: string; blob: string; key: string }> = [];
         const newPaths: string[] = [];
         for (const [filePath, content] of documents) {
             if (!filePath || path.isAbsolute(filePath) || filePath.split(/[\\/]/).some(part => part === '..')) continue;
@@ -49,7 +50,12 @@ export async function readReaderGitFileChanges(root: string, documents: Map<stri
             if (blob) {
                 const blobHash = (text: string) => createHash(blob.length === 64 ? 'sha256' : 'sha1')
                     .update(`blob ${Buffer.byteLength(text, 'utf8')}\0`).update(text).digest('hex');
-                if (blob !== blobHash(content) && blob !== blobHash(content.replace(/\r\n/g, '\n'))) comparisons.push({ filePath, content, blob });
+                const contentHash = blobHash(content.replace(/\r\n/g, '\n'));
+                if (blob !== blobHash(content) && blob !== contentHash) {
+                    const key = `${blob}:${contentHash}`, known = blobComparisons.get(key);
+                    if (known === true) files[filePath] = 'modified';
+                    else if (known === undefined) comparisons.push({ filePath, content, blob, key });
+                }
             } else if (trackedPaths.has(filePath)) files[filePath] = 'added';
             else newPaths.push(filePath);
         }
@@ -73,7 +79,10 @@ export async function readReaderGitFileChanges(root: string, documents: Map<stri
                 const size = Number(header[1]), body = end + 1;
                 if (body + size >= bytes.length || bytes[body + size] !== 10) return unavailable;
                 const previous = bytes.subarray(body, body + size).toString('utf8');
-                if (previous.replace(/\r\n/g, '\n') !== item.content.replace(/\r\n/g, '\n')) files[item.filePath] = 'modified';
+                const modified = previous.replace(/\r\n/g, '\n') !== item.content.replace(/\r\n/g, '\n');
+                blobComparisons.set(item.key, modified);
+                if (blobComparisons.size > 256) blobComparisons.delete(blobComparisons.keys().next().value!);
+                if (modified) files[item.filePath] = 'modified';
                 offset = body + size + 1;
             }
         }

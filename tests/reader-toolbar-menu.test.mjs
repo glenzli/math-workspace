@@ -138,11 +138,13 @@ export async function readerToolbarHarness(options = {}) {
     document.body = document.createElement('body'); document.body.parent = document; document.activeElement = document.body;
     const previousDocument = globalThis.document; globalThis.document = document;
     const window = new EventTarget(); window.innerWidth = 320; window.innerHeight = 700;
+    window.getSelection = () => undefined;
     window.matchMedia = () => ({ matches: false });
     const timers = new Map(); let timerSequence = 0;
     window.setTimeout = (run, delay) => { const id = ++timerSequence; timers.set(id, { run, delay }); return id; };
     window.clearTimeout = id => timers.delete(id);
     window.requestAnimationFrame = () => 1;
+    window.cancelAnimationFrame = () => {};
     class Owner {
         opened = false; openCount = 0;
         constructor(...args) { this.host = args.at(-1); }
@@ -196,7 +198,7 @@ export async function readerToolbarHarness(options = {}) {
         if (file === 'main.ts') source = source.replace(/\nstartReader\(\);\s*$/, '\n');
         const exports = {};
         vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText + expose,
-            { exports, require: name => modules[name] || {}, document, window, Element, HTMLElement: Element, HTMLInputElement: Element, Node: Element, URLSearchParams, console, AbortController, Reflect,
+            { exports, require: name => modules[name] || {}, document, window, Element, HTMLElement: Element, HTMLInputElement: Element, Node: Element, URL, URLSearchParams, console, AbortController, Reflect,
                 crypto: options.withoutWebCrypto ? undefined : globalThis.crypto, TextEncoder, setTimeout: window.setTimeout, clearTimeout: window.clearTimeout,
                 localStorage: { setItem() {} }, requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
         modules[name] = exports; return exports;
@@ -205,10 +207,16 @@ export async function readerToolbarHarness(options = {}) {
     await load('reader-popover.ts', './reader-popover');
     await load('reader-toolbar-menu.ts', './reader-toolbar-menu');
     await load('reader-uncommitted.ts', './reader-uncommitted');
+    await load('reader-page-analysis.ts', './reader-page-analysis');
     await load('reader-search.ts', './reader-search');
+    await load('reader-change-preview.ts', './reader-change-preview');
     await load('reader-change-navigation.ts', './reader-change-navigation');
     await load('reader-toolbar-panel.ts', './reader-toolbar-panel');
     await load('reader-create-page.ts', './reader-create-page');
+    if (options.sourceActions) {
+        await load('reader-references.ts', './reader-references');
+        await load('source-actions.ts', './source-actions');
+    }
     if (options.publication) {
         await load('../../../packages/core/src/project-metadata.ts', '../../../packages/core/src/project-metadata');
         await load('../../publication/matter.ts', '../../publication/matter');

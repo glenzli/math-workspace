@@ -5,8 +5,10 @@ import { defaultProjectStateFilePath } from './local-state';
 const os = require('node:os');
 const nodeFs = require('node:fs');
 const { spawn } = require('node:child_process');
+const { randomBytes } = require('node:crypto');
 
 const MAX_RECENT_PROJECTS = 12;
+const pendingUpdates = new Map<string, Promise<void>>();
 
 export interface ReaderProjectRecord {
     rootPath: string;
@@ -68,7 +70,7 @@ export class ReaderProjectRegistry {
     private readonly chooseDirectory: () => Promise<string | undefined>;
 
     constructor(options: ReaderProjectRegistryOptions = {}) {
-        this.stateFilePath = options.stateFilePath || process.env.MATH_WORKSPACE_STATE || defaultProjectStateFilePath();
+        this.stateFilePath = path.resolve(options.stateFilePath || process.env.MATH_WORKSPACE_STATE || defaultProjectStateFilePath());
         this.chooseDirectory = options.chooseDirectory || chooseProjectDirectory;
     }
 
@@ -101,15 +103,33 @@ export class ReaderProjectRegistry {
             rootName: path.basename(canonicalPath),
             openedAt: new Date().toISOString()
         };
-        const previous = await this.readStored();
-        const projects = [record, ...previous.filter(item => item.rootPath !== canonicalPath)].slice(0, MAX_RECENT_PROJECTS);
         try {
-            await fs.mkdir(path.dirname(this.stateFilePath), { recursive: true });
-            await fs.writeFile(this.stateFilePath, JSON.stringify({ version: 1, projects }, null, 2) + '\n', 'utf8');
+            await this.updateStored(previous => [record, ...previous.filter(item => item.rootPath !== canonicalPath)].slice(0, MAX_RECENT_PROJECTS));
         } catch (error) {
             console.warn(`[math-workspace] Could not save Math Workspace recent projects: ${error instanceof Error ? error.message : String(error)}`);
         }
         return record;
+    }
+
+    async forget(rootPath: string): Promise<void> {
+        const resolvedPath = await nodeFs.promises.realpath(path.resolve(rootPath)).catch(() => path.resolve(rootPath));
+        await this.updateStored(previous => previous.filter(item => path.resolve(item.rootPath) !== resolvedPath));
+    }
+
+    private async updateStored(update: (previous: ReaderProjectRecord[]) => ReaderProjectRecord[]): Promise<void> {
+        const next = (pendingUpdates.get(this.stateFilePath) || Promise.resolve()).then(async () => {
+            const projects = update(await this.readStored());
+            await fs.mkdir(path.dirname(this.stateFilePath), { recursive: true });
+            const temporary = `${this.stateFilePath}.${randomBytes(8).toString('hex')}.tmp`;
+            try {
+                await fs.writeFile(temporary, JSON.stringify({ version: 1, projects }, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' });
+                await nodeFs.promises.rename(temporary, this.stateFilePath);
+            } finally { await fs.rm(temporary, { force: true }); }
+        });
+        const settled = next.then(() => {}, () => {});
+        pendingUpdates.set(this.stateFilePath, settled);
+        void settled.then(() => { if (pendingUpdates.get(this.stateFilePath) === settled) pendingUpdates.delete(this.stateFilePath); });
+        return next;
     }
 
     private async isFormalProject(rootPath: string): Promise<boolean> {

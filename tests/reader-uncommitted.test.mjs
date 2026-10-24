@@ -19,7 +19,15 @@ export async function testReaderUncommitted() {
     const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'reader-uncommitted-contracts-'));
     try {
         await build({ entryPoints: [path.join(root, 'src/reader/git-changes.ts')], outfile: path.join(temporary, 'git.cjs'), bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent' });
-        const { readReaderGitChanges: read, readReaderGitFileChanges: readFiles, readReaderGitPrevious: before } = require(path.join(temporary, 'git.cjs'));
+        const childProcess = require('node:child_process'), originalExec = childProcess.execFile;
+        let blobBatches = 0;
+        childProcess.execFile = (command, args, ...rest) => {
+            if (command === 'git' && args.includes('--batch')) blobBatches++;
+            return originalExec(command, args, ...rest);
+        };
+        let api;
+        try { api = require(path.join(temporary, 'git.cjs')); } finally { childProcess.execFile = originalExec; }
+        const { readReaderGitChanges: read, readReaderGitFileChanges: readFiles, readReaderGitPrevious: before } = api;
         const repo = path.join(temporary, 'project'); await fs.mkdir(repo); git(repo, 'init', '-q');
         git(repo, 'config', 'user.name', 'Reader fixture'); git(repo, 'config', 'user.email', 'reader@example.invalid');
         const name = 'book/chapter.md'; await fs.mkdir(path.join(repo, 'book'));
@@ -40,6 +48,9 @@ export async function testReaderUncommitted() {
         assert.ok(previous.hunks.some(hunk => hunk.beforeCount === 2 && hunk.count === 0), 'Deletion navigation retains the old source position.');
         assert.equal((await before(repo, name, initial)).status, 'stale');
         assert.deepEqual((await readFiles(repo, new Map([[name, working]]))).files, { [name]: 'modified' });
+        const checkedBatches = blobBatches;
+        assert.deepEqual((await readFiles(repo, new Map([[name, working]]))).files, { [name]: 'modified' });
+        assert.equal(blobBatches, checkedBatches, 'Unchanged snapshot bytes reuse the committed-blob comparison on later polls.');
         assert.deepEqual((await put(initial)).ranges, [], 'Staged changes cancelled in the working tree are not falsely marked.');
         assert.deepEqual((await readFiles(repo, new Map([[name, initial]]))).files, {}, 'File badges follow rendered bytes even when the index differs.');
         assert.deepEqual((await readFiles(repo, new Map([[name, initial.replace(/\n/g, '\r\n')]]))).files, {}, 'CRLF alone does not create a file badge.');
@@ -115,12 +126,16 @@ async function fileUiContracts() {
         toggle(); await drain();
         const changed = find('[data-page-path="book/01.md"]'), added = find('[data-page-path="book/02.md"]');
         assert.ok(changed.querySelector('.reader-file-change'), 'Changed files receive a compact badge.');
-        assert.equal(changed.querySelector('.reader-file-change').textContent, '•');
-        assert.equal(added.querySelector('.reader-file-change').textContent, '+');
+        assert.equal(changed.querySelector('.reader-file-change').textContent, '', 'The dot is drawn without a text glyph.');
+        const titleGroup = changed.querySelector('.reader-nav-page-title');
+        assert.deepEqual(titleGroup.children, [changed.querySelector('.reader-nav-page-label'), changed.querySelector('.reader-file-change')], 'The change dot follows the title inside its text group.');
+        assert.equal(changed.children[0], titleGroup);
+        assert.equal(titleGroup.contains(changed.querySelector('.reader-page-integration')), false, 'Status icons stay after the title and its dot.');
+        assert.equal(added.querySelector('.reader-file-change').classList.contains('is-added'), true);
         assert.match(changed.getAttribute('aria-label'), /未提交修改/);
-        assert.equal(header.querySelector('.reader-file-change').textContent, '•');
+        assert.ok(header.querySelector('.reader-file-change'));
         app.openTitleNavigation(app.pageTitle);
-        assert.equal(find('[data-chapter-path="book/02.md"]').querySelector('.reader-file-change').textContent, '+');
+        assert.equal(find('[data-chapter-path="book/02.md"]').querySelector('.reader-file-change').dataset.readerTooltip, '新增文件（未提交）');
         h.preferences.setLanguage('en'); app.uncommitted.updateLanguage();
         assert.equal(changed.querySelector('.reader-file-change').dataset.readerTooltip, 'Uncommitted changes');
         assert.match(added.getAttribute('aria-label'), /New file/);
@@ -162,8 +177,7 @@ async function uiContracts() {
         assert.equal(find('#reader-category-menu').hidden, false); assert.equal(find('#reader-uncommitted').getAttribute('aria-checked'), 'true');
         assert.equal(paragraph.classList.contains('has-uncommitted-change'), true); assert.equal(heading.classList.contains('has-uncommitted-change'), false);
         assert.equal(find('#reader-uncommitted-status').textContent, '2 处', 'Embedded views work without Web Crypto and visibly report rendered markers.');
-        assert.equal(app.article.querySelectorAll('.reader-change-marker').length, 2);
-        assert.ok(app.article.querySelectorAll('.reader-change-marker').every(marker => marker.parentElement === app.article), 'Gutter markers remain outside scrolling source blocks.');
+        assert.equal(app.article.querySelectorAll('.reader-change-marker').length, 0, 'Prose tint leaves the dependency gutter free of change markers.');
         assert.equal(unchanged.classList.contains('has-uncommitted-change'), false); assert.equal(unchanged.classList.contains('has-uncommitted-deletion'), true);
         assert.equal(paragraph.textContent, 'A changed paragraph.'); assert.match(paragraph.dataset.readerTooltip, /3/);
         const requests = h.createRequests.length; h.preferences.setLanguage('en'); app.uncommitted.updateLanguage();

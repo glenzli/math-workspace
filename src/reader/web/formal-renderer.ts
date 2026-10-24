@@ -216,6 +216,24 @@ export function bindFormalInterfaceLabels(container: HTMLElement, markers: Recor
     });
 }
 
+/** Add late Lean controls in place, preserving text selections, formulas and scroll position. */
+export function updateFormalLeanMarkers(container: HTMLElement, markers: Record<string, ReaderDependencyMarker>, language: () => 'zh' | 'en'): void {
+    for (const [id, marker] of Object.entries(markers)) {
+        const anchor = container.querySelector<HTMLElement>('#formal-' + id);
+        if (!anchor) continue;
+        let badge = anchor.querySelector<HTMLElement>('[data-reader-lean-anchor]');
+        if (!(marker.leanDeclarationCount > 0)) { badge?.remove(); continue; }
+        if (!badge) {
+            badge = document.createElement('button');
+            badge.setAttribute('type', 'button'); badge.className = 'reader-lean-anchor';
+            badge.dataset.readerLeanAnchor = id; badge.textContent = 'Lean';
+            const title = anchor.querySelector('strong');
+            if (title) title.after(badge); else anchor.append(badge);
+        }
+    }
+    bindFormalInterfaceLabels(container, markers, language);
+}
+
 function hasOddBackslashPrefix(value: string, index: number): boolean {
     let count = 0;
     for (let cursor = index - 1; cursor >= 0 && value[cursor] === '\\'; cursor--) count++;

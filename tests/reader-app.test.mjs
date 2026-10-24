@@ -166,6 +166,15 @@ export async function testReaderApps() {
         assert.ok(!released.isError || /Reader view not found/.test(released.content[0].text));
         assert.equal((await client.callTool({ name: 'reader_request', arguments: { viewKey: first, route: '/api/state' } })).isError, true);
         assert.equal((await request(second, '/api/state')).status, 200);
+        const cleanupKey = 'd'.repeat(32); await open(cleanupKey, { launcher: true });
+        const cleanup = await json(cleanupKey, '/api/state');
+        const removed = cleanup.recentProjects.find(project => project.rootName === 'second');
+        const removal = await request(cleanupKey, '/api/projects/recent/remove', { method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-math-workspace-token': cleanup.requestToken }, body: JSON.stringify({ id: removed.id }) });
+        assert.equal(removal.status, 200);
+        assert.ok(!JSON.parse(removal.text).recentProjects.some(project => project.id === removed.id));
+        assert.ok(!(await json(cleanupKey, '/api/state')).recentProjects.some(project => project.id === removed.id), 'The packaged app persists recent-project removal.');
+        assert.equal((await json(second, '/api/state')).rootName, 'second', 'Removing history leaves an already open Reader bound to its project.');
     } finally {
         await client.close(); await fs.rm(temporary, { recursive: true, force: true });
     }

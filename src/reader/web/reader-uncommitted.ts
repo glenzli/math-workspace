@@ -4,8 +4,8 @@ interface Page { filePath: string; sourceHash?: string; project: string; token: 
 interface Project { project: string; token: string; revision: number }
 type Request = (route: string, options?: RequestInit) => Promise<Response>;
 const words = {
-    zh: { label: '未提交修改', hint: '用淡底色和侧线标记正文修改，在目录与页眉显示文件标记（相对最近一次 Git 提交，含暂存内容）', modified: '未提交修改', added: '新增文件（未提交）', changed: '未提交修改：源码行', deleted: '此处附近删除了源码行', 'not-git': '非 Git 项目', ignored: '稿件已忽略', unavailable: '读取失败', stale: '等待刷新', loading: '检查中…', outdated: '需重启服务', outdatedHint: 'Reader 服务版本较旧，请重启服务；在 Codex 中需重启客户端，再打开 Math Workspace', waiting: '请先打开稿件', clean: '无修改', invisible: '无可见修改', count: (count: number) => `${count} 处` },
-    en: { label: 'Uncommitted changes', hint: 'Tint changed prose and mark files in navigation and the header since the latest Git commit, including staged edits', modified: 'Uncommitted changes', added: 'New file (uncommitted)', changed: 'Uncommitted changes: source lines', deleted: 'Source lines deleted near here', 'not-git': 'No Git repository', ignored: 'Manuscript ignored', unavailable: 'Read failed', stale: 'Awaiting refresh', loading: 'Checking…', outdated: 'Restart Reader', outdatedHint: 'The Reader service is outdated. Restart it; in Codex, restart the client and reopen Math Workspace', waiting: 'Open a manuscript first', clean: 'No changes', invisible: 'No visible changes', count: (count: number) => `${count} marked` }
+    zh: { label: '未提交修改', hint: '用淡琥珀金底标记正文修改，在目录与页眉的文件名旁显示同色空心标记（相对最近一次 Git 提交，含暂存内容）', modified: '未提交修改', added: '新增文件（未提交）', changed: '未提交修改：源码行', deleted: '此处附近删除了源码行', 'not-git': '非 Git 项目', ignored: '稿件已忽略', unavailable: '读取失败', stale: '等待刷新', loading: '检查中…', outdated: '需重启服务', outdatedHint: 'Reader 服务版本较旧，请重启服务；在 Codex 中需重启客户端，再打开 Math Workspace', waiting: '请先打开稿件', clean: '无修改', invisible: '无可见修改', count: (count: number) => `${count} 处` },
+    en: { label: 'Uncommitted changes', hint: 'Use a faint amber-gold tint on changed prose and matching rings beside file titles since the latest Git commit, including staged edits', modified: 'Uncommitted changes', added: 'New file (uncommitted)', changed: 'Uncommitted changes: source lines', deleted: 'Source lines deleted near here', 'not-git': 'No Git repository', ignored: 'Manuscript ignored', unavailable: 'Read failed', stale: 'Awaiting refresh', loading: 'Checking…', outdated: 'Restart Reader', outdatedHint: 'The Reader service is outdated. Restart it; in Codex, restart the client and reopen Math Workspace', waiting: 'Open a manuscript first', clean: 'No changes', invisible: 'No visible changes', count: (count: number) => `${count} marked` }
 };
 
 /** Owns opt-in markers and their page-bound polling; never rewrites rendered content. */
@@ -20,15 +20,13 @@ export class ReaderUncommittedChanges {
     private abort?: AbortController;
     private latest?: ReaderGitChanges;
     private status?: 'loading' | 'unavailable' | 'outdated' | 'stale';
-    private marked = new Map<HTMLElement, { tooltip: string | null; marker: HTMLElement }>();
-    private resize?: ResizeObserver;
+    private marked = new Map<HTMLElement, { tooltip: string | null }>();
     private paused = false;
     private readonly onClick = () => this.setEnabled(!this.enabled);
     private readonly onVisibility = () => { if (document.visibilityState !== 'hidden') void this.refresh(); };
     constructor(private article: HTMLElement, private button: HTMLElement, private language: () => 'zh' | 'en', private request: Request, private markersChanged: () => void = () => {}, private filesChanged: () => void = () => {}) {
         button.addEventListener('click', this.onClick);
         document.addEventListener('visibilitychange', this.onVisibility);
-        if (typeof ResizeObserver !== 'undefined') { this.resize = new ResizeObserver(() => this.markersChanged()); this.resize.observe(article); }
         this.updateLanguage();
     }
     bind(page?: Page): void {
@@ -52,7 +50,6 @@ export class ReaderUncommittedChanges {
         const kind = this.latestFiles!.files[filePath];
         const badge = document.createElement('span');
         badge.className = 'reader-file-change is-' + kind;
-        badge.textContent = kind === 'added' ? '+' : '•';
         badge.setAttribute('aria-hidden', 'true');
         badge.setAttribute('data-reader-tooltip', label);
         return badge;
@@ -61,6 +58,7 @@ export class ReaderUncommittedChanges {
         return [...this.marked.keys()].sort((a, b) => Number(a.dataset.sourceStartLine || 0) - Number(b.dataset.sourceStartLine || 0));
     }
     hasChanges(): boolean { return this.enabled && this.latest?.status === 'ready' && !!(this.latest.ranges.length || this.latest.deletions.length); }
+    baselineCommit(): string | undefined { return this.enabled && this.latest?.status === 'ready' ? this.latest.commit : undefined; }
     private setFiles(value: ReaderGitFileChanges | undefined): void {
         if (JSON.stringify(this.latestFiles) === JSON.stringify(value)) return;
         this.latestFiles = value; this.filesChanged();
@@ -74,7 +72,6 @@ export class ReaderUncommittedChanges {
     dispose(): void {
         this.enabled = false; this.bind(); this.bindProject(); this.button.removeEventListener('click', this.onClick);
         document.removeEventListener('visibilitychange', this.onVisibility);
-        this.resize?.disconnect();
     }
     updateLanguage(): void {
         const w = words[this.language()];
@@ -94,26 +91,14 @@ export class ReaderUncommittedChanges {
         ++this.generation; this.abort?.abort(); this.abort = undefined;
         if (this.timer !== undefined) clearTimeout(this.timer); this.timer = undefined;
     }
-    private clear(): void {
-        for (const [element, { tooltip, marker }] of this.marked) {
-            marker.remove();
+    private clear(notify = true): void {
+        for (const [element, { tooltip }] of this.marked) {
             element.classList.remove('has-uncommitted-change', 'has-uncommitted-deletion');
             delete element.dataset.uncommittedLines; delete element.dataset.uncommittedDeleted;
             if (tooltip === null) element.removeAttribute('data-reader-tooltip'); else element.setAttribute('data-reader-tooltip', tooltip);
         }
         this.marked.clear();
-        this.markersChanged();
-    }
-    alignMarkers(): void {
-        if (!this.marked.size) return;
-        const articleBounds = this.article.getBoundingClientRect();
-        const left = (Number.parseFloat(getComputedStyle(this.article).paddingLeft) || 0) - 13;
-        for (const [element, { marker }] of this.marked) {
-            const bounds = element.getBoundingClientRect(), styles = getComputedStyle(element);
-            const offset = element.matches('.reader-formula.is-display') ? (bounds.height - 16) / 2
-                : ((Number.parseFloat(styles.lineHeight) || 16) - 16) / 2 + (Number.parseFloat(styles.paddingTop) || 0);
-            marker.style.left = left + 'px'; marker.style.top = (bounds.top - articleBounds.top + Math.max(0, offset)) + 'px';
-        }
+        if (notify) this.markersChanged();
     }
     private async refresh(): Promise<void> {
         this.cancel();
@@ -137,7 +122,8 @@ export class ReaderUncommittedChanges {
             // The page API hashes the exact rendered bytes; opaque hosts need no Web Crypto API.
             this.latest = page.sourceHash && changes.filePath === page.filePath && changes.sourceHash === page.sourceHash ? changes : undefined;
             this.status = !page.sourceHash ? 'outdated' : this.latest ? undefined : 'stale';
-            this.clear(); this.updateLanguage();
+            if (!this.latest) this.clear(false);
+            this.updateLanguage();
         } catch {
             if (current()) { this.latest = undefined; this.status = 'unavailable'; this.clear(); this.updateLanguage(); }
         } finally {
@@ -156,21 +142,16 @@ export class ReaderUncommittedChanges {
         } catch { if (current()) { this.fileStatus = 'unavailable'; this.setFiles(undefined); this.updateLanguage(); } }
     }
     private apply(changes: ReaderGitChanges): void {
-        this.clear();
-        if (changes.status !== 'ready') return;
+        this.clear(false);
+        if (changes.status !== 'ready') { this.markersChanged(); return; }
         const w = words[this.language()];
         const blocks = Array.from(this.article.querySelectorAll<HTMLElement>('[data-source-start-line]')).map(element => ({ element, start: Number(element.dataset.sourceStartLine), end: Number(element.dataset.sourceEndLine || element.dataset.sourceStartLine) })).filter(block => block.start > 0 && block.end >= block.start);
         const affected = blocks.filter(block => changes.ranges.some(range => range.startLine <= block.end && range.endLine >= block.start));
         const mark = (element: HTMLElement, label: string) => {
             let entry = this.marked.get(element);
             if (!entry) {
-                const marker = document.createElement('span'); marker.className = 'reader-change-marker'; marker.setAttribute('aria-hidden', 'true');
-                // A direct article child stays outside scrolling formulas, tables and code blocks.
-                this.article.append(marker); entry = { tooltip: element.getAttribute('data-reader-tooltip'), marker }; this.marked.set(element, entry);
+                entry = { tooltip: element.getAttribute('data-reader-tooltip') }; this.marked.set(element, entry);
             }
-            entry.marker.classList.toggle('is-deletion', element.classList.contains('has-uncommitted-deletion'));
-            entry.marker.classList.toggle('has-replacement', element.classList.contains('has-uncommitted-change'));
-            entry.marker.setAttribute('data-reader-tooltip', label);
             element.setAttribute('data-reader-tooltip', label);
         };
         for (const block of affected) {

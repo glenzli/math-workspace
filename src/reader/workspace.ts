@@ -50,7 +50,7 @@ async function collectMarkdownFiles(rootPath: string, config: any, directory = r
         const absolutePath = path.join(directory, entry.name);
         const relativePath = toPosix(path.relative(rootPath, absolutePath));
         if (entry.isDirectory()) {
-            if (!shouldExcludeScanPath(relativePath, config)) {
+            if (entry.name !== '.lake' && !shouldExcludeScanPath(relativePath, config)) {
                 await collectMarkdownFiles(rootPath, config, absolutePath, files, budget);
             }
             continue;
@@ -78,7 +78,7 @@ async function collectDraftMarkdownFiles(rootPath: string, config: any, director
         const relativePath = toPosix(path.relative(rootPath, absolutePath));
         if (entry.isDirectory()) {
             const collectionCouldContain = collections.some((collection: any) => collectionMayContainPath(relativePath, collection));
-            if (collectionCouldContain || !shouldExcludeScanPath(relativePath, config)) {
+            if (collectionCouldContain) {
                 await collectDraftMarkdownFiles(rootPath, config, absolutePath, files, budget);
             }
             continue;
@@ -106,7 +106,7 @@ async function readIndex(rootPath: string, name: 'definitions' | 'symbols'): Pro
 }
 
 /** Produce the Reader/MCP scan without generating or modifying source documents. */
-export async function loadWorkspaceSnapshot(rootPath: string, revision = 1): Promise<WorkspaceSnapshot> {
+export async function loadWorkspaceSnapshot(rootPath: string, revision = 1, options: { deferLean?: boolean } = {}): Promise<WorkspaceSnapshot> {
     const resolvedRoot = path.resolve(rootPath);
     const config = await readConfig(resolvedRoot);
     const [formalFiles, draftFiles] = await Promise.all([
@@ -142,8 +142,9 @@ export async function loadWorkspaceSnapshot(rootPath: string, revision = 1): Pro
         };
     });
     formalState.pages = sortManuscriptPages([...formalState.pages, ...draftPages], 'workspace');
-    const leanIndex = await scanLeanWorkspace(resolvedRoot, config, formalState.labels, formalState.dependencyGraph);
-    formalState.issues.push(...leanIndex.diagnostics.map(diagnostic => ({
+    const analysisPending = options.deferLean && config.lean?.projects?.length > 0;
+    const leanIndex = analysisPending ? undefined : await scanLeanWorkspace(resolvedRoot, config, formalState.labels, formalState.dependencyGraph);
+    formalState.issues.push(...(leanIndex?.diagnostics || []).map(diagnostic => ({
         severity: diagnostic.severity,
         code: diagnostic.code,
         file: diagnostic.file,
@@ -155,6 +156,7 @@ export async function loadWorkspaceSnapshot(rootPath: string, revision = 1): Pro
         refreshedAt: new Date().toISOString(),
         state: {
             ...formalState,
+            analysisPending: !!analysisPending,
             leanIndex,
             documentState: await readDocumentState(resolvedRoot, config, new Map(documents.map(document => [document.filePath, document.content])))
         },
@@ -173,8 +175,9 @@ export class ReaderWorkspace {
     private readonly listeners = new Set<(change: WorkspaceChange) => void>();
     private readonly pendingChangedPaths = new Set<string>();
     private readonly pendingMetadataPaths = new Set<string>();
+    private leanAnalysis?: { documents: Map<string, string>; promise: Promise<WorkspaceSnapshot> };
 
-    constructor(readonly rootPath: string) {}
+    constructor(readonly rootPath: string, private readonly options: { deferLean?: boolean } = {}) {}
 
     async start(): Promise<void> {
         this.closed = false;
@@ -224,6 +227,29 @@ export class ReaderWorkspace {
     current(): WorkspaceSnapshot {
         if (!this.snapshot) throw new Error('Math Workspace is not ready.');
         return this.snapshot;
+    }
+
+    /** Optional Lean facts share the source snapshot, without delaying the first readable page.
+     * A source refresh owns a new document map; an older analysis can never replace it. */
+    async completeLeanAnalysis(): Promise<WorkspaceSnapshot> {
+        const source = this.current();
+        if (this.closed || !source.state.analysisPending) return source;
+        if (this.leanAnalysis?.documents === source.documents) return this.leanAnalysis.promise;
+        const job = { documents: source.documents, promise: undefined as Promise<WorkspaceSnapshot> };
+        job.promise = (async () => {
+            const leanIndex = await scanLeanWorkspace(this.rootPath, source.state.config, source.state.labels, source.state.dependencyGraph);
+            const current = this.current();
+            if (!this.closed && current.documents === source.documents) {
+                this.snapshot = { ...current, state: { ...current.state, leanIndex, analysisPending: false,
+                    issues: [...current.state.issues, ...leanIndex.diagnostics.map(diagnostic => ({
+                        severity: diagnostic.severity, code: diagnostic.code, file: diagnostic.file,
+                        line: diagnostic.line, message: diagnostic.message
+                    }))] } };
+            }
+            return this.current();
+        })().finally(() => { if (this.leanAnalysis === job) this.leanAnalysis = undefined; });
+        this.leanAnalysis = job;
+        return job.promise;
     }
 
     async reload(): Promise<WorkspaceSnapshot> {
@@ -350,7 +376,7 @@ export class ReaderWorkspace {
                 this.refreshQueued = false;
                 const changedPaths = Array.from(this.pendingChangedPaths).sort();
                 this.pendingChangedPaths.clear();
-                const refreshed = await loadWorkspaceSnapshot(this.rootPath, (this.snapshot?.revision || 0) + 1);
+                const refreshed = await loadWorkspaceSnapshot(this.rootPath, (this.snapshot?.revision || 0) + 1, this.options);
                 // A metadata-only notification may have advanced the revision during this scan.
                 refreshed.revision = (this.snapshot?.revision || 0) + 1;
                 this.snapshot = refreshed;

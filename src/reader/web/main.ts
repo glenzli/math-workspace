@@ -17,6 +17,7 @@ import { ReaderChangeNavigation } from './reader-change-navigation';
 import {
     createFormalRenderer,
     bindFormalInterfaceLabels,
+    updateFormalLeanMarkers,
     renderFormalDocument,
     renderFormalInline,
     renderReaderFormula,
@@ -35,10 +36,11 @@ import { ReaderRecallPopover } from './recall-popover';
 import { ReaderDependencyPopover } from './reader-dependency-popover';
 import { ReaderLeanPopover, type ReaderLeanAnchorPayload } from './reader-lean-popover';
 import { leanAssistanceUpdatePaths, ReaderLeanReview } from './reader-lean-review';
-import { readerIcon, replaceReaderButtonIcon, type ReaderIconName } from './reader-icons';
+import { readerIcon, readerIconAction, replaceReaderButtonIcon, type ReaderIconName } from './reader-icons';
 import { ReaderToolbarPanel } from './reader-toolbar-panel';
 import { ReaderToolbarMenu } from './reader-toolbar-menu';
 import { ReaderUncommittedChanges } from './reader-uncommitted';
+import { ReaderPageAnalysis } from './reader-page-analysis';
 import { ReaderPropositionReview, type ReaderPropositionReviewItem } from './reader-proposition-review';
 import { ReaderTooltip } from './reader-tooltip';
 import {
@@ -68,8 +70,9 @@ interface ReaderState {
     definitions: DefinitionSummary[];
     issues: Array<{ severity: string; code: string; message: string }>;
     leanSummary?: Record<string, number>;
+    analysisPending?: boolean;
     requestToken?: string;
-    recentProjects?: Array<{ index: number; rootName: string; openedAt: string }>;
+    recentProjects?: Array<{ id: string; index: number; rootName: string; openedAt: string }>;
 }
 
 interface ReaderPagePayload {
@@ -78,6 +81,7 @@ interface ReaderPagePayload {
     page?: ReaderPage;
     content: string;
     sourceHash?: string;
+    analysisPending?: boolean;
     labels: Record<string, ReaderLabel>;
     dependencyMarkers?: Record<string, ReaderDependencyMarker>;
     formulas?: ReaderFormula[];
@@ -223,6 +227,7 @@ const words = {
         restoreFormula: '恢复原公式排版',
         adaptingFormula: '正在调整公式排版…',
         copySelectedMarkdown: '复制选中 Markdown',
+        comparePrevious: '对比旧稿',
         copySourceLines: '复制所在行 Markdown',
         lookupDefinition: '查定义',
         copied: '已复制',
@@ -232,6 +237,8 @@ const words = {
         fontSize: '正文大小',
         chooseProject: '选择项目目录',
         recentProjects: '最近打开的项目',
+        removeRecentProject: (name: string) => `从最近打开移除“${name}”`,
+        removeRecentProjectFailed: '暂时无法移除这条记录，请重试。',
         noRecentProjects: '还没有最近打开的项目。',
         noMainPages: '项目中暂无正文页面。可展开目录中的草稿区，选择草稿。',
         noMarkdownPages: '项目中暂无 Markdown 页面。',
@@ -411,6 +418,7 @@ const words = {
         restoreFormula: 'Restore original formula layout',
         adaptingFormula: 'Adapting formula…',
         copySelectedMarkdown: 'Copy selected Markdown',
+        comparePrevious: 'Compare previous content',
         copySourceLines: 'Copy source lines',
         lookupDefinition: 'Find definition',
         copied: 'Copied',
@@ -420,6 +428,8 @@ const words = {
         fontSize: 'Text size',
         chooseProject: 'Choose project folder',
         recentProjects: 'Recent projects',
+        removeRecentProject: (name: string) => `Remove ${name} from recent projects`,
+        removeRecentProjectFailed: 'Could not remove this recent project. Please try again.',
         noRecentProjects: 'No recent projects yet.',
         noMainPages: 'No main pages in this project. Expand Drafts in the contents to choose a draft.',
         noMarkdownPages: 'No Markdown pages were found in this project.',
@@ -725,6 +735,7 @@ class ReaderApplication {
     private toolbarPanel!: ReaderToolbarPanel;
     private toolbarMenu!: ReaderToolbarMenu;
     private uncommitted!: ReaderUncommittedChanges;
+    private pageAnalysis!: ReaderPageAnalysis;
     private fullSearch!: ReaderSearch;
     private changeNavigation!: ReaderChangeNavigation;
     private tooltip!: ReaderTooltip;
@@ -813,11 +824,13 @@ class ReaderApplication {
         this.pageTitle = this.root.querySelector('#reader-page-title') as HTMLElement;
         this.liveStatus = this.root.querySelector('#reader-live') as HTMLElement;
         this.toolbarMenu = new ReaderToolbarMenu(this.root, () => this.dictionary(), () => this.prepareToolbarView('menu'), readerPreferences);
-        this.uncommitted = new ReaderUncommittedChanges(this.article, this.root.querySelector('#reader-uncommitted')!, () => this.uiLanguage, readerFetch, () => { this.queueSourceLineNumberAlignment(); this.changeNavigation?.update(); }, () => { this.renderFileChangeBadges(); this.changeNavigation?.update(); });
+        this.pageAnalysis = new ReaderPageAnalysis(readerFetch);
+        this.uncommitted = new ReaderUncommittedChanges(this.article, this.root.querySelector('#reader-uncommitted')!, () => this.uiLanguage, readerFetch, () => { this.queueSourceLineNumberAlignment(); this.changeNavigation?.update(); this.sourceActions?.updateChanges?.(); }, () => { this.renderFileChangeBadges(); this.changeNavigation?.update(); this.sourceActions?.updateChanges?.(); });
         this.changeNavigation = new ReaderChangeNavigation(this.main, {
-            context: () => this.page && !this.symbolAuditReportOpen ? { filePath: this.page.filePath, sourceHash: this.page.sourceHash, project: this.state?.projectId || '', token: this.state?.requestToken || '', language: this.uiLanguage } : undefined,
+            article: this.article,
+            context: () => this.page && !this.symbolAuditReportOpen ? { filePath: this.page.filePath, sourceHash: this.page.sourceHash, commit: this.uncommitted.baselineCommit(), project: this.state?.projectId || '', token: this.state?.requestToken || '', language: this.uiLanguage } : undefined,
             targets: () => this.uncommitted.targets(), hasChanges: () => this.uncommitted.hasChanges(), request: readerFetch,
-            reveal: target => revealExerciseTarget(target), currentContent: () => this.page?.content || '',
+            reveal: target => revealExerciseTarget(target),
             render: (source, previous) => renderFormalDocument(this.markdown, source, { currentFilePath: this.page?.filePath || '', labels: previous?.labels || this.page?.labels || {}, pages: previous?.pages || this.state?.pages || [], language: this.state?.language || 'zh' }).html,
             beforeOpen: () => this.prepareToolbarView('change-preview')
         });
@@ -832,8 +845,8 @@ class ReaderApplication {
         this.tooltip.bind(this.root);
         window.addEventListener('pagehide', () => { this.formulaLayout?.dispose(); this.createPage?.close(false); this.fullSearch?.close(false); this.changeNavigation?.closePreview(false); });
         window.addEventListener('pageshow', event => { if (event.persisted && this.page && !this.symbolAuditReportOpen) this.mountArticleFormulaLayout(); });
-        window.addEventListener('pagehide', event => { if (event.persisted) this.uncommitted.pause(); else this.uncommitted.dispose(); });
-        window.addEventListener('pageshow', event => { if (event.persisted) this.uncommitted.resume(); });
+        window.addEventListener('pagehide', event => { this.pageAnalysis.cancel(); if (event.persisted) this.uncommitted.pause(); else this.uncommitted.dispose(); });
+        window.addEventListener('pageshow', event => { if (event.persisted) { this.uncommitted.resume(); this.bindPageAnalysis(); } });
         this.installToolbarIcons();
         this.root.querySelector('#reader-expand')?.addEventListener('click', async () => {
             const button = this.root.querySelector<HTMLButtonElement>('#reader-expand')!;
@@ -859,6 +872,8 @@ class ReaderApplication {
             canAdaptFormula: formula => this.formulaLayout?.canAdapt(formula) || false,
             isFormulaAdapted: formula => this.formulaLayout?.isAdapted(formula) || false,
             toggleFormulaLayout: formula => this.formulaLayout?.toggle(formula) || Promise.resolve(),
+            canCompare: location => this.changeNavigation.canCompare(location),
+            compare: (location, trigger) => this.changeNavigation.openComparison(location, trigger),
             reference: async (location, markdown) => {
                 try {
                     const page = this.page, projectId = this.state?.projectId;
@@ -880,6 +895,7 @@ class ReaderApplication {
                     adaptFormula: dictionary.adaptFormula,
                     restoreFormula: dictionary.restoreFormula,
                     adaptingFormula: dictionary.adaptingFormula,
+                    comparePrevious: dictionary.comparePrevious,
                     copySelectedMarkdown: dictionary.copySelectedMarkdown,
                     copySourceLines: dictionary.copySourceLines,
                     lookupDefinition: dictionary.lookupDefinition,
@@ -1049,7 +1065,7 @@ class ReaderApplication {
         if (url.startsWith('/api/symbol-audit') && this.state?.requestToken) {
             headers['x-math-workspace-token'] = this.state.requestToken;
         }
-        if (url === '/api/document-state' && this.state?.requestToken) {
+        if ((url === '/api/document-state' || url === '/api/projects/recent/remove') && this.state?.requestToken) {
             headers['x-math-workspace-token'] = this.state.requestToken;
         }
         const response = await readerFetch(url, {
@@ -1078,6 +1094,7 @@ class ReaderApplication {
 
     private applyState(state: ReaderState): void {
         const projectChanged = this.state?.projectId !== state.projectId;
+        this.pageAnalysis?.cancel();
         if (projectChanged || this.state?.requestToken !== state.requestToken) this.uncommitted?.bind();
         const formulaContextChanged = projectChanged || this.state?.requestToken !== state.requestToken || this.state?.language !== state.language;
         if (this.toolbarPanel?.isActive('chapters')) this.toolbarPanel.close(this.titleNavigationHasFocus());
@@ -1097,9 +1114,11 @@ class ReaderApplication {
         this.renderNavigation((this.root.querySelector('#reader-page-filter') as HTMLInputElement).value);
         this.updateToolbarLabels();
         readerViewStateChanged();
+        if (!projectChanged) this.bindPageAnalysis();
     }
 
     private renderProjectLauncher(message: string | (() => string) = ''): void {
+        this.pageAnalysis?.cancel();
         this.uncommitted?.bind();
         this.formulaLayout?.dispose();
         const shell = this.root.querySelector('.reader-shell') as HTMLElement;
@@ -1129,20 +1148,54 @@ class ReaderApplication {
             recent.append(empty);
         } else {
             projects.forEach(project => {
+                const row = document.createElement('div'); row.className = 'reader-recent-project';
                 const button = document.createElement('button');
                 button.type = 'button';
+                button.className = 'reader-recent-project-open';
                 button.dataset.recentProject = String(project.index);
+                if (project.id) button.dataset.recentProjectId = project.id;
                 const name = document.createElement('strong');
                 name.textContent = project.rootName;
                 const opened = document.createElement('span');
                 const date = new Date(project.openedAt);
                 opened.textContent = Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
                 button.append(name, opened);
-                recent.append(button);
+                row.append(button);
+                if (project.id) {
+                    const remove = readerIconAction('x', ''); remove.classList.add('reader-recent-project-remove');
+                    remove.dataset.removeRecentProject = project.id;
+                    readerAttribute(remove, 'aria-label', () => this.dictionary().removeRecentProject(project.rootName));
+                    readerAttribute(remove, 'data-reader-tooltip', () => this.dictionary().removeRecentProject(project.rootName));
+                    row.append(remove);
+                }
+                recent.append(row);
             });
         }
         panel.append(title, description, choose, recentHeading, recent);
         this.article.append(panel);
+    }
+
+    private recentProjectRemovalPending = false;
+    private async removeRecentProject(button: HTMLButtonElement): Promise<void> {
+        const id = button.dataset.removeRecentProject, state = this.state;
+        if (!id || !state || this.recentProjectRemovalPending) return;
+        this.recentProjectRemovalPending = true;
+        const index = state.recentProjects?.findIndex(project => project.id === id) ?? 0;
+        this.article.querySelectorAll<HTMLButtonElement>('[data-remove-recent-project]').forEach(item => { item.disabled = true; });
+        const current = () => this.state === state && !!this.article.querySelector('.reader-project-launcher');
+        try {
+            const result = await this.postJson<Pick<ReaderState, 'recentProjects'>>('/api/projects/recent/remove', { id });
+            if (!current()) return;
+            state.recentProjects = result.recentProjects || [];
+            this.renderProjectLauncher();
+            const remaining = this.article.querySelectorAll<HTMLButtonElement>('[data-remove-recent-project]');
+            (remaining[Math.min(Math.max(0, index), remaining.length - 1)] || this.article.querySelector<HTMLButtonElement>('[data-project-picker]'))?.focus();
+        } catch {
+            if (current()) {
+                this.renderProjectLauncher(() => this.dictionary().removeRecentProjectFailed);
+                this.article.querySelector<HTMLButtonElement>(`[data-remove-recent-project="${id}"]`)?.focus();
+            }
+        } finally { this.recentProjectRemovalPending = false; }
     }
 
     private async chooseProject(url: string, value: unknown = {}): Promise<void> {
@@ -1341,7 +1394,6 @@ class ReaderApplication {
                 element.style.setProperty('--reader-source-line-indent', indent.toFixed(2) + 'px');
                 element.style.setProperty('--reader-source-line-top', firstLineTop.toFixed(2) + 'px');
             });
-            this.uncommitted?.alignMarkers();
         });
     }
 
@@ -1608,7 +1660,10 @@ class ReaderApplication {
                 const label = document.createElement('span');
                 label.className = 'reader-nav-page-label';
                 label.innerHTML = renderFormalInline(this.markdown, title, this.renderOptions(page.filePath, {}));
-                button.append(label);
+                const titleGroup = document.createElement('span');
+                titleGroup.className = 'reader-nav-page-title';
+                titleGroup.append(label);
+                button.append(titleGroup);
                 const status = documentStatusBadge(page, this.uiLanguage);
                 if (status) button.append(status);
                 button.append(pageIntegrationGlyph(page, this.uiLanguage));
@@ -1630,7 +1685,7 @@ class ReaderApplication {
             element.querySelectorAll('.reader-file-change').forEach(badge => badge.remove());
             const filePath = element.dataset.pagePath || element.dataset.chapterPath || element.dataset.fileStatus || '';
             const badge = this.uncommitted.fileBadge(filePath);
-            if (badge) element.append(badge);
+            if (badge) (element.querySelector('.reader-nav-page-title') || element).append(badge);
             refreshReaderLabels(element);
         }
         if (this.pageTitle) refreshReaderLabels(this.pageTitle);
@@ -1652,6 +1707,7 @@ class ReaderApplication {
             ? 'replace'
             : historyMode;
         const requestId = ++this.pageRequestId;
+        this.pageAnalysis?.cancel();
         this.uncommitted?.bind();
         this.formulaLayout?.invalidate();
         this.clearSourceLocationHighlight?.();
@@ -1722,6 +1778,7 @@ class ReaderApplication {
         titleLabel.className = 'reader-page-title-label';
         titleLabel.innerHTML = renderFormalInline(this.markdown, title, this.renderOptions(this.page.filePath, this.page.labels));
         const documentStatus = documentStatusBadge(this.page.page, this.uiLanguage, true);
+        const fileStatus = document.createElement('span'); fileStatus.className = 'reader-file-status'; fileStatus.dataset.fileStatus = this.page.filePath;
         const navigation = this.titleNavigationScope();
         let titleTrigger: HTMLButtonElement | undefined;
         if (navigation) {
@@ -1736,12 +1793,10 @@ class ReaderApplication {
             titleTrigger.setAttribute('aria-haspopup', 'dialog');
             titleTrigger.setAttribute('aria-controls', 'reader-chapter-navigation');
             titleTrigger.setAttribute('aria-expanded', 'false');
-            titleTrigger.append(titleLabel, readerIcon('chevron-down', 12));
+            titleTrigger.append(titleLabel, fileStatus, readerIcon('chevron-down', 12));
         }
-        const titleParts: Node[] = [titleTrigger || titleLabel];
+        const titleParts: Node[] = titleTrigger ? [titleTrigger] : [titleLabel, fileStatus];
         if (documentStatus) titleParts.push(documentStatus);
-        const fileStatus = document.createElement('span'); fileStatus.className = 'reader-file-status'; fileStatus.dataset.fileStatus = this.page.filePath;
-        titleParts.push(fileStatus);
         titleParts.push(pageIntegrationGlyph(this.page.page, this.uiLanguage));
         this.pageTitle.replaceChildren(...titleParts);
         if (restoreTitleFocus) (titleTrigger || this.pageTitle.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
@@ -1787,6 +1842,23 @@ class ReaderApplication {
         this.dependencyPopover.bind(this.article);
         this.leanPopover.bind(this.article);
         this.leanReview.contextChanged();
+        this.bindPageAnalysis();
+    }
+
+    private bindPageAnalysis(): void {
+        const page = this.page, state = this.state;
+        if (!page || !state?.projectId || !page.sourceHash || this.symbolAuditReportOpen
+            || !(state.analysisPending || page.analysisPending)) return;
+        const project = state.projectId, token = state.requestToken || '', revision = state.revision;
+        this.pageAnalysis.bind({ filePath: page.filePath, sourceHash: page.sourceHash, project, token, revision }, result => {
+            if (this.page !== page || this.state?.projectId !== project || this.state.requestToken !== token
+                || this.state.revision !== revision || this.symbolAuditReportOpen) return;
+            page.dependencyMarkers = result.dependencyMarkers; page.analysisPending = false;
+            this.state.analysisPending = false; this.state.leanSummary = result.leanSummary; this.state.issues = result.issues;
+            updateFormalLeanMarkers(this.article, result.dependencyMarkers, () => this.uiLanguage);
+            this.queueSourceLineNumberAlignment();
+            this.leanReview.contextChanged();
+        });
     }
 
     private mountArticleFormulaLayout(): void {
@@ -2373,6 +2445,7 @@ class ReaderApplication {
         this.toolbarPanel.close();
         this.symbolAudit.dispose();
         this.symbolAuditReportOpen = true;
+        this.pageAnalysis?.cancel();
         this.uncommitted?.bind();
         this.article.lang = this.uiLanguage;
         this.article.classList.add('is-symbol-audit-report');
@@ -2456,9 +2529,11 @@ class ReaderApplication {
                 void this.chooseProject('/api/projects/pick');
                 return;
             }
+            const removeRecentProject = target.closest<HTMLButtonElement>('[data-remove-recent-project]');
+            if (removeRecentProject) { void this.removeRecentProject(removeRecentProject); return; }
             const recentProject = target.closest<HTMLElement>('[data-recent-project]');
             if (recentProject?.dataset.recentProject) {
-                void this.chooseProject('/api/projects/recent', { index: Number(recentProject.dataset.recentProject) });
+                void this.chooseProject('/api/projects/recent', recentProject.dataset.recentProjectId ? { id: recentProject.dataset.recentProjectId } : { index: Number(recentProject.dataset.recentProject) });
                 return;
             }
             const documentStatus = target.closest<HTMLElement>('[data-document-status]');

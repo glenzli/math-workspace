@@ -29,6 +29,7 @@ export interface ReaderSourceActionLabels {
     adaptFormula?: string;
     restoreFormula?: string;
     adaptingFormula?: string;
+    comparePrevious?: string;
 }
 
 export interface ReaderSourceActionsHost {
@@ -41,6 +42,8 @@ export interface ReaderSourceActionsHost {
     canAdaptFormula?(formula: ReaderFormula): boolean;
     isFormulaAdapted?(formula: ReaderFormula): boolean;
     toggleFormulaLayout?(formula: ReaderFormula): Promise<void>;
+    canCompare?(location: ReaderReferenceLocation): boolean;
+    compare?(location: ReaderReferenceLocation, trigger: HTMLElement): void | Promise<void>;
     labels(): ReaderSourceActionLabels;
 }
 
@@ -70,6 +73,7 @@ export class ReaderSourceActions {
     private selectionTimer: number | undefined;
     private definitionRequestId = 0;
     private formulaReturnFocus: HTMLElement | undefined;
+    private comparisonActions?: { actions: HTMLElement; location: ReaderReferenceLocation; sourceDocument: SourceDocument; rect: DOMRect; button?: HTMLButtonElement };
     private readonly copiedLabels = new WeakMap<HTMLButtonElement, { timer: number; restore(): void }>();
     private readonly onPointerDown = (event: PointerEvent) => {
         const target = event.target as Node | null;
@@ -168,6 +172,7 @@ export class ReaderSourceActions {
         this.formulaReturnFocus = undefined;
         this.popover?.remove();
         this.popover = undefined;
+        this.comparisonActions = undefined;
     }
 
     private selectedSource(): { text: string; markdown?: string; sourceLines: string; rect: DOMRect; startLine: number; endLine: number } | undefined {
@@ -198,7 +203,7 @@ export class ReaderSourceActions {
     private showSelectionActions(): void {
         const selection = window.getSelection();
         const formula = closestReaderElement(selection?.anchorNode || null, '[data-reader-formula]');
-        if (formula?.dataset.readerFormula) {
+        if (formula?.dataset.readerFormula && this.article?.contains(formula) && formula.contains(selection?.focusNode || null)) {
             const item = this.sourceDocument?.formulas.find(candidate => candidate.id === formula.dataset.readerFormula);
             const rect = selection ? selectionRect(selection) : undefined;
             if (item) {
@@ -235,6 +240,7 @@ export class ReaderSourceActions {
                 await this.host.reference(referenceLocation, selected.markdown);
                 this.dismiss();
             }));
+            this.registerComparison(actions, referenceLocation, selected.rect);
             if (definitions.length > 0) {
                 actions.append(readerLabel(this.iconButton('definition', labels.lookupDefinition, () => {
                     this.showDefinitionLookup(selected.text, selected.rect, definitions);
@@ -304,6 +310,7 @@ export class ReaderSourceActions {
                     await this.host.reference(referenceLocation, formula.source);
                     this.dismiss();
                 }));
+                this.registerComparison(actions, referenceLocation, rect);
             }
             popover.append(actions);
         }, true);
@@ -390,6 +397,32 @@ export class ReaderSourceActions {
         populate(popover);
         this.popover = popover;
         positionReaderPopover(popover, rect, { maxWidth: 460 });
+        this.updateChanges();
+    }
+
+    private registerComparison(actions: HTMLElement, location: ReaderReferenceLocation, rect: DOMRect): void {
+        if (this.sourceDocument) this.comparisonActions = { actions, location, sourceDocument: this.sourceDocument, rect };
+    }
+
+    updateChanges(): void {
+        const entry = this.comparisonActions;
+        if (!entry || !this.popover?.contains(entry.actions)) return;
+        const available = entry.sourceDocument === this.sourceDocument && !!this.host.compare && !!this.host.canCompare?.(entry.location);
+        if (!available) {
+            if (entry.button) { entry.button.remove(); entry.button = undefined; positionReaderPopover(this.popover, entry.rect, { maxWidth: 460 }); }
+            return;
+        }
+        if (entry.button) return;
+        const label = () => this.host.labels().comparePrevious || 'Compare previous content';
+        const button = readerLabel(this.iconButton('history', label(), async trigger => {
+            if (entry.sourceDocument !== this.sourceDocument || !this.host.canCompare?.(entry.location)) { this.updateChanges(); return; }
+            const opened = this.host.compare!(entry.location, trigger);
+            this.dismiss(); await opened;
+        }), label);
+        button.dataset.changePreview = 'true'; button.setAttribute('aria-haspopup', 'dialog');
+        button.setAttribute('aria-controls', 'reader-change-preview'); button.setAttribute('aria-expanded', 'false');
+        entry.button = button; entry.actions.append(button);
+        positionReaderPopover(this.popover, entry.rect, { maxWidth: 460 });
     }
 
     private referenceButton(action: () => Promise<void>): HTMLButtonElement {

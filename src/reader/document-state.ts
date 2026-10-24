@@ -55,6 +55,7 @@ const STATE_FILE = '.math-workspace/documents.json';
 const STAGES = new Set<DocumentStage>(['draft', 'revising', 'stable']);
 const HARD_IGNORED_DIRECTORIES = new Set([
     '.git',
+    '.lake',
     '.math-workspace',
     'node_modules',
     'out',
